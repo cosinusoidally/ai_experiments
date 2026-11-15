@@ -11,7 +11,11 @@
   0 not run**. Harness **344.651 s**, process **345.37 s**, peak RSS
   **516784 KiB**, exit 0. The same snapshot bytes are used for PE and ELF.
 - Existing corpus, selectors and instruction limits unchanged; external tests
-  and demos are not modified. Linux regression validation follows serially.
+  and demos are not modified. The subsequent Linux executable regression run
+  of the **same snapshot** also passes **3292/3292**, zero failures/timeouts/
+  skips/not run: harness **343.433 s**, process **344.07 s**, peak RSS
+  **513840 KiB**, exit 0. This is slightly faster than the preceding 352.095-s
+  observation, not an isolated performance attribution experiment.
   See [Windows implementation and validation](guest_vm/docs/windows-snapshot.md).
 
 2026-11-14, approximately 20:17 UTC, Penguin coercion/property-name fix

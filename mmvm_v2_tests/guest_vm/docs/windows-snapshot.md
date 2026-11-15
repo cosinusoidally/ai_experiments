@@ -158,8 +158,9 @@ integration pass is claimed. Core Node tests are checked separately.
 
 The full Wine rerun now passes **3292/3292**, zero failed/timed out/not run,
 harness **344651.144 ms**, process **345.37 s**, peak RSS **516784 KiB**, exit 0.
-Corpus, selection and instruction limits are unchanged. Linux regression gates
-are running serially after the Windows run; their results remain pending here.
+Corpus, selection and instruction limits are unchanged. The following Linux
+full run also passes **3292/3292**, zero failed/timed out/not run, harness
+**343433.396 ms**, process **344.07 s**, peak RSS **513840 KiB**, exit 0.
 
 ### Packager host contracts
 
@@ -183,3 +184,64 @@ not supplied. No TCC or compiler-generated fixture was needed.
 
 Temporary builds and logs use ignored `artifacts/win-*` paths. Subsequent Linux
 and memory/build acceptance results are recorded below when completed.
+
+### Linux compatibility and GC/build gates
+
+- Both Node and js_min core suites pass 12 guest programs / 310 assertions,
+  including CLI server/demo paths and three-context multiplexing.
+- Dedicated structural GC passes under both PE/Wine and ELF: 27 audits,
+  113184 checked edges, 221 property-index audits, 74 embedding collections,
+  maximum observed guest bump 3532584 bytes under an 8 MiB guest cap.
+- Genuine Linux self-hosting reproduces the Node snapshot byte-for-byte:
+  **87.57 s / 485020 KiB peak RSS / exit 0**. The preceding recorded build was
+  91.77 s; these historical single observations do not isolate a speedup.
+- The full standalone language integration passes on Windows and Linux.
+  No demo or external corpus code, C source, compiler binary or loader was changed.
+
+The full current-snapshot SHA-256 is
+`9f12d591102671059e3098bd936acf60977fe042453c6acf6baa078f2d5f5d13`.
+The original source snapshot is not required by either packaged executable.
+Broader Node-on-Windows compatibility is not claimed: the shared minimal process
+API still reports its historical `linux` platform string, and drive/UNC path
+semantics need explicit future platform work. This does not affect the completed
+Test262 selection; do not use that result to claim a full Windows Node API.
+
+### Final serial acceptance, 2026-11-15
+
+- js_min rebuild: **105.73 s / 394040 KiB peak RSS / exit 0**, snapshot identical
+  to Node and the genuine Linux self-build. Previous observation was 110.82 s;
+  these are not paired attribution experiments. js_min itself was not rebuilt.
+- With the source snapshot moved aside, Windows hello and the ch06 selection
+  pass. A direct socket FFI call prints the explicit unsupported-operation
+  message and exits **3**. No network connection or X11 program was attempted
+  on Windows. Full Windows Test262 above ran before moving that source file;
+  the later absence checks are separate focused acceptance, not a second full run.
+- Wine's hello virtual-memory trace records the **640 MiB MEM_RESERVE** call
+  (size `0x28000000`, allocation type `0x2000`), followed by **109 MEM_COMMIT
+  calls of 64 KiB** inside that mapping: **7143424 bytes / 6.8125 MiB** committed.
+  The initialized snapshot heap is 6795560 bytes. This is evidence of incremental
+  commitment for that mapping, not a whole-process memory accounting or a claim
+  that full-suite peak memory is 6.81 MiB. Memory observation used a separate
+  hello run, not instrumented suite timings.
+- All eight bounded Linux demos and all three HTTP servers pass with the source
+  snapshot absent. These are not long endurance runs. No demo code was changed.
+- Three stock Linux Octane checks pass: Richards **89.2** (previous 92.6),
+  Gameboy **808** (770), CodeLoad **94.2** (90.9). Process seconds/RSS KiB:
+  Richards **3.44 / 21632**, Gameboy **17.26 / 96500**, CodeLoad **30.19 / 281216**.
+  Mixed single-run score changes are not proof of performance neutrality or an
+  isolated regression. The full fifteen-suite Octane and historical ECMA sweeps
+  were not repeated for this Windows bring-up.
+- The unrelated portable-host standalone-language recursion limitation was
+  confirmed with the **pre-numeric-test source from 05e732c**, supplied in memory
+  to the current Node-hosted runner without editing files: the same object-runtime
+  recursion occurs. Both native platforms pass that integration workload. Do not
+  count the diagnostic portable run as a passing acceptance test.
+
+Final PE SHA-256 (also identical across all five packaging contracts above):
+`e6c6f0b36ceb4bc45d7cafc3e0f41831ff96389ef54f9e806b3c6d6ada13444c`.
+
+All heavy tests/builds were serial. Logs, screenshots/application fixtures and
+executables remain ignored in artifacts. No Windows system version other than
+the provided Wine prefix was tested; a real-Windows run is still required before
+claiming that coverage. The build never invoked TCC, GCC or binutils and added no
+dependency on them.

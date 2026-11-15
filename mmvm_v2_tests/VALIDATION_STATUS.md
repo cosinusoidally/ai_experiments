@@ -1,5 +1,20 @@
 # Validation checkpoint, 2026-11-04
 
+Windows PE32 checkpoint, 2026-11-15 (`guestVM-win32`, runtime fix `d2cdf53`):
+the **same snapshot** passes Test262 under PE/Wine and ELF: **3292/3292** on
+both, zero failures/timeouts/not run, process **345.37 s / 344.07 s** respectively.
+Initial Windows result was 3261/3292; shared kernel hex/Infinity conversion
+removed the CRT dependency responsible for 31 failures. Both core suites and
+both native structural GC runs pass. Node/js_min/Linux-self-built snapshots
+are identical; PE packaging matches across Node, js_min, Linux guest, Windows
+guest and the raw-MSVCRT I/O contract. Self-build **87.57 s**, js_min build
+**105.73 s**. All eight bounded Linux demos and three HTTP servers pass with
+the snapshot absent. Three Octane checks pass with mixed score changes, not a
+performance-neutrality claim. Windows reserves 640 MiB but the separate hello
+trace commits only 6.8125 MiB within that mapping. Networking errors explicitly;
+no Windows X11 work, demo changes or C/compiler dependencies were added. See
+[implementation, commands, measurements and limitations](guest_vm/docs/windows-snapshot.md).
+
 Latest serial performance audit, 2026-11-14, approximately 21:15–21:50 UTC:
 implementation `fa4b98f` (including `3dd1363`), freshly built default executable.
 ECMA **996 pass / 333 fail / 39 timeouts / 4 configured skips / 0 not run**:
