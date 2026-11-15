@@ -1,4 +1,15 @@
 print("standalone integration: globals");
+/* These conversions must not depend on a particular CRT's strtod extensions.
+ * Keep coverage in the existing cross-platform language integration workload. */
+if (Number("0x10000000") !== 268435456 || Number("0x000A") !== 10 ||
+    Number("0x1fffffffffffff") !== 9007199254740991 ||
+    Number("0x20000000000001") !== 9007199254740992 ||
+    Number("0x20000000000003") !== 9007199254740996 ||
+    Number("Infinity") !== Infinity || Number("-Infinity") !== -Infinity ||
+    parseFloat("-Infinity suffix") !== -Infinity ||
+    !isNaN(Number("+0x1")) || !isNaN(Number("0x1p0"))) {
+    throw new Error("shared numeric string conversion is incorrect");
+}
 var standalonePerformance = standalonePerformance || {};
 print("standalone integration: global object ready");
 standalonePerformance.now = (function () {

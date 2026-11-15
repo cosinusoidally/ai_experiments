@@ -321,6 +321,9 @@
             ASCII_UNDERSCORE: 95,
             ASCII_LOWER_A: 97,
             ASCII_LOWER_Z: 122,
+            ASCII_UPPER_X: 88,
+            ASCII_LOWER_X: 120,
+            HEX_DIGIT_BITS: 4,
             IEEE754_QUIET_NAN_HIGH: 2146959360,
             POSITIVE_2147483648_HIGH: 1105199104,
             UINT32_LOW_UNUSED_MASK: 2097151,
@@ -17202,6 +17205,7 @@
             setValueCellInt32(targetCell, 0);
             return 1;
         }
+        if (specialStringNumericValueKernel(heapBase, string, start, end, targetCell) === 1) return 1;
         var mallocPointer = platformMallocPointer(
             heapBase, platformServices);
         var freePointer = platformFreePointer(heapBase, platformServices);
@@ -17233,6 +17237,92 @@
         if (valid === 0) return 0;
         store32(targetCell, VALUE_TAG_DOUBLE);
         store32(targetCell + RecordLayout.VALUE_CELL_AUX, 0);
+        return 1;
+    }
+
+    function infinityWordKernel(heapBase, source, start, end) {
+        if (end - start !== 8) return 0;
+        if ((stringCharacterCodeUnit(heapBase, source, start) & 65535) !== 73 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 1) & 65535) !== 110 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 2) & 65535) !== 102 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 3) & 65535) !== 105 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 4) & 65535) !== 110 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 5) & 65535) !== 105 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 6) & 65535) !== 116 ||
+            (stringCharacterCodeUnit(heapBase, source, start + 7) & 65535) !== 121) return 0;
+        return 1;
+    }
+
+    function specialStringNumericValueKernel(heapBase, source, start, end, target) {
+        var prefix = start;
+        var sign = stringCharacterCodeUnit(heapBase, source, prefix) & 65535;
+        if (sign === ASCII_MINUS || sign === ASCII_PLUS) prefix = prefix + 1;
+        if (infinityWordKernel(heapBase, source, prefix, end) === 1) {
+            var high = IEEE754_EXPONENT_VALUE_MASK << IEEE754_EXPONENT_SHIFT;
+            if (sign === ASCII_MINUS) high = high | IEEE754_SIGN_BIT;
+            setValueCellDoubleBits(target, 0, high); return 1;
+        }
+        return hexadecimalStringNumberKernel(heapBase, source, start, end, target);
+    }
+
+    /* ES StringNumericLiteral hexadecimal conversion belongs to the VM, not
+     * strtod (whose hexadecimal support differs between C libraries). Retain
+     * 53 significant bits plus guard/sticky bits and round once, ties-to-even.
+     * No native allocation or host conversion is needed, even for long input. */
+    function hexadecimalStringNumberKernel(heapBase, source, start, end, target) {
+        var prefix = start;
+        var first = stringCharacterCodeUnit(heapBase, source, prefix) & 65535;
+        if (first === ASCII_MINUS || first === ASCII_PLUS) prefix = prefix + 1;
+        if (end - prefix < 2 ||
+                (stringCharacterCodeUnit(heapBase, source, prefix) & 65535) !== ASCII_ZERO) return 0;
+        var marker = stringCharacterCodeUnit(heapBase, source, prefix + 1) & 65535;
+        if (marker !== ASCII_LOWER_X && marker !== ASCII_UPPER_X) return 0;
+        if (prefix !== start || prefix + 2 === end) {
+            setValueCellDoubleBits(target, 0, IEEE754_QUIET_NAN_HIGH); return 1;
+        }
+        var high = 0, low = 0, significantBits = 0, guard = 0, sticky = 0;
+        var cursor = prefix + 2;
+        while (cursor < end) {
+            var digit = uriHexValueKernel(stringCharacterCodeUnit(heapBase, source, cursor) & 65535);
+            if (digit < 0) {
+                setValueCellDoubleBits(target, 0, IEEE754_QUIET_NAN_HIGH); return 1;
+            }
+            var bitIndex = HEX_DIGIT_BITS - 1;
+            while (bitIndex >= 0) {
+                var bit = (digit >>> bitIndex) & 1;
+                if (significantBits !== 0 || bit !== 0) {
+                    significantBits = significantBits + 1;
+                    if (significantBits <= IEEE754_FRACTION_BITS + 1) {
+                        high = (high << 1) | (low >>> (IEEE754_WORD_BITS - 1));
+                        low = (low << 1) | bit;
+                    } else if (significantBits === IEEE754_FRACTION_BITS + 2) guard = bit;
+                    else sticky = sticky | bit;
+                }
+                bitIndex = bitIndex - 1;
+            }
+            cursor = cursor + 1;
+        }
+        if (significantBits < IEEE754_WORD_BITS) {
+            setValueCellInt32(target, low); return 1;
+        }
+        var exponent = significantBits - 1;
+        while (significantBits < IEEE754_FRACTION_BITS + 1) {
+            high = (high << 1) | (low >>> (IEEE754_WORD_BITS - 1)); low = low << 1;
+            significantBits = significantBits + 1;
+        }
+        if (guard !== 0 && (sticky !== 0 || (low & 1) !== 0)) {
+            low = low + 1;
+            if (low === 0) high = high + 1;
+            if (high === IEEE754_SIGNIFICAND_HIGH_BIT * 2) {
+                high = IEEE754_SIGNIFICAND_HIGH_BIT; low = 0; exponent = exponent + 1;
+            }
+        }
+        if (exponent > IEEE754_EXPONENT_BIAS) {
+            setValueCellDoubleBits(target, 0, IEEE754_EXPONENT_VALUE_MASK << IEEE754_EXPONENT_SHIFT);
+        } else {
+            setValueCellDoubleBits(target, low, (high & IEEE754_FRACTION_HIGH_MASK) |
+                ((exponent + IEEE754_EXPONENT_BIAS) << IEEE754_EXPONENT_SHIFT));
+        }
         return 1;
     }
 
@@ -17777,6 +17867,7 @@
             setValueCellInt32(targetCell, 0);
             return 1;
         }
+        if (specialStringNumericValueKernel(heapBase, source, start, end, targetCell) === 1) return 1;
         var mallocPointer = platformMallocPointer(
             heapBase, platformServices);
         var freePointer = platformFreePointer(heapBase, platformServices);
@@ -17934,20 +18025,17 @@
         }
         /* Only the exact, case-sensitive Infinity word is accepted. libc's
          * strtod also recognizes inf/nan and hexadecimal floats, which are
-         * not part of parseFloat's decimal-prefix grammar. ASCII code units
-         * below spell Infinity; the optional sign was consumed above. */
+         * not part of parseFloat's decimal-prefix grammar. The optional sign
+         * was consumed above; the exact word check is shared with ToNumber. */
         var infinity = 0;
-        if (length - cursor >= 8) {
-            if ((stringCharacterCodeUnit(heapBase, source, cursor) & 65535) === 73 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 1) & 65535) === 110 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 2) & 65535) === 102 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 3) & 65535) === 105 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 4) & 65535) === 110 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 5) & 65535) === 105 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 6) & 65535) === 116 &&
-                (stringCharacterCodeUnit(heapBase, source, cursor + 7) & 65535) === 121) infinity = 1;
+        if (length - cursor >= 8) infinity = infinityWordKernel(heapBase, source, cursor, cursor + 8);
+        if (infinity === 1) {
+            var infinityHigh = IEEE754_EXPONENT_VALUE_MASK << IEEE754_EXPONENT_SHIFT;
+            if ((stringCharacterCodeUnit(heapBase, source, start) & 65535) === ASCII_MINUS) {
+                infinityHigh = infinityHigh | IEEE754_SIGN_BIT;
+            }
+            setValueCellDoubleBits(targetCell, 0, infinityHigh); return 1;
         }
-        if (infinity === 1) cursor = cursor + 8;
         else {
             var digitStart = cursor;
             cursor = scanDecimalDigitsKernel(heapBase, source, cursor, length);
@@ -18570,6 +18658,9 @@
             unwindExceptionKernel: unwindExceptionKernel,
             uriStringIntrinsicKernel: uriStringIntrinsicKernel,
             uriHexValueKernel: uriHexValueKernel,
+            hexadecimalStringNumberKernel: hexadecimalStringNumberKernel,
+            infinityWordKernel: infinityWordKernel,
+            specialStringNumericValueKernel: specialStringNumericValueKernel,
             uriComponentSafeKernel: uriComponentSafeKernel,
             setURIStringCodeUnitKernel: setURIStringCodeUnitKernel,
             appendURIPercentByteKernel: appendURIPercentByteKernel,

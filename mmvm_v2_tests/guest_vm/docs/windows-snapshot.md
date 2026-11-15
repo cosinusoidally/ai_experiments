@@ -133,7 +133,29 @@ space; reserving a range does not remove fragmentation or commitment limits.
   preferred address, and exact embedded payload; only kernel32.dll/msvcrt.dll
   appear as direct imports.
 
-The first full Windows Test262 run is in progress at this working point.
-Do not interpret the focused selection as full-suite acceptance. Full results
-and later Linux regression checks will be recorded after completion. Temporary
-builds and logs use ignored `artifacts/win-*` paths.
+The initial complete Wine run executed all 3292 tests: **3261 passed / 31 failed /
+zero timed out / zero not run**, harness 338.994 s, process 340.96 s, peak RSS
+498296 KiB. This exposed CRT dependencies, not a reason to change test selection.
+
+### Shared numeric support follow-up
+
+The Windows CRT's strtod lacks the hexadecimal/Infinity behavior the VM was
+implicitly obtaining from glibc. Conversion of ES hexadecimal strings and signed
+Infinity now belongs to shared kernel code in `aot/native_interpreter.js` on
+**both** platforms. Hexadecimal conversion retains 53 significand bits with
+guard/sticky rounding, ties-to-even, without allocating a temporary native string.
+Signed hex strings and hexadecimal floating syntax are rejected. parseFloat
+uses the same exact Infinity-word recognition and constructs infinity directly.
+Decimal conversion continues using the platform decimal service; a complete
+shared correctly-rounded decimal parser is not claimed or required for this fix.
+
+The focused Windows numeric selection passes **129/129**; the existing standalone
+language integration passes under both PE/Wine and ELF, including boundary
+rounding, signed Infinity and malformed hex checks. A direct portable-host run
+of that whole integration file is not an acceptance gate: it reaches an existing
+object-runtime recursion failure after the numeric checks, so no portable full
+integration pass is claimed. Core Node tests are checked separately.
+
+The full Windows rerun and Linux regression gates are pending at this checkpoint.
+Temporary builds and logs use ignored `artifacts/win-*` paths. Subsequent full
+results are recorded below when completed; a focused selection is not a full pass.
