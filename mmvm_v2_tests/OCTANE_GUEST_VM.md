@@ -1,5 +1,16 @@
 # Octane guest-VM bring-up and performance approach
 
+Mandreel follow-up, 2026-11-15: **fixed in `6b89c2a`**. Its loading failure was
+compiler source-location storage requiring a large contiguous guest vector.
+Paged statement boundaries preserve diagnostics without changing the 512 MiB
+cap. Full stock Mandreel retest passes, aggregate **346**, **129.83 s**,
+exit zero. Node/js_min core, full Linux Test262 (3292/3292), GC, eight demos,
+three servers, Linux/Windows shell integration and self-build identity pass.
+Matched fresh-process Richards/PdfJS/CodeLoad scores are **84.7/727/91.6**
+versus control **85.3/678/89.8**; individual pairs, not an all-suite speedup.
+See [the follow-up validation](LINUX_ECMA_OCTANE_2026-11-15.md#post-fix-validation-6b89c2a).
+The full fifteen-suite sweep below is the pre-fix audit; it was not repeated.
+
 Latest full Linux executable sweep, 2026-11-15 (VM sources `5163ff6`):
 **14/15 suites pass; Mandreel regressed with an allocation failure during
 source loading at the unchanged 512 MiB heap maximum**. Every suite was

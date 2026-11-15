@@ -150,5 +150,51 @@ single observations do not establish a speedup. RSS is higher than the old
 500712-KiB observation because location information remains enabled; no small
 memory-footprint claim is made.
 
-Broad post-fix validation is in progress; the full failed-sweep table above
-remains the exact audit record, not silently overwritten by a focused retest.
+### Post-fix validation (`6b89c2a`)
+
+- Both Node/js_min core suites pass: 12 guest programs / 310 assertions,
+  internal compiler checks and the existing command-line/context checks.
+- Full Linux Test262: **3292 passed / 0 failed / 0 timed out / 0 not run**.
+  Harness **414010.437 ms**, summed test time **381092.047 ms**; process
+  **414.79 s**, peak RSS **512332 KiB**. This is slower than the pre-fix
+  366.85-second observation; no full-suite performance-neutrality claim.
+- A subsequent matched chapter-09 comparison passes **128/128 on both**:
+  control/fixed process **17.66/17.05 s**, summed test time
+  **2977.177/2839.121 ms**. The smaller comparison is faster but does not
+  establish the cause of the slower full-suite observation.
+- Native language integration and Linux/Windows-Wine shell/ctypes integration
+  pass. GC integrity: **27 audits / 113184 edges / 221 property indexes /
+  74 embedding collections**, max bump **3532584 bytes** under an 8 MiB cap.
+- All eight bounded Linux demos and three HTTP servers pass with the actual
+  original source snapshot absent. No demo/corpus changes or relaxed limits.
+- A combined Richards/PdfJS/CodeLoad/Typescript correctness run passes too.
+  Its scores are not compared with per-process baselines: it loads several
+  large suites into one heap before timing. Separate paired runs follow.
+
+Matched fresh-process observations, pre-fix executable then fixed executable,
+same unmodified benchmark and options:
+
+| Suite | Control score | Fixed score | Change | Control/fixed process s | Control/fixed RSS KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Richards | 85.3 | 84.7 | -0.70% | 3.45 / 3.33 | 22400 / 22016 |
+| PdfJS | 678 | 727 | +7.23% | 21.83 / 20.83 | 310496 / 240524 |
+| CodeLoad | 89.8 | 91.6 | +2.00% | 31.57 / 31.01 | 230272 / 296320 |
+
+Memory results are mixed; CodeLoad RSS increases in this pair, so this is not
+an across-the-board memory reduction claim. Single pairs are not statistical
+attribution. The native interpreter code section remains **696243 bytes and
+byte-identical** to the pre-fix image; the change is compiler metadata storage,
+not a benchmark-specific interpreter or machine-code optimization.
+
+Current image **7,544,872 bytes**, SHA-256
+`f756a9f225bdcafa78b0f7a27f584e7f792daa8710717b71b39044f7cae44858`.
+Node, genuine Linux self-hosting and js_min produce identical bytes. Self-build
+**80.06 s / 480176 KiB**, versus the preceding 82.64-second observation;
+js_min build **101.76 s / 333396 KiB**, versus 101.94 seconds. Snapshot size
+increases by 10464 bytes for the shared metadata implementation.
+
+Raw follow-up receipts: ignored `artifacts/mandreel-fix/`. The corrected image
+is `artifacts/mandreel-fix/current.exe`. The full failed-sweep table above
+remains the exact audit record, not silently overwritten by focused retests.
+The full ECMA and all-fifteen Octane sweeps were not repeated after this fix;
+the ECMA 997/332 record above is the preceding full run.

@@ -1,5 +1,18 @@
 # Test262 status
 
+2026-11-15, paged compiler source-location fix (`6b89c2a`):
+
+- Full default Linux executable: **3292 passed / 0 failed / 0 timed out /
+  0 not run**, harness **414010.437 ms**, summed test time **381092.047 ms**;
+  process **414.79 s**, peak RSS **512332 KiB**. No harness/corpus changes.
+- The full observation is slower than the preceding **366.85 s** run. A
+  subsequent matched chapter-09 pair passes **128/128** on control and fixed
+  images, process **17.66 / 17.05 s** and test sum **2977.177 / 2839.121 ms**.
+  This narrower comparison does not explain the full-suite time difference.
+- Mandreel now loads and passes with capture enabled and unchanged heap cap.
+  Both source-map representations preserve the existing error-location test's
+  filename/line/column expectations. See [follow-up receipts and scope](LINUX_ECMA_OCTANE_2026-11-15.md#post-fix-validation-6b89c2a).
+
 2026-11-15, unified standalone shell/Node APIs and bounded kernel literals
 (`5163ff6`):
 

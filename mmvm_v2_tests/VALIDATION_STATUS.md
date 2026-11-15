@@ -1,5 +1,22 @@
 # Validation checkpoint, 2026-11-04
 
+Mandreel loading regression fixed, 2026-11-15 (`6b89c2a`):
+
+- Compiler metadata now uses paged source-location boundaries rather than a
+  bytecode-word-indexed sparse array. Source capture remains enabled; heap
+  maximum remains 512 MiB. Stock Mandreel **passes, aggregate 346, exit 0**.
+- Node/js_min core suites, full Linux Test262 **3292/3292**, bounded GC,
+  all eight Linux demos and three HTTP servers, and Linux/Windows-Wine
+  shell integration pass. Existing error-location test covers both formats.
+- Node/self-hosted/js_min snapshots match exactly. Self-build **80.06 s**;
+  js_min **101.76 s**. Full Test262 took **414.79 s**, slower than the prior
+  observation; matched chapter-09 pair **128/128** on each, **17.66/17.05 s**.
+- Matched fresh-process control/fixed scores: Richards **85.3/84.7**, PdfJS
+  **678/727**, CodeLoad **89.8/91.6**. Memory mixed; no blanket neutrality claim.
+- See [complete follow-up](LINUX_ECMA_OCTANE_2026-11-15.md#post-fix-validation-6b89c2a).
+  The ECMA/full-Octane records below remain the earlier sweep; full repeats
+  were not made after the targeted fix.
+
 Latest full Linux ECMA/Octane audit, 2026-11-15 (VM source `5163ff6`):
 
 - ECMA **997 passed / 332 failed (39 timeouts) / 4 configured skips /
