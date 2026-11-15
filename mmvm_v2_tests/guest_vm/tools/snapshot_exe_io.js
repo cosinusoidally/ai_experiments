@@ -3,6 +3,7 @@
     var CHUNK_BYTES = 65536, OWNER_READ_WRITE = 384, EXECUTABLE_MODE = 493;
     var OPEN_READ_ONLY = 0, OPEN_EXCLUSIVE_WRITE = 193;
     var SEEK_SET = 0, SEEK_END = 2, INTERRUPTED = 4;
+    var CRT_BINARY = 32768, CRT_EXCLUSIVE_WRITE = 1281;
 
     function nodeAdapter(fs) {
         var scratch = Buffer.alloc ? Buffer.alloc(CHUNK_BYTES) : new Buffer(CHUNK_BYTES);
@@ -32,9 +33,18 @@
 
     function nativeAdapter(HostFFI) {
         var ffi = new HostFFI(), functions = {}, i;
+        /* A native Windows js_min may expose only msvcrt exports, whereas
+         * our Windows guest resolver already supplies the POSIX contracts.
+         * Detect the contract, not the build host or requested output format. */
+        var windowsCRT = ffi.call(ffi.getDlsym(), [0, "__errno_location"]) === 0;
+        var crtNames = {open: "_open", close: "_close", read: "_read", write: "_write",
+            lseek: "_lseek", chmod: "_chmod", link: "rename", unlink: "_unlink",
+            getpid: "_getpid", __errno_location: "_errno"};
+        var publishedTemporary = null;
         var names = ["open", "close", "read", "write", "lseek", "calloc", "free",
             "chmod", "link", "unlink", "getpid", "__errno_location"];
-        for (i = 0; i < names.length; i++) functions[names[i]] = ffi.resolve(names[i]);
+        for (i = 0; i < names.length; i++) functions[names[i]] = ffi.resolve(
+            windowsCRT && crtNames[names[i]] ? crtNames[names[i]] : names[i]);
         function call(name, args) { return ffi.call(functions[name], args); }
         function checked(name, args) {
             var result = call(name, args);
@@ -45,8 +55,13 @@
         var scratch = call("calloc", [CHUNK_BYTES, 1]);
         if (!scratch) throw new Error("could not allocate file copy buffer");
         return {
-            openInput: function (path) { return checked("open", [path, OPEN_READ_ONLY, 0]); },
-            createOutput: function (path) { return checked("open", [path, OPEN_EXCLUSIVE_WRITE, OWNER_READ_WRITE]); },
+            openInput: function (path) {
+                return checked("open", [path, windowsCRT ? CRT_BINARY : OPEN_READ_ONLY, 0]);
+            },
+            createOutput: function (path) {
+                return checked("open", [path, windowsCRT ? CRT_EXCLUSIVE_WRITE | CRT_BINARY :
+                    OPEN_EXCLUSIVE_WRITE, OWNER_READ_WRITE]);
+            },
             length: function (fd) {
                 var length = checked("lseek", [fd, 0, SEEK_END]);
                 checked("lseek", [fd, 0, SEEK_SET]); return length;
@@ -70,9 +85,17 @@
             get: function (index) { return ffi.peek8(scratch + index); },
             set: function (index, value) { ffi.poke8(scratch + index, value); },
             close: function (fd) { checked("close", [fd]); },
-            chmod: function (path) { checked("chmod", [path, EXECUTABLE_MODE]); },
-            publish: function (temporary, destination) { checked("link", [temporary, destination]); },
-            remove: function (path) { checked("unlink", [path]); },
+            chmod: function (path) { checked("chmod", [path, windowsCRT ? OWNER_READ_WRITE : EXECUTABLE_MODE]); },
+            publish: function (temporary, destination) {
+                /* MSVCRT rename refuses an existing destination. Unlike the
+                 * POSIX hard-link publication it consumes the temporary name. */
+                checked("link", [temporary, destination]);
+                if (windowsCRT) publishedTemporary = temporary;
+            },
+            remove: function (path) {
+                if (windowsCRT && path === publishedTemporary) { publishedTemporary = null; return; }
+                checked("unlink", [path]);
+            },
             pid: function () { return call("getpid", []); },
             dispose: function () { call("free", [scratch]); }
         };

@@ -1,5 +1,19 @@
 # Test262 status
 
+2026-11-15, Windows PE32 bring-up under the supplied 32-bit Wine prefix:
+
+- Initial unchanged default snapshot with the Windows platform adapter:
+  **3292 executed / 3261 passed / 31 failed / 0 timed out / 0 skipped /
+  0 not run**. Harness **338.994 s**, process **340.96 s**, peak RSS
+  **498296 KiB**, exit 1. Failures exposed CRT hex/Infinity parsing differences.
+- Shared kernel numeric conversion fix `d2cdf53` (not a Windows-only parser):
+  **3292 executed / 3292 passed / 0 failed / 0 timed out / 0 skipped /
+  0 not run**. Harness **344.651 s**, process **345.37 s**, peak RSS
+  **516784 KiB**, exit 0. The same snapshot bytes are used for PE and ELF.
+- Existing corpus, selectors and instruction limits unchanged; external tests
+  and demos are not modified. Linux regression validation follows serially.
+  See [Windows implementation and validation](guest_vm/docs/windows-snapshot.md).
+
 2026-11-14, approximately 20:17 UTC, Penguin coercion/property-name fix
 (`3dd1363`, packaged default executable): **3292 executed / 3292 passed /
 0 failed / 0 timed out / 0 skipped / 0 not run**; observed exit 0.

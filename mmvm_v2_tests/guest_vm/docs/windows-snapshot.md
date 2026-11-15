@@ -156,6 +156,30 @@ of that whole integration file is not an acceptance gate: it reaches an existing
 object-runtime recursion failure after the numeric checks, so no portable full
 integration pass is claimed. Core Node tests are checked separately.
 
-The full Windows rerun and Linux regression gates are pending at this checkpoint.
-Temporary builds and logs use ignored `artifacts/win-*` paths. Subsequent full
-results are recorded below when completed; a focused selection is not a full pass.
+The full Wine rerun now passes **3292/3292**, zero failed/timed out/not run,
+harness **344651.144 ms**, process **345.37 s**, peak RSS **516784 KiB**, exit 0.
+Corpus, selection and instruction limits are unchanged. Linux regression gates
+are running serially after the Windows run; their results remain pending here.
+
+### Packager host contracts
+
+The native I/O adapter detects whether the host resolver supplies POSIX contracts
+or only raw MSVCRT exports. The raw-CRT branch translates descriptor names and
+open flags, uses binary mode, and uses MSVCRT's no-overwrite rename publication.
+The existing POSIX hard-link publication remains unchanged. Both contracts use
+the same streaming converter and container writers, not a second packager.
+
+`check_snapshot_pe_crt.js` runs inside the Windows guest and restricts only its
+I/O resolver to the actual msvcrt module. It performs a complete conversion and
+checks that a second publication fails with EEXIST; there are no mocked file
+operations. This passes, including byte-identical output and no clobber. The
+test wrapper initially omitted peek32 needed for errno reporting; that fixture
+defect was fixed before accepting the no-clobber result.
+
+Final PE bytes agree across Node, Linux js_min, Linux standalone and Windows
+standalone packaging, as well as the raw-CRT I/O contract. This is not a claim
+that an actual native Windows Node/js_min binary was run: those binaries were
+not supplied. No TCC or compiler-generated fixture was needed.
+
+Temporary builds and logs use ignored `artifacts/win-*` paths. Subsequent Linux
+and memory/build acceptance results are recorded below when completed.
