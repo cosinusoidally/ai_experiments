@@ -1,5 +1,17 @@
 # Test262 status
 
+2026-11-16, Windows networking checkpoint (`832b4ae`):
+
+- Full Wine executable run: **3292 executed / 3292 passed / 0 failed /
+  0 timed out / 0 not run**, unchanged corpus/harness and default settings.
+- Harness **346899.175 ms**, summed test time **324768.452 ms**; process
+  **348.74 s**, peak RSS **518092 KiB**, exit 0.
+- Subsequent deferred-Winsock-loading refinement is exercised by focused
+  socket/HTTP/build acceptance; the guest language snapshot remains byte-for-byte
+  identical. This was one full run, not repeated after the loader-only refinement.
+- Receipt: ignored `artifacts/network-test262-wine.log`; see
+  [Windows networking validation](guest_vm/docs/windows-networking.md#validation-2026-11-16).
+
 2026-11-15, paged compiler source-location fix (`6b89c2a`):
 
 - Full default Linux executable: **3292 passed / 0 failed / 0 timed out /

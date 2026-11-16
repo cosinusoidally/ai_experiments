@@ -13,6 +13,8 @@
         maxPollEntries: 65536, asciiZero: 48, asciiNine: 57, asciiDot: 46,
         ipv4Bytes: 4, maxOctet: 255, decimalBase: 10};
     var S = {next: 0, descriptor: 4, handle: 8, flags: 12, bytes: 16};
+    /* PE-relative metadata for lazily resolved stdcall bridge targets. */
+    var I = {nameRVA: 0, targetRVA: 4, bytes: 8};
     var E = {interrupted: 4, badDescriptor: 9, again: 11, noMemory: 12,
         access: 13, fault: 14, invalid: 22, tooManyFiles: 24, notSocket: 88,
         destination: 89, messageSize: 90, protocolType: 91, protocolOption: 92,
@@ -98,8 +100,31 @@
         if (result === N.socketError) return socketFailure(s);
         return result;
     }
+    function socketImportName(p) { return load32(p + I.nameRVA); }
+    function socketImportTarget(p) { return load32(p + I.targetRVA); }
+    function loadSocketLibrary(s) {
+        if (load32(s + L.winsockModule) !== 0) return 0;
+        var dll = callNativeI32(load32(apiTable(s) + A.LoadLibraryA), load32(s + L.winsockDLLName));
+        if (dll === 0) return networkErrno(s, E.networkDown);
+        var first = load32(s + L.winsockImports), p = first;
+        while (socketImportName(p) !== 0) {
+            var pointer = lookup(s, dll, imageBase(s) + socketImportName(p));
+            if (pointer === 0) {
+                /* Do not leave stale callable targets after a failed load. */
+                p = first;
+                while (socketImportName(p) !== 0) {
+                    store32(imageBase(s) + socketImportTarget(p), 0); p = p + I.bytes;
+                }
+                callNativeI32(load32(apiTable(s) + A.FreeLibrary), dll);
+                return networkErrno(s, E.protocol);
+            }
+            store32(imageBase(s) + socketImportTarget(p), pointer); p = p + I.bytes;
+        }
+        store32(s + L.winsockModule, dll); return 0;
+    }
     function initializeSockets(s) {
         if (load32(s + L.winsockReady) !== 0) return 0;
+        if (loadSocketLibrary(s) !== 0) return -1;
         var data = nativeAllocate(s, N.wsaDataBytes);
         if (data === 0) return networkErrno(s, E.noMemory);
         var result = callNativeI32(load32(apiTable(s) + A.WSAStartup), N.winsockVersion, data);
@@ -223,6 +248,9 @@
     }
     function networkPoll(s, entries, count, timeout) {
         if (count < 0 || count > N.maxPollEntries) return networkErrno(s, E.invalid);
+        /* poll treats every negative timeout as infinite. Sleep uses exactly
+         * DWORD(-1) for infinity; other negative values mean finite days. */
+        if (timeout < 0) timeout = -1;
         if (count === 0) { callNativeI32(load32(apiTable(s) + A.Sleep), timeout); return 0; }
         if (commitNativeRange(s, entries, count * N.pollBytes) === 0) return networkErrno(s, E.fault);
         var setBytes = (count + 1) * N.wordBytes;
@@ -329,15 +357,18 @@
     }
     function install(platform) {
         var L = platform.state, A = platform.constants.A, O = platform.operations;
-        L.sockets = L.bytes; L.winsockReady = L.bytes + 4;
-        L.nextSocketDescriptor = L.bytes + 8; L.bytes += 12;
+        L.sockets = L.bytes; L.winsockReady = L.bytes + N.wordBytes;
+        L.nextSocketDescriptor = L.bytes + 2 * N.wordBytes;
+        L.winsockModule = L.bytes + 3 * N.wordBytes;
+        L.winsockDLLName = L.bytes + 4 * N.wordBytes;
+        L.winsockImports = L.bytes + 5 * N.wordBytes; L.bytes += 6 * N.wordBytes;
         var imports = [["WSAStartup", 2], ["WSAGetLastError", 0], ["socket", 3],
             ["bind", 3], ["listen", 2], ["accept", 3], ["connect", 3],
             ["setsockopt", 5], ["getsockopt", 5], ["getsockname", 3],
             ["ioctlsocket", 3], ["recv", 4], ["send", 4], ["closesocket", 1], ["select", 5]];
         for (var i = 0; i < imports.length; i++) {
             A[imports[i][0]] = platform.imports.length * N.wordBytes;
-            platform.imports.push([imports[i][0], imports[i][1], "ws2_32.dll"]);
+            platform.imports.push([imports[i][0], imports[i][1], "ws2_32.dll", true]);
         }
         var operations = ["socket", "connect", "setSocketOption", "getSocketOption",
             "bind", "listen", "accept", "getSocketName", "inetAton", "fcntl", "close"];
@@ -345,11 +376,15 @@
         delete platform.aliases.close;
         platform.constants.N = N; platform.constants.S = S;
         platform.constants.E = E; platform.constants.WE = WE;
+        platform.constants.I = I;
+        platform.socketImportLayout = I;
         var functions = {socketHead: socketHead, setSocketHead: setSocketHead,
             socketNext: socketNext, setSocketNext: setSocketNext, socketDescriptor: socketDescriptor,
             socketHandle: socketHandle, socketFlags: socketFlags, setSocketFlags: setSocketFlags,
             findSocket: findSocket, networkErrno: networkErrno, translateSocketError: translateSocketError,
             socketFailure: socketFailure, socketResult: socketResult, initializeSockets: initializeSockets,
+            socketImportName: socketImportName, socketImportTarget: socketImportTarget,
+            loadSocketLibrary: loadSocketLibrary,
             registerSocket: registerSocket, networkClose: networkClose, networkIO: networkIO,
             networkFlags: networkFlags, networkOption: networkOption, networkInetAton: networkInetAton,
             socketSetContains: socketSetContains, socketSetAdd: socketSetAdd,

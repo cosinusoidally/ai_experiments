@@ -49,10 +49,12 @@ and is rejected before output creation. Existing ELF debug handling is unchanged
 
 - `../tools/snapshot_to_exe.js`: shared CLI and streaming copy; selects a
   container backend. Default output remains ELF.
-- `../tools/snapshot_exe_pe.js`: deterministic PE32 headers, three direct DLL
+- `../tools/snapshot_exe_pe.js`: deterministic PE32 headers, two direct DLL
   import tables, position-independent startup/ABI thunks and opaque snapshot
   section. Preferred image base is `0x00400000`; large-address-aware and ASLR
   flags are not enabled. Input bytes remain inspectable in `.snap`.
+  Winsock adds generated bridges/deferred target slots, resolved lazily from
+  ws2_32.dll rather than adding a static DLL dependency.
 - `../tools/windows_platform.js`: integer/kernel-JS native platform boundary,
   compiled using the existing compiler/front end and i386 backend. No second
   interpreter, GC, parser or JS-language implementation is introduced.
@@ -126,9 +128,10 @@ space; reserving a range does not remove fragmentation or commitment limits.
 - There is no fork/ptrace/Linux process-isolation emulation. The Test262 runner
   does not require the ECMA process supervisor. A Windows ECMA supervisor and
   Windows kernel debugger remain separate work.
-- The implementation currently imports vectored-exception APIs, so Windows
-  versions predating that facility are not supported. The supplied 32-bit Wine
-  prefix is the initial execution target; real-Windows coverage remains pending.
+- The implementation imports vectored-exception APIs, so versions predating
+  that facility are not supported. The user confirmed the pre-networking VM
+  works on Windows XP. New networking acceptance is under Wine so far; actual
+  XP networking remains an explicit follow-up test.
 
 ## Initial working-point validation
 

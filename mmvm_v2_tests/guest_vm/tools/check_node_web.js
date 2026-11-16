@@ -5,9 +5,12 @@
  *   node guest_vm/tools/check_node_web.js --native artifacts/linux.exe
  *   node guest_vm/tools/check_node_web.js --js-min ../../mmvm_v2/artifacts/js_min.exe
  * --all-interfaces omits --bind and checks the existing default as well.
- * Fixtures/logs stay in an exclusively created directory under artifacts. */
+ * Fixtures/logs stay in an exclusively created directory under artifacts.
+ * Guest executables run there with only node_web.js and fixtures, so the
+ * source checkout cannot accidentally supply missing runtime modules. */
 (function () {
     var fs = require("fs"), cp = require("child_process"), http = require("http"), net = require("net");
+    var paths = require("path");
     var args = process.argv.slice(2), mode = args.shift(), binary = args.shift();
     if (!binary || ["--wine", "--native", "--js-min"].indexOf(mode) < 0 ||
             args.length > 1 || (args.length && args[0] !== "--all-interfaces")) {
@@ -22,12 +25,15 @@
     fs.writeFileSync(root + "/space name.txt", "space\n");
     fs.mkdirSync(root + "/indexed"); fs.writeFileSync(root + "/indexed/index.html", "<h1>Index</h1>\n");
     fs.mkdirSync(root + "/listing"); fs.writeFileSync(root + "/listing/item.txt", "listed\n");
+    fs.copyFileSync("node_web.js", root + "/node_web.js");
+    binary = paths.resolve(binary);
     var command = mode === "--wine" ? "wine" : binary;
     var childArgs = mode === "--wine" ? [binary] : [];
     if (mode === "--js-min") childArgs.push("node_runner.js");
-    childArgs.push("node_web.js", "--directory", root, "0");
+    childArgs.push("node_web.js", "--directory", mode === "--js-min" ? root : ".", "0");
     if (!args.length) childArgs.push("--bind", "127.0.0.1");
-    var child = cp.spawn(command, childArgs, {stdio: ["ignore", "pipe", "pipe"]});
+    var child = cp.spawn(command, childArgs, {cwd: mode === "--js-min" ? process.cwd() : paths.resolve(root),
+        stdio: ["ignore", "pipe", "pipe"]});
     var watchdog = setTimeout(function () { finish(new Error("server acceptance exceeded 90 seconds")); }, 90000);
     function check(condition, message) {
         if (!condition) throw new Error(message);
@@ -94,7 +100,7 @@
             responseTest("/missing", "GET", 404), responseTest("/hello.txt", "POST", 405),
             responseTest("/%ZZ", "GET", 400), responseTest("/../hello.txt", "GET", 400),
             responseTest("/bad%5cpath", "GET", 400),
-            incompleteRequest, manyConnections, slowReader,
+            incompleteRequest, manyConnections, slowReader, abortedResponse,
             function (done) {
                 check(log.indexOf('"GET /bytes.bin HTTP/1.1" 200') >= 0, "stdout request logging");
                 done();
@@ -156,11 +162,28 @@
             } catch (error) { done(error); }
         });
     }
+    function abortedResponse(done) {
+        var socket = net.connect(port, "127.0.0.1", function () {
+            socket.write("GET /bytes.bin HTTP/1.0\r\n\r\n");
+        });
+        sockets.push(socket); socket.on("error", done);
+        socket.once("data", function () {
+            socket.destroy();
+            request("/hello.txt", "GET", function (error, response) {
+                if (error) { done(error); return; }
+                check(response.statusCode === 200, "aborted response does not kill server"); done();
+            });
+        });
+    }
     function capture(data) {
         log += data.toString();
         if (!port) {
             var match = /at http:\/\/([^:]+):(\d+)\//.exec(log);
-            if (match) { port = Number(match[2]); setTimeout(startTests, 0); }
+            if (match) {
+                try { check(match[1] === (args.length ? "0.0.0.0" : "127.0.0.1"), "requested bind address"); }
+                catch (error) { finish(error); return; }
+                port = Number(match[2]); setTimeout(startTests, 0);
+            }
         }
     }
     child.stdout.on("data", capture); child.stderr.on("data", capture);

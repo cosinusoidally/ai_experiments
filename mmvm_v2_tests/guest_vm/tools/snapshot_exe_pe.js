@@ -94,7 +94,7 @@
         var cursor = PE.kernelRVA + kernel.length, imports = [], apiRVA = [], stubs = {}, aliases = {};
         for (i = 0; i < Platform.imports.length; i++) {
             var spec = Platform.imports[i];
-            imports.push({name: spec[0], arity: spec[1], dll: spec[2] || "kernel32.dll"});
+            imports.push({name: spec[0], arity: spec[1], dll: spec[2] || "kernel32.dll", lazy: !!spec[3]});
         }
         /* First lay out fixed-width bridges. Re-emit after all RVAs are known. */
         for (i = 0; i < imports.length; i++) {
@@ -115,6 +115,7 @@
         cursor = (cursor + 3) & -4;
         var groups = [], groupByName = {};
         for (i = 0; i < imports.length; i++) {
+            if (imports[i].lazy) continue;
             var dll = imports[i].dll;
             if (!groupByName["$" + dll]) {
                 groupByName["$" + dll] = {name: dll, functions: []};
@@ -127,6 +128,11 @@
             groups[i].lookup = cursor; cursor += (groups[i].functions.length + 1) * 4;
             groups[i].iat = cursor; cursor += (groups[i].functions.length + 1) * 4;
         }
+        var socketImports = [];
+        for (i = 0; i < imports.length; i++) if (imports[i].lazy) {
+            imports[i].iat = cursor; cursor += PE.word;
+            socketImports.push(imports[i]);
+        }
         var data = [];
         function append(text) { var at = cursor; cursor += text.length + 1; string(data, at, text); return at; }
         for (i = 0; i < groups.length; i++) {
@@ -137,6 +143,8 @@
                 item.nameRVA = append(item.name); item.iat = group.iat + j * 4;
             }
         }
+        var winsockName = append("ws2_32.dll");
+        for (i = 0; i < socketImports.length; i++) socketImports[i].nameRVA = append(socketImports[i].name);
         var exportEntries = [];
         for (i = 0; i < specs.length; i++) if (specs[i][0].charAt(0) !== "$") {
             exportEntries.push([append(specs[i][0]), stubs[specs[i][0]]]);
@@ -146,6 +154,8 @@
         var ioCommitMessage = append("guest VM: cannot commit native I/O buffer\n");
         cursor = (cursor + 3) & -4;
         var exportTable = cursor; cursor += (exportEntries.length + 1) * 8;
+        var socketLayout = Platform.socketImportLayout, socketTable = cursor;
+        cursor += (socketImports.length + 1) * socketLayout.bytes;
         var state = cursor; cursor += Platform.state.bytes;
         var apiTable = cursor; cursor += imports.length * 4;
         var snapshot = align(cursor), prefix = [], suffix = [];
@@ -175,6 +185,10 @@
             put32(prefix, exportTable + i * 8, exportEntries[i][0]);
             put32(prefix, exportTable + i * 8 + 4, exportEntries[i][1]);
         }
+        for (i = 0; i < socketImports.length; i++) {
+            put32(prefix, socketTable + i * socketLayout.bytes + socketLayout.nameRVA, socketImports[i].nameRVA);
+            put32(prefix, socketTable + i * socketLayout.bytes + socketLayout.targetRVA, socketImports[i].iat);
+        }
         var numericConstants = {integerMaximum: 2147483647, wordRange: 4294967296,
             halfWordRange: 65536, fileTimeTicksPerSecond: 10000000,
             fileTimeEpochSeconds: 11644473600, microsecondsPerSecond: 1000000};
@@ -196,6 +210,7 @@
         storeAddress(L.exports, exportTable); storeAddress(L.message, message);
         storeAddress(L.ioCommitMessage, ioCommitMessage);
         storeAddress(L.faultHandler, stubs.$fault);
+        storeAddress(L.winsockDLLName, winsockName); storeAddress(L.winsockImports, socketTable);
         for (i = 0; i < imports.length; i++) storeAddress(apiTable - state + i * 4, imports[i].bridge);
         for (i = 0; i < groups.length; i++) {
             if (groups[i].name !== "kernel32.dll" && groups[i].name !== "msvcrt.dll") continue;

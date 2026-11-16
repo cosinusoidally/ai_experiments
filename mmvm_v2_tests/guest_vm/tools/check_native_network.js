@@ -7,7 +7,7 @@ load("node_compat/libc.js");
         F_GETFL: 3, F_SETFL: 4, NONBLOCK: 2048, AGAIN: 11, INPROGRESS: 115,
         REFUSED: 111, BADFD: 9, POLLIN: 1, POLLOUT: 4, POLLNVAL: 32,
         pollBytes: 8, events: 4, returned: 6, addressBytes: 16,
-        payloadBytes: 4096, waitMillis: 5000};
+        payloadBytes: 4096, backpressureBound: 16 * 1024 * 1024, waitMillis: 5000};
     var checks = 0, buffers = [], descriptors = [];
     function check(condition, message) {
         if (!condition) throw new Error("network acceptance: " + message + " (errno " + NodeLibc.errno() + ")");
@@ -82,8 +82,24 @@ load("node_compat/libc.js");
         check(NodeLibc.poll(polls, 3, 0) === 2, "duplicate descriptors count separately; negative ignored");
         check(returned(polls) === C.POLLOUT && returned(polls + C.pollBytes) === C.POLLOUT &&
             returned(polls + C.pollBytes * 2) === 0, "poll results");
-        close(client); wait(accepted, C.POLLIN);
-        check(NodeLibc.read(accepted, target, C.payloadBytes) === 0, "EOF readiness");
+        /* Fill a connection whose peer deliberately does not read. This is
+         * bounded kernel buffering, not a large guest allocation. Then close
+         * the writer and drain: queued bytes must arrive before EOF. */
+        var queued = 0, blocked = false;
+        while (queued < C.backpressureBound) {
+            result = NodeLibc.write(client, source, C.payloadBytes);
+            if (result === -1 && NodeLibc.errno() === C.AGAIN) { blocked = true; break; }
+            check(result > 0, "backpressure write progress"); queued += result;
+        }
+        check(blocked, "nonblocking backpressure reached within bounded transfer");
+        close(client); received = 0;
+        while (true) {
+            wait(accepted, C.POLLIN);
+            result = NodeLibc.read(accepted, target, C.payloadBytes);
+            if (result === 0) break;
+            check(result > 0, "draining queued bytes before EOF"); received += result;
+        }
+        check(received === queued, "all queued bytes precede EOF");
         close(accepted); close(server);
         check(NodeLibc.close(server) === -1 && NodeLibc.errno() === C.BADFD, "double close is a normal error");
         entry(polls, server, C.POLLIN);

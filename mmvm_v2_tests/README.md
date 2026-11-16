@@ -414,6 +414,17 @@ Compatibility-layer file callbacks are queued asynchronously, although the
 underlying libc regular-file operation runs on the event-loop thread because
 there is no native worker pool.
 
+The unchanged `node_web.js` also runs in the Win32 guest executable using
+XP-era Winsock APIs, with no Node installation or separate runtime modules:
+
+```bat
+guest_vm-win32.exe node_web.js --bind 127.0.0.1 --directory www 8000
+```
+
+Omit `--bind` to listen on all IPv4 interfaces. See
+[Windows networking](guest_vm/docs/windows-networking.md) for build commands,
+Wine acceptance results, XP testing instructions and current API limits.
+
 ### Reusable X11 modules
 
 The X11 example is split into three CommonJS files so additional demos can

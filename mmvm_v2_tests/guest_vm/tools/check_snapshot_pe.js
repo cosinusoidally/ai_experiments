@@ -48,7 +48,8 @@
         check(i < 8, "bounded import descriptor list");
         dlls.push(text(fileOffset(u32(descriptors + i * 20 + 12))));
     }
-    check(dlls.join(",") === "kernel32.dll,msvcrt.dll,ws2_32.dll", "only the three intended DLL imports");
+    check(dlls.join(",") === "kernel32.dll,msvcrt.dll", "only the two intended static DLL imports");
+    check(u32(optional + 108) === (dlls.length + 1) * 20, "complete import descriptor directory extent");
     console.log("PE snapshot acceptance passed: " + checks + " checks; snapshot SHA-256 " +
         crypto.createHash("sha256").update(input).digest("hex"));
 }());
