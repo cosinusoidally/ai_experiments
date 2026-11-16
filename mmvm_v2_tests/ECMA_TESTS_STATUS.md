@@ -2,6 +2,22 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Win32/Wine initial bring-up, 2026-11-16 — incomplete
+
+- The shared Test262-style guest backend now runs in-process on Windows;
+  Linux process isolation and the direct Node runner are unchanged.
+- Whole-suite attempt: **435 passed / 100 failed (11 timeouts included) /
+  4 configured skips / 794 unfinished**. Of the unfinished files, one started
+  and aborted the VM and 793 were not started. All 535 completed statuses
+  exactly match the recorded Linux results for those filenames.
+- Fatal `STRING_SUBSTRING` operation at `ecma/String/15.5.4.10-1.js` stops
+  the run; a fresh-process isolated run reproduces it. This is an existing
+  Linux-failing file, not a newly introduced passing-test regression.
+- Attempt duration **223.53 s**, peak RSS **497672 KiB**. Boolean smoke runs
+  pass **19/19** on Wine, Linux guest and direct Node.
+- See [Windows receipts, timeout limitations and next blocker](ECMA_WIN32_STATUS.md).
+  This does not supersede the completed Linux audit below.
+
 ### Full Linux audit, 2026-11-15, approximately 16:19--16:29 UTC
 
 - Latest VM sources `5163ff6`, checkout `ae0e709`, fresh default optimized

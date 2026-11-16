@@ -125,15 +125,18 @@
         }
         else {
             var guestModule = require("./ecma_tests_guest.js");
+            var inProcess = process.platform === "win32";
             var guestBackend = guestModule.create(fs,
-                {sampleFunctions: sampleFunctions});
+                {sampleFunctions: sampleFunctions, timeoutMs: inProcess ? timeoutMs : 0});
             if (preloadHarnesses) {
                 var preloadStarted = clock();
                 var preloaded = guestBackend.prepareHarnesses(sharedHarnessFiles);
                 if (verbose) console.log("Prepared " + preloaded +
                     " shared harness programs in " + (clock() - preloadStarted).toFixed(3) + " ms");
             }
-            backend = require("./ecma_tests_process.js").create(guestBackend, timeoutMs);
+            backend = inProcess ? guestBackend :
+                require("./ecma_tests_process.js").create(guestBackend, timeoutMs);
+            if (verbose && inProcess) console.log("ECMA: in-process guest backend; cooperative wall-clock timeout");
         }
     }
     var total = {passed: 0, failed: 0, timedOut: 0, executed: 0};

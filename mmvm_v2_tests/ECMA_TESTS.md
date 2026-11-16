@@ -15,6 +15,28 @@ From `mmvm_v2_tests`, with a current generic standalone image:
 node ecma_tests_runner_node.js
 ```
 
+For a Windows guest executable, use the same runner from `mmvm_v2_tests`:
+
+```bat
+artifacts\js.exe ecma_tests_runner.js
+artifacts\js.exe ecma_tests_runner.js --verbose ecma/Boolean
+```
+
+The executable uses the guest interpreter, not Node or a Windows JavaScript
+engine. Corpus discovery and harness loading use the existing Windows-backed
+filesystem API; preserve the relative `../../js_tests/tests` layout.
+
+On Windows, the runner invokes the shared guest backend directly, reusing
+the Test262 baseline-restoration and context lifecycle. It does not import
+the Linux fork/pipe supervisor or emulate fork. The default ten-second
+per-test deadline is cooperative: the existing execution-slice observer
+checks it between slices, and phase boundaries check elapsed time after
+compilation/execution returns. A timeout aborts that execution and is reported
+as a failure/timeout before continuing to the next file. This cannot contain
+a native crash or preempt compilation/native code that does not return.
+The Linux process-isolated path and the direct Node reference path are
+unchanged. No threads or additional executable dependencies are introduced.
+
 If needed, construct an image from the current sources with the existing
 snapshot workflow; no C source or js_min rebuild is required:
 

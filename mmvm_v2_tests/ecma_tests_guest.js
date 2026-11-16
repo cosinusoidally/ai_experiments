@@ -23,6 +23,13 @@ exports.create = function (fs, options) {
     embedding.test262Progress = null;
     var functionSamples = {};
     var sampleReported = 0;
+    var deadline = Infinity, deadlineReached = {}, deadlineInstructions = 0;
+    function expired() { return options.timeoutMs && new Date().getTime() >= deadline; }
+    function timeoutResult(filename, phase, instructions) {
+        return {status: "timeout", phase: phase, name: "TimeoutError",
+            message: "cooperative wall-clock limit exhausted", filename: filename,
+            line: 0, column: 0, instructions: instructions};
+    }
     if (options.sampleFunctions) {
         embedding.test262Sample = function (execution) {
             var frames = vm.inspectNativeFrames(1);
@@ -41,6 +48,19 @@ exports.create = function (fs, options) {
                     " heap=" + vm.runtime.linearHeap.bump +
                     " pc=" + frame.pc + " source=" + frame.sourcePreview.replace(/[\r\n]+/g, " "));
             }
+        };
+    }
+    /* Reuse the existing slice observer: no Test262 harness change, timer
+     * thread, process API or second interpreter. Compilation/native calls are
+     * not preemptible; their elapsed time is checked when they return. */
+    if (options.timeoutMs) {
+        var sampleExecution = embedding.test262Sample;
+        embedding.test262Sample = function (execution) {
+            if (expired()) {
+                deadlineInstructions = execution.totalInstructions;
+                throw deadlineReached;
+            }
+            if (sampleExecution) sampleExecution(execution);
         };
     }
     var base = ["ecma_tests_harness.js", "../../js_tests/tests/shell.js"];
@@ -90,19 +110,28 @@ exports.create = function (fs, options) {
             functionSamples = {};
             sampleReported = new Date().getTime();
             if (preparationFailure) return visible(preparationFailure);
+            deadline = options.timeoutMs ? new Date().getTime() + options.timeoutMs : Infinity;
             /* Match Test262's baseline-restore path: merely creating another
              * context in this VM shares intrinsic objects and would let an
              * Array.prototype mutation poison subsequent tests. */
             var context = embedding.instantiateTest262Harness(false);
             var used = 0, loadTimeout = null;
             function execute(text, path, phase, cache, target) {
-                var outcome = embedding.runTest262Source(target || context, text,
-                    path, Math.max(1, limit - used), cache ? "$" + path : null);
+                if (expired()) return timeoutResult(path, phase, used);
+                var outcome;
+                try {
+                    outcome = embedding.runTest262Source(target || context, text,
+                        path, Math.max(1, limit - used), cache ? "$" + path : null);
+                } catch (error) {
+                    if (error === deadlineReached) return timeoutResult(path, phase, used + deadlineInstructions);
+                    throw error;
+                }
                 if (cache && embedding.test262ProgramCache["$" + path]) {
                     vm.runtime.retainProgram(embedding.test262ProgramCache["$" + path]);
                 }
                 var result = visible(outcome);
                 used += Number(result.instructions) || 0;
+                if (expired()) return timeoutResult(path, phase, used);
                 if (result.status !== "completed" && phase !== "test") result.phase = phase;
                 result.instructions = used;
                 return result;
@@ -144,6 +173,7 @@ exports.create = function (fs, options) {
                 path = "ecma_tests_verify.js";
                 return execute(readHarness(path), path, "assertions", true);
             } finally {
+                deadline = Infinity;
                 if (options.sampleFunctions) {
                     var samples = [], key;
                     for (key in functionSamples) {
