@@ -118,11 +118,17 @@ Additional focused acceptance: the Node core suite passes after the engine-root
 ownership fix; js_min core passes with compact backings; a js_min-built image
 containing a live external backing reloads, passes 49 forced collections and
 preserves slice aliasing. Its graph audit reports 40,219 reachable records and
-zero missing marks. Full ECMA/Test262/Octane, all graphical demos, fresh normal
-cross-host/self-hosted fixed-point builds and Windows acceptance have **not**
-been rerun for contract 109. The contract-108 checkpoint below must not be
-mistaken for those missing fresh checks. Work paused at the user's request
+zero missing marks. At that checkpoint, full ECMA/Test262/Octane, all graphical
+demos, fresh normal cross-host/self-hosted fixed-point builds and Windows
+acceptance had **not** been rerun for contract 109. The contract-108 checkpoint
+below must not be mistaken for those missing fresh checks. Work paused at the user's request
 after the stated bootstrap-memory goal was achieved.
+
+Subsequent ECMA-only acceptance, 2026-11-16: the ordinary Linux harness completes
+with 997 passes / 332 failures / four configured skips and zero filename-status
+changes; all 997 Linux-passing files also pass through the Windows harness.
+See [the matched-image comparison](../../ECMA_LINUX_WIN32_COMPARISON_2026-11-16.md).
+This does not supply the other missing full-suite/fixed-point acceptance runs.
 
 ### Remaining substantial space use (not implemented)
 

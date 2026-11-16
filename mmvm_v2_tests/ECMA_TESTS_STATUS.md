@@ -2,6 +2,17 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Existing Linux harness versus Win32 harness, 2026-11-16
+
+- Fresh full Linux fork-supervised run: **997 passed / 332 failed (39 timeouts
+  included) / 4 configured skips / 0 not run**; all 1333 filename statuses
+  exactly match the tracked baseline. Process **609.77 s**, peak **463900 KiB**.
+- Every one of those **997 passing files passes under the Windows in-process
+  harness** with the identical snapshot: **0 additional Windows failures /
+  0 timeouts / 0 aborted files / 0 unfinished comparisons** in that pass set.
+- This is not a full Windows-suite pass: Linux-failing files were outside this
+  targeted comparison. See [scope and receipts](ECMA_LINUX_WIN32_COMPARISON_2026-11-16.md).
+
 ### Win32/Wine initial bring-up, 2026-11-16 — incomplete
 
 - The shared Test262-style guest backend now runs in-process on Windows;

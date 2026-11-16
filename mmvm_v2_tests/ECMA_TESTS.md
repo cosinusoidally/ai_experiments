@@ -37,6 +37,15 @@ a native crash or preempt compilation/native code that does not return.
 The Linux process-isolated path and the direct Node reference path are
 unchanged. No threads or additional executable dependencies are introduced.
 
+For a filename-level old-Linux/new-Windows comparison, first capture a complete
+ordinary Linux run, then use
+`guest_vm/tools/compare_ecma_windows.js LINUX_LOG SNAPSHOT LINUX_EXE WINDOWS_EXE artifacts/NEW_DIRECTORY`
+under Node with the Wine prefix activated. This diagnostic supervisor verifies
+the common embedded snapshot and runs every Linux-passing filename serially
+through Wine. It does not replace the Linux harness or infer Windows passes
+for Linux-failing tests. Commands, results and limitations are documented in
+[the 2026-11-16 comparison](ECMA_LINUX_WIN32_COMPARISON_2026-11-16.md).
+
 If needed, construct an image from the current sources with the existing
 snapshot workflow; no C source or js_min rebuild is required:
 

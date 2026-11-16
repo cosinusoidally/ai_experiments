@@ -1,5 +1,22 @@
 # ECMA under Win32/Wine
 
+## 2026-11-16: complete comparison of all Linux-passing tests
+
+Fresh existing Linux fork-supervised run: **997 passed / 332 failed (39
+timeouts included) / 4 default skips / 0 not run**, 609.77 s, 463900 KiB RSS.
+Every filename status matches the tracked Linux baseline.
+
+All **997 Linux-passing filenames also pass on Windows**, using the same
+snapshot and the new in-process harness. Zero Windows-only failures,
+timeouts, aborted files or unfinished comparisons in that set. The 332 Linux
+failures and four default skips were not selected for this Windows comparison;
+they are not counted as Windows passes. The known shared substring failure
+still prevents an uninterrupted whole-suite Windows invocation.
+
+See [the matched-image comparison](ECMA_LINUX_WIN32_COMPARISON_2026-11-16.md)
+for per-tree counts, exact scope, commands and input identities. This
+supersedes the earlier partial comparison's limited coverage, not its receipt.
+
 ## 2026-11-16: initial in-process bring-up
 
 The existing PE guest executable can discover and execute the ECMA corpus
