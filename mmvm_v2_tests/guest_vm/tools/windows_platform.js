@@ -389,8 +389,8 @@
         if (operation === O.zeroAllocate) return zeroAllocate(s, a, b);
         if (operation === O.resize) return resize(s, a, b);
         if (operation === O.free) return free(s, a);
-        if (operation === O.read) return nativeIO(s, 0, 0, a, b, c, 0);
-        if (operation === O.write) return nativeIO(s, 0, 1, a, b, c, 0);
+        if (operation === O.read) return networkIO(s, 0, a, b, c);
+        if (operation === O.write) return networkIO(s, 1, a, b, c);
         if (operation === O.fread) return nativeIO(s, 1, 0, a, b, c, d);
         if (operation === O.fwrite) return nativeIO(s, 1, 1, a, b, c, d);
         if (operation === O.link) {
@@ -398,9 +398,9 @@
             return -1;
         }
         if (operation === O.chmod || operation === O.signal) return 0;
-        if (operation === O.poll && b === 0) {
-            callNativeI32(load32(apiTable(s) + A.Sleep), c); return 0;
-        }
+        if (operation === O.poll) return networkPoll(s, a, b, c);
+        if (operation === O.close) return networkClose(s, a);
+        if (operation >= O.socket) return networkDispatch(s, operation, a, b, c, d, e);
         return unsupported(s);
     }
     var functions = {imageBase: imageBase, apiTable: apiTable, crtModule: crtModule,
@@ -419,6 +419,9 @@
     var api = {entry: dispatch, functions: functions, state: L, operations: O,
         imports: APIs, aliases: descriptorAliases,
         constants: {L: L, M: M, D: D, W: W, O: O, A: A}};
+    var Network = root.GuestVMWindowsNetwork;
+    if (typeof module !== "undefined" && module.exports) Network = require("./windows_network.js");
+    Network.install(api);
     root.GuestVMWindowsPlatform = api;
     if (typeof module !== "undefined" && module.exports) module.exports = api;
 }(this));

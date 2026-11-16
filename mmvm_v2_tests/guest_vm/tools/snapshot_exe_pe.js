@@ -82,13 +82,15 @@
             ["realloc", O.resize, 2], ["free", O.free, 1], ["link", O.link, 2],
             ["chmod", O.chmod, 2], ["signal", O.signal, 2], ["poll", O.poll, 3],
             ["read", O.read, 3], ["write", O.write, 3],
-            ["fread", O.fread, 4], ["fwrite", O.fwrite, 4],
+            ["fread", O.fread, 4], ["fwrite", O.fwrite, 4], ["close", O.close, 1],
+            ["socket", O.socket, 3], ["connect", O.connect, 3],
+            ["setsockopt", O.setSocketOption, 5], ["getsockopt", O.getSocketOption, 5],
+            ["bind", O.bind, 3], ["listen", O.listen, 2], ["accept", O.accept, 3],
+            ["getsockname", O.getSocketName, 3], ["inet_aton", O.inetAton, 2],
+            ["fcntl", O.fcntl, 3],
             ["$fault", O.fault, 1, false, 4], ["$start", O.start, 2]
         ];
-        var network = ["socket", "connect", "setsockopt", "getsockopt", "bind",
-            "listen", "accept", "getsockname", "inet_aton", "fcntl"];
         var i, key;
-        for (i = 0; i < network.length; i++) specs.push([network[i], O.unsupported, 0]);
         var cursor = PE.kernelRVA + kernel.length, imports = [], apiRVA = [], stubs = {}, aliases = {};
         for (i = 0; i < Platform.imports.length; i++) {
             var spec = Platform.imports[i];
@@ -111,9 +113,16 @@
             for (i = 0; i < imports.length; i++) if (imports[i].name === Platform.aliases[key]) aliases[key] = imports[i].bridge;
         }
         cursor = (cursor + 3) & -4;
-        var descriptors = cursor; cursor += 60; // two DLL descriptors plus terminator
-        var groups = [{name: "kernel32.dll", functions: []}, {name: "msvcrt.dll", functions: []}];
-        for (i = 0; i < imports.length; i++) groups[imports[i].dll === "kernel32.dll" ? 0 : 1].functions.push(imports[i]);
+        var groups = [], groupByName = {};
+        for (i = 0; i < imports.length; i++) {
+            var dll = imports[i].dll;
+            if (!groupByName["$" + dll]) {
+                groupByName["$" + dll] = {name: dll, functions: []};
+                groups.push(groupByName["$" + dll]);
+            }
+            groupByName["$" + dll].functions.push(imports[i]);
+        }
+        var descriptors = cursor; cursor += (groups.length + 1) * 20;
         for (i = 0; i < groups.length; i++) {
             groups[i].lookup = cursor; cursor += (groups[i].functions.length + 1) * 4;
             groups[i].iat = cursor; cursor += (groups[i].functions.length + 1) * 4;
@@ -133,7 +142,7 @@
             exportEntries.push([append(specs[i][0]), stubs[specs[i][0]]]);
         }
         for (key in aliases) if (Object.prototype.hasOwnProperty.call(aliases, key)) exportEntries.push([append(key), aliases[key]]);
-        var message = append("guest VM: networking or unsupported Windows platform operation attempted\n");
+        var message = append("guest VM: unsupported Windows platform operation attempted\n");
         var ioCommitMessage = append("guest VM: cannot commit native I/O buffer\n");
         cursor = (cursor + 3) & -4;
         var exportTable = cursor; cursor += (exportEntries.length + 1) * 8;
@@ -145,7 +154,7 @@
         copy(prefix, PE.kernelRVA, kernel);
         for (i = 0; i < imports.length; i++) {
             var bridge = importBridge(Assembler, imports[i].bridge,
-                imports[i].iat, imports[i].arity, imports[i].dll === "kernel32.dll");
+                imports[i].iat, imports[i].arity, imports[i].dll !== "msvcrt.dll");
             if (bridge.length !== imports[i].bridgeBytes) throw new Error("PE bridge layout changed during linking");
             copy(prefix, imports[i].bridge, bridge);
             apiRVA.push(imports[i].bridge);
@@ -189,6 +198,7 @@
         storeAddress(L.faultHandler, stubs.$fault);
         for (i = 0; i < imports.length; i++) storeAddress(apiTable - state + i * 4, imports[i].bridge);
         for (i = 0; i < groups.length; i++) {
+            if (groups[i].name !== "kernel32.dll" && groups[i].name !== "msvcrt.dll") continue;
             address(groups[i].nameRVA); a.pushEax();
             var getModule;
             for (j = 0; j < imports.length; j++) if (imports[j].name === "GetModuleHandleA") getModule = imports[j];
@@ -218,7 +228,8 @@
         put16(prefix, opt + OPT.subsystem, PE.console); put32(prefix, opt + OPT.stackReserve, 1048576);
         put32(prefix, opt + OPT.stackCommit, 4096); put32(prefix, opt + OPT.heapReserve, 1048576);
         put32(prefix, opt + OPT.heapCommit, 4096); put32(prefix, opt + OPT.directories, 16);
-        put32(prefix, opt + OPT.importRVA, descriptors); put32(prefix, opt + OPT.importBytes, 60);
+        put32(prefix, opt + OPT.importRVA, descriptors);
+        put32(prefix, opt + OPT.importBytes, (groups.length + 1) * 20);
         function section(index, name, rva, bytes, flags) {
             var at = opt + PE.optionalBytes + index * PE.sectionBytes;
             string(prefix, at, name); put32(prefix, at + SEC.virtualBytes, bytes);

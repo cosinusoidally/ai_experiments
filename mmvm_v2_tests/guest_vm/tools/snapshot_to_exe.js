@@ -30,6 +30,7 @@
         load("guest_vm/aot/kernel_compiler.js");
         load("guest_vm/aot/backend_x86.js");
         load("guest_vm/tools/snapshot_launcher.js");
+        load("guest_vm/tools/windows_network.js");
         load("guest_vm/tools/windows_platform.js");
         load("guest_vm/binary64.js");
         load("guest_vm/tools/snapshot_exe_pe.js");

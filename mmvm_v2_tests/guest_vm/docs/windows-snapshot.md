@@ -1,11 +1,13 @@
 # Windows snapshot executable: implementation and bring-up
 
-Updated 2026-11-15. Initial scope: hello.js and Test262, not networking/X11.
+Updated 2026-11-16. Initial scope was hello.js and Test262; TCP networking is
+now supported through the existing Node compatibility layer.
 This is the implementation companion to [the original plan](windows-snapshot-plan.md).
 
 The unified image also runs the unmodified Windows mishmashvm bootstrap and
 SDL/PortableGL demos; see [reference hashes, configuration and acceptance](windows-mishmashvm.md).
-This does not enable Winsock or port the Unix/X11 demos to Windows.
+See [Windows networking](windows-networking.md) for Winsock support and tests.
+Unix/X11 demos are not ported to Windows.
 
 ## Build and run
 
@@ -47,13 +49,15 @@ and is rejected before output creation. Existing ELF debug handling is unchanged
 
 - `../tools/snapshot_to_exe.js`: shared CLI and streaming copy; selects a
   container backend. Default output remains ELF.
-- `../tools/snapshot_exe_pe.js`: deterministic PE32 headers, two direct DLL
+- `../tools/snapshot_exe_pe.js`: deterministic PE32 headers, three direct DLL
   import tables, position-independent startup/ABI thunks and opaque snapshot
   section. Preferred image base is `0x00400000`; large-address-aware and ASLR
   flags are not enabled. Input bytes remain inspectable in `.snap`.
 - `../tools/windows_platform.js`: integer/kernel-JS native platform boundary,
   compiled using the existing compiler/front end and i386 backend. No second
   interpreter, GC, parser or JS-language implementation is introduced.
+- `../tools/windows_network.js`: kernel-JS Winsock adapter, private socket
+  descriptors and select-backed readiness for the shared Node event loop.
 - `../aot/x86_assembler.js`: a single new `retPopBytes` instruction macro for
   native stdcall returns. Ordinary compiled-kernel calls remain cdecl.
 - `../tools/check_snapshot_pe.js`: structural/payload/import acceptance without
@@ -108,9 +112,11 @@ space; reserving a range does not remove fragmentation or commitment limits.
 
 ## Unsupported facilities and current portability limits
 
-- Socket entrypoints fail with a clear stderr message and exit status 3.
-  Polling real descriptors is unsupported; an empty poll may sleep for timers.
-  No Winsock library is imported or loaded, and no X11/demo code is changed.
+- IPv4 TCP networking through the Node compatibility layer uses XP-era Winsock
+  APIs in `ws2_32.dll`. Unix sockets, general file-descriptor polling and the
+  Linux resolver ABI required by `net.js` are not implemented. Unsupported
+  socket families fail normally with translated errno, not process termination.
+  No X11/demo code is changed. See [networking details](windows-networking.md).
 - Linux's signal facility has no implementation here; initial compatibility
   permits the compatibility layer's signal setup. Broader signals are not a
   claimed feature.
