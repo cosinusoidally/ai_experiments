@@ -231,10 +231,20 @@ disable a source-verification pass that currently does not run.
 The writer retires/publishes outstanding allocator regions, shares remaining
 string backings and builds a heap template. It temporarily zeros platform
 pointers, binding payloads and buffer pointers, normalizes engine diagnostics/
-root state, copies external buffer contents into the template, then restores
+root state, plans/copies external buffer contents into a separate aligned
+payload area before the heap template, then restores
 the live builder's process-local state. The output concatenates concrete
 header/data/code/heap bytes; the unused reserved capacity is not a giant
 sparse-file tail. Bootstrap allocates that capacity anonymously at launch.
+
+Contract 109 external backing descriptors contain image-relative payload
+offsets while serialized; ordinary inline pointers remain zero. The kernel
+`rebindStartupBuffersKernel` reconstructs native allocations after platform
+binding, without changing the mapped image. The existing header's heap offset
+includes the payload area, while heap length describes records only. Thus the
+normal C loader and ELF/PE packagers need no additional support. Context-state
+snapshots are a separate in-process format: copied external bytes follow the
+saved record regions and restore to the same live payload addresses.
 
 Compact strings, source slices, integer metadata and bytecode/constant-pool
 packing reduce retained representation redundancy without compressing the

@@ -5,6 +5,8 @@
  * Optional leading --stack-only samples bounded guest call stacks instead of
  * walking every record. It uses a 200 ms interval; timings are perturbed.
  * --stack-depth COUNT (1..128, default 12) controls the stack bound. Truncated
+ * --cwd DIRECTORY selects the application's working directory without changing
+ * where the profiler resolves its snapshot, runner or output files.
  * stacks are identified explicitly: filtering for an ancestor absent below
  * that bound otherwise biases a phase analysis toward shallow call chains.
  * Brief SIGSTOP samples perturb timing; do not use this run as a stock score.
@@ -15,11 +17,15 @@
     var Cells = require("../value_cell.js");
     var Backend = require("../aot/backend_x86.js");
     var args = process.argv.slice(2);
-    var stackOnly = false, stackDepth = 12;
+    var stackOnly = false, stackDepth = 12, childDirectory;
     var MAX_STACK_DEPTH = 128;
     while (args.length && args[0].substring(0, 2) === "--") {
         var option = args.shift();
         if (option === "--stack-only") stackOnly = true;
+        else if (option === "--cwd") {
+            childDirectory = args.shift();
+            if (!childDirectory) throw new Error("--cwd requires a directory");
+        }
         else if (option === "--stack-depth") {
             stackDepth = Number(args.shift());
             if (!(stackDepth >= 1 && stackDepth <= MAX_STACK_DEPTH) ||
@@ -32,6 +38,7 @@
     var snapshot = args.shift(), prefix = args.shift();
     var fields = Backend.StandaloneHeaderFields;
     var image = fs.readFileSync(snapshot);
+    var externalAccounting = image.readUInt32LE(fields.compilerVersion) >= Records.NativeInterpreterContractVersion;
     var imageHeapOffset = image.readUInt32LE(fields.heapOffset);
     var imageHeapLength = image.readUInt32LE(fields.heapLength);
     var heapCapacity = image.readUInt32LE(fields.heapCapacity);
@@ -52,8 +59,9 @@
     image = null;
     var output = fs.openSync(prefix + ".jsonl", "wx");
     var log = fs.openSync(prefix + ".log", "wx");
-    var child = cp.spawn("./artifacts/js_runner.exe", [snapshot].concat(args),
-        {stdio: ["ignore", "pipe", "pipe"]});
+    var paths = require("path");
+    var child = cp.spawn(paths.resolve("artifacts/js_runner.exe"), [paths.resolve(snapshot)].concat(args),
+        {cwd: childDirectory, stdio: ["ignore", "pipe", "pipe"]});
     var started = Date.now(), samples = 0, pending = false, closed = false;
     var heapBase = 0, timer, interval = stackOnly ? 200 : 5000;
     function record(value) {
@@ -275,6 +283,8 @@
                 freeBytes: free, largestFreeRecord: largest, recordCount: recordCount,
                 spareValueBytes: spareValues, sparePropertyBytes: spareProperties,
                 externalBufferBytes: externalBufferBytes, externalBufferCount: externalBufferCount,
+                trackedExternalBufferBytes: externalAccounting ? records.engineExternalBufferBytes(engine) : undefined,
+                externalBufferThreshold: externalAccounting ? records.engineExternalBufferThreshold(engine) : undefined,
                 collectorWorkspaceResidentBytes: residentInterior(
                     records.engineGCStackBase(engine), records.engineGCStackLimit(engine)),
                 collections: records.engineGCCollections(engine),

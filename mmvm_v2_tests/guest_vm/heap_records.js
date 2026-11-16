@@ -306,7 +306,10 @@
         NATIVE_FREE_BITMAP_WORDS * Heap.WORD_BYTES;
     var ENGINE_RANDOM_STATE = ENGINE_FREE_BIN_HEADS +
         NATIVE_FREE_BIN_COUNT * Heap.WORD_BYTES;
-    var ENGINE_STATE_BYTES = ENGINE_RANDOM_STATE + Heap.WORD_BYTES;
+    var ENGINE_EXTERNAL_BUFFER_BYTES = ENGINE_RANDOM_STATE + Heap.WORD_BYTES;
+    var ENGINE_EXTERNAL_BUFFER_THRESHOLD = ENGINE_EXTERNAL_BUFFER_BYTES + Heap.WORD_BYTES;
+    var ENGINE_EXTERNAL_BUFFER_REQUEST = ENGINE_EXTERNAL_BUFFER_THRESHOLD + Heap.WORD_BYTES;
+    var ENGINE_STATE_BYTES = ENGINE_EXTERNAL_BUFFER_REQUEST + Heap.WORD_BYTES;
 
     var REGEXP_PATTERN = 0;
     var REGEXP_FLAGS = 4;
@@ -363,6 +366,7 @@
         }
         this.heap = heap;
         this.cells = cells;
+        this.externalBackingBytes = 0;
     }
 
     Records.Attributes = {WRITABLE: ATTR_WRITABLE,
@@ -385,7 +389,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 108;
+    Records.NativeInterpreterContractVersion = 109;
     Records.HeapSizePolicy = Heap.SizePolicy;
     Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
@@ -496,6 +500,7 @@
         BUFFER_BACKING_EXTERNAL_FLAG: Heap.BufferBackingPolicy.EXTERNAL,
         BUFFER_BACKING_POINTER: Heap.HEADER_SIZE + BUFFER_BACKING_POINTER,
         LARGE_BUFFER_BYTES: Heap.BufferBackingPolicy.LARGE_BYTES,
+        MAXIMUM_BUFFER_BYTES: Heap.BufferBackingPolicy.MAXIMUM_BYTES,
         PLATFORM_CALLOC_POINTER: Heap.HEADER_SIZE + PLATFORM_CALLOC_POINTER,
         INITIAL_ARRAY_CAPACITY: INITIAL_ARRAY_CAPACITY,
         MAX_VECTOR_LENGTH: MAX_VECTOR_LENGTH,
@@ -608,6 +613,10 @@
         CONTEXT_NEXT: Heap.HEADER_SIZE + CONTEXT_NEXT,
         HANDLER_NEXT: Heap.HEADER_SIZE + HANDLER_NEXT,
         ENGINE_RECORD_CURRENT_FRAME: Heap.HEADER_SIZE + ENGINE_CURRENT_FRAME,
+        ENGINE_RECORD_GC_ROOT: Heap.HEADER_SIZE + ENGINE_GC_ROOT,
+        ENGINE_RECORD_GC_CONTEXT_HEAD: Heap.HEADER_SIZE + ENGINE_GC_CONTEXT_HEAD,
+        ENGINE_RECORD_GC_NATIVE_FUNCTION_HEAD: Heap.HEADER_SIZE + ENGINE_GC_NATIVE_FUNCTION_HEAD,
+        ENGINE_RECORD_GC_ROOT_SLOT_HEAD: Heap.HEADER_SIZE + ENGINE_GC_ROOT_SLOT_HEAD,
         ROOT_SLOT_NEXT: Heap.HEADER_SIZE + ROOT_SLOT_NEXT,
         HEAP_LAST_RECORD_TYPE: Heap.LastRecordType,
         HEAP_TYPE_PROPERTY_INDEX: Heap.Types.PROPERTY_INDEX,
@@ -699,6 +708,9 @@
         ENGINE_FREE_BIN_BITMAP: ENGINE_FREE_BIN_BITMAP,
         ENGINE_FREE_BIN_HEADS: ENGINE_FREE_BIN_HEADS,
         ENGINE_RANDOM_STATE: ENGINE_RANDOM_STATE,
+        ENGINE_EXTERNAL_BUFFER_BYTES: ENGINE_EXTERNAL_BUFFER_BYTES,
+        ENGINE_EXTERNAL_BUFFER_THRESHOLD: ENGINE_EXTERNAL_BUFFER_THRESHOLD,
+        ENGINE_EXTERNAL_BUFFER_REQUEST: ENGINE_EXTERNAL_BUFFER_REQUEST,
         FREE_REGION_PREVIOUS: FREE_REGION_PREVIOUS,
         FREE_BIN_NEXT: FREE_BIN_NEXT,
         FREE_BIN_PREVIOUS: FREE_BIN_PREVIOUS,
@@ -1821,9 +1833,16 @@
         length = Number(length);
         var host = this.heap.memory.host;
         var external = host.isMMVM && length >= Heap.BufferBackingPolicy.LARGE_BYTES;
+        if (external) {
+            var provider = this.heap.recordAllocationProvider;
+            if (provider && provider.prepareExternalBufferAllocation) {
+                provider.prepareExternalBufferAllocation(length);
+            } else if (length > this.heap.maximumAllocationLimit - this.externalBackingBytes) {
+                throw new RangeError("external buffer budget exhausted");
+            }
+        }
         var address = this.heap.allocateRecordWords(Heap.Types.BUFFER_BACKING,
-            BUFFER_BACKING_DATA + length, 0, length, 0, 0,
-            external ? BUFFER_BACKING_DATA : undefined);
+            BUFFER_BACKING_DATA + (external ? 0 : length), 0, length, 0, 0);
         if (external) {
             var externalPointer = host.ffi.call(host.callocPointer, [length, 1]);
             if (!externalPointer) {
@@ -1832,6 +1851,7 @@
             }
             this.heap.setFlags(address, Heap.BufferBackingPolicy.EXTERNAL);
             this.setBufferBackingPointer(address, externalPointer);
+            this.adjustExternalBackingBytes(length);
             return address;
         }
         var pointer = this.heap.memory.nativeAddress(
@@ -1899,6 +1919,7 @@
 
     Records.prototype.releaseExternalBufferBacking = function (backing) {
         if (!this.bufferBackingIsExternal(backing)) return;
+        this.adjustExternalBackingBytes(-this.bufferBackingLength(backing));
         var pointer = this.bufferBackingPointer(backing);
         this.setBufferBackingPointer(backing, 0);
         this.heap.setFlags(backing, this.heap.flags(backing) & ~Heap.BufferBackingPolicy.EXTERNAL);
@@ -1906,7 +1927,16 @@
         host.ffi.call(host.freePointer, [pointer]);
     };
 
-    Records.prototype.suspendBufferPointersForSnapshot = function () {
+    Records.prototype.adjustExternalBackingBytes = function (change) {
+        var provider = this.heap.recordAllocationProvider;
+        if (provider && provider.stateAddress) {
+            var state = provider.stateAddress;
+            this.setEngineExternalBufferBytes(state,
+                this.engineExternalBufferBytes(state) + change);
+        } else this.externalBackingBytes += change;
+    };
+
+    Records.prototype.bufferBackingsForSnapshot = function () {
         var records = this;
         var saved = [];
         this.heap.visitRecords(function (address, type) {
@@ -1915,10 +1945,15 @@
                         pointer: records.bufferBackingPointer(address),
                         flags: records.heap.flags(address),
                         length: records.bufferBackingLength(address)});
-            records.setBufferBackingPointer(address, 0);
-            records.heap.setFlags(address, records.heap.flags(address) &
-                ~Heap.BufferBackingPolicy.EXTERNAL);
         });
+        return saved;
+    };
+
+    Records.prototype.suspendBufferPointersForSnapshot = function (saved) {
+        saved = saved || this.bufferBackingsForSnapshot();
+        for (var index = 0; index < saved.length; index++) {
+            this.setBufferBackingPointer(saved[index].address, 0);
+        }
         return saved;
     };
 
@@ -1931,35 +1966,46 @@
         }
     };
 
-    /* Canonical files always contain inline bytes and no external ownership.
-     * Copy into the private snapshot, never relocate a live backing whose
-     * address may have escaped through FFI. Region snapshots retain ownership
-     * in-process and restore content to the same allocation. */
-    Records.prototype.copyExternalBufferDataToSnapshot = function (snapshot, saved, regions) {
+    /* Payloads occupy an explicitly planned, aligned byte area, not a shadow
+     * reservation in the live heap. Canonical files place it before the heap;
+     * context snapshots place it after the copied record regions. */
+    Records.prototype.layoutExternalBufferSnapshot = function (saved, start) {
+        var cursor = start;
+        for (var index = 0; index < saved.length; index++) {
+            var backing = saved[index];
+            if (!(backing.flags & Heap.BufferBackingPolicy.EXTERNAL)) continue;
+            cursor = Heap.alignRecordBytes(cursor);
+            backing.snapshotOffset = cursor;
+            cursor += backing.length;
+            if (cursor > Heap.SizePolicy.MAXIMUM_MIB * Heap.SizePolicy.MIB) {
+                throw new RangeError("snapshot buffer payloads exceed 1 GiB");
+            }
+        }
+        return cursor;
+    };
+
+    Records.prototype.writeSnapshotBufferPointers = function (snapshot, saved) {
+        var host = this.heap.memory.host;
+        for (var index = 0; index < saved.length; index++) {
+            var backing = saved[index];
+            host.write32LE(snapshot, backing.address + Heap.HEADER_SIZE + BUFFER_BACKING_POINTER,
+                backing.flags & Heap.BufferBackingPolicy.EXTERNAL ? backing.snapshotOffset : 0);
+        }
+    };
+
+    Records.prototype.copyExternalBufferDataToSnapshot = function (snapshot, saved) {
         var host = this.heap.memory.host;
         if (!snapshot.isNative) return;
         var index = 0;
         while (index < saved.length) {
             var backing = saved[index++];
             if (!(backing.flags & Heap.BufferBackingPolicy.EXTERNAL)) continue;
-            var destination = backing.address;
-            if (regions) {
-                destination = -1;
-                for (var r = 0; r < regions.length; r++) {
-                    var region = regions[r];
-                    if (backing.address >= region.address && backing.address +
-                            Heap.HEADER_SIZE + BUFFER_BACKING_DATA + backing.length <=
-                            region.address + region.length) {
-                        destination = region.snapshotOffset + backing.address - region.address;
-                        break;
-                    }
-                }
-                if (destination < 0) continue;
+            if (backing.snapshotOffset === undefined || backing.snapshotOffset < 0 ||
+                    backing.snapshotOffset + backing.length > snapshot.length) {
+                throw new RangeError("external buffer snapshot payload is outside its allocation");
             }
-            var data = destination + Heap.HEADER_SIZE + BUFFER_BACKING_DATA;
-            host.ffi.call(host.memcpyPointer, [snapshot.pointer + data, backing.pointer, backing.length]);
-            var padding = (Heap.RECORD_ALIGNMENT - backing.length % Heap.RECORD_ALIGNMENT) % Heap.RECORD_ALIGNMENT;
-            if (padding) host.fillAllocationRange(snapshot, data + backing.length, padding, 0);
+            host.ffi.call(host.memcpyPointer, [snapshot.pointer + backing.snapshotOffset,
+                backing.pointer, backing.length]);
         }
     };
 
@@ -1980,12 +2026,12 @@
         return result;
     };
 
-    Records.prototype.restoreExternalBufferSnapshotContents = function (saved) {
+    Records.prototype.restoreExternalBufferSnapshotContents = function (saved, snapshot) {
         var host = this.heap.memory.host;
         for (var index = 0; index < saved.length; index++) {
             var backing = saved[index];
             host.ffi.call(host.memcpyPointer, [backing.pointer,
-                this.heap.memory.nativeAddress(this.bufferBackingDataAddress(backing.address)), backing.length]);
+                snapshot.pointer + backing.snapshotOffset, backing.length]);
         }
     };
 
@@ -2809,6 +2855,19 @@
         return this.heap.readTrustedFieldU32(state, ENGINE_RANDOM_STATE, Heap.Types.ENGINE_STATE);
     };
 
+    Records.prototype.engineExternalBufferBytes = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_EXTERNAL_BUFFER_BYTES, Heap.Types.ENGINE_STATE);
+    };
+    Records.prototype.setEngineExternalBufferBytes = function (state, value) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_EXTERNAL_BUFFER_BYTES, value, Heap.Types.ENGINE_STATE);
+    };
+    Records.prototype.engineExternalBufferThreshold = function (state) {
+        return this.heap.readTrustedFieldU32(state, ENGINE_EXTERNAL_BUFFER_THRESHOLD, Heap.Types.ENGINE_STATE);
+    };
+    Records.prototype.setEngineExternalBufferThreshold = function (state, value) {
+        this.heap.writeTrustedFieldU32(state, ENGINE_EXTERNAL_BUFFER_THRESHOLD, value, Heap.Types.ENGINE_STATE);
+    };
+
     Records.prototype.setEngineRandomState = function (state, value) {
         this.heap.writeTrustedFieldU32(state, ENGINE_RANDOM_STATE, value, Heap.Types.ENGINE_STATE);
     };
@@ -3615,6 +3674,10 @@
         } else if (type === Heap.Types.ENGINE_STATE) {
             reference(records.engineCurrentFrame(address));
             reference(records.enginePlatformServices(address));
+            reference(records.engineGCRoot(address));
+            reference(records.engineGCContextHead(address));
+            reference(records.engineGCNativeFunctionHead(address));
+            reference(records.engineGCRootSlotHead(address));
         }
     };
 

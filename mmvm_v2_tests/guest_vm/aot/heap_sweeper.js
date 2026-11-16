@@ -379,6 +379,10 @@
                         target = engineRecordPlatformServices(
                             heapBase, address);
                     }
+                    else if (referenceIndex === 2) target = engineRecordGCRoot(heapBase, address);
+                    else if (referenceIndex === 3) target = engineRecordGCContextHead(heapBase, address);
+                    else if (referenceIndex === 4) target = engineRecordGCNativeFunctionHead(heapBase, address);
+                    else if (referenceIndex === 5) target = engineRecordGCRootSlotHead(heapBase, address);
                     else referenceIndex = -2;
                 } else referenceIndex = -2;
                 if (cellAddress !== 0) {

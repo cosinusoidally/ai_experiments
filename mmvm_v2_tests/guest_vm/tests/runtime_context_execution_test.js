@@ -291,28 +291,39 @@
             "remaining_context_snapshot.js");
         firstRuntime.runtime.destroyHeapStateSnapshot(savedContextB.heapState);
 
-        /* A portable file image uses canonical inline bytes, without moving
-         * or changing ownership of the live backing. Check the same conversion
-         * used by standalone snapshot output, including an odd byte length. */
+        /* Canonical images carry payloads outside compact descriptors and
+         * contain image-relative offsets, never live process pointers. */
         var records = firstRuntime.runtime.heapRecords;
         var heap = firstRuntime.runtime.linearHeap, memory = heap.memory;
         var savedBytes = firstRuntime.runtime.getGlobal(firstContext, "snapshotBytes");
         var backing = firstRuntime.runtime.bufferSupport.viewBacking(savedBytes);
         var livePointer = records.bufferBackingPointer(backing);
         var savedPointers = records.suspendBufferPointersForSnapshot();
+        var snapshotLength = records.layoutExternalBufferSnapshot(savedPointers, heap.bump);
         var image = null;
         try {
-            image = memory.createSnapshot(heap.bump);
+            image = memory.host.allocate(snapshotLength, false);
+            memory.host.copyAllocationRange(image, 0, memory.allocation, 0, heap.bump);
+            records.writeSnapshotBufferPointers(image, savedPointers);
             records.copyExternalBufferDataToSnapshot(image, savedPointers);
             var dataAddress = records.bufferBackingDataAddress(backing);
+            var external = 0, snapshotPointer = 0;
+            for (var savedIndex = 0; savedIndex < savedPointers.length; savedIndex++) {
+                if (savedPointers[savedIndex].address === backing &&
+                        (savedPointers[savedIndex].flags & heap.constructor.BufferBackingPolicy.EXTERNAL)) {
+                    dataAddress = savedPointers[savedIndex].snapshotOffset;
+                    snapshotPointer = dataAddress;
+                    external = heap.constructor.BufferBackingPolicy.EXTERNAL;
+                }
+            }
             assert(memory.host.read8(image, dataAddress) === 19 &&
                    memory.host.read8(image, dataAddress + 1024 * 1024 + 2) === 37 &&
-                   memory.host.read8(image, dataAddress + 1024 * 1024 + 3) === 0,
+                   memory.host.read8(image, dataAddress + 1) === 0,
                    "portable snapshot lost large backing contents");
-            assert(memory.host.read32LE(image, backing + heap.constructor.HeaderFields.FLAGS) === 0,
-                   "portable snapshot retained external ownership");
+            assert(memory.host.read32LE(image, backing + heap.constructor.HeaderFields.FLAGS) === external,
+                   "portable snapshot lost backing representation");
             assert(memory.host.read32LE(image, backing +
-                records.standaloneBufferRebindLayout().bufferPointer) === 0,
+                records.standaloneBufferRebindLayout().bufferPointer) === snapshotPointer,
                 "portable snapshot retained a process-local buffer pointer");
         } finally {
             records.restoreBufferPointersAfterSnapshot(savedPointers);

@@ -299,22 +299,42 @@ subarray/slice view keeps its backing alive; a copy owns another backing.
 Element count is not byte length for multi-byte kinds.
 
 Small backing bytes are inline. On native hosts, backings at least 1 MiB
-use a separately `calloc`-allocated block while retaining a logical heap
-reservation for accounting/layout. GC frees the external block exactly when
-its backing dies. Raw pointers are not owning roots. Native heap growth is
+use a separately `calloc`-allocated block owned by a 32-byte heap descriptor
+(header included). There is no payload-sized shadow reservation. GC frees
+the external block exactly when its backing dies. Raw pointers are not owning
+roots. Native heap growth is
 nonmoving; teardown still invalidates all pointers. Node emulates bytes
 through the same accessor contract rather than executing libc.
 
-Snapshot writing temporarily removes process pointers and copies backing
-contents into the image representation. Bootstrap rebinds them for the new
-allocation. This is why serializing a host pointer or treating a view's
-address as its data pointer is incorrect.
+Native engine state tracks external bytes, an adaptive collection threshold
+and a pending allocation request. A large allocation can request collection
+before allocating even when its descriptor fits. The post-sweep record walk
+recounts surviving external payloads and grants proportional headroom, with
+the pending request included. The current external-byte budget is bounded by
+the configured heap maximum, independently of the linear-heap bound; neither
+bound is a hard process-RSS limit. Portable native-host construction uses the
+same engine counter when an engine owns allocation, and a portable adapter
+counter otherwise. Node's non-native backend retains inline emulated storage.
+
+Canonical snapshot payloads occupy an aligned byte area between machine code
+and the heap image. External descriptors retain their ownership flag but their
+serialized pointer contains an image-relative payload offset, never a process
+address. Kernel startup allocates/copies the payloads and installs live
+pointers; inline pointers are rebound to the new heap base. On allocation
+failure, startup frees payloads it has already reconstructed. The file image
+is not modified. In-process context snapshots append external payload copies
+after record regions and restore directly to the existing owned allocations.
+They do not dirty an unused inline shadow span. See
+[runtime memory reduction](MEMORY_REDUCTION.md).
 
 ## Engine and platform records
 
 `ENGINE_STATE` holds current frame, exit/result/instruction fields, scratch
 cells, allocator regions and bins, pointer-free property-slot hints, collector root heads,
-workspace bounds and diagnostics. `PLATFORM_SERVICES` carries native service
+workspace bounds, external-buffer pressure and diagnostics. Its root/global,
+context, callback and persistent-root chains are traced edges in both the
+portable reference walk and kernel collector, not just roots supplied at a
+particular collector entry point. `PLATFORM_SERVICES` carries native service
 pointers and arithmetic/FFI support. These are not public JS objects. Named
 accessors and layout exports connect portable code, kernel code, collector
 and snapshot bootstrap. Changing an edge or layout requires updating all

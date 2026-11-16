@@ -89,6 +89,10 @@
     }
 
     function configureStartupHeapKernel(heapBase, state, maximum) {
+        if (engineExternalBufferBytes(heapBase, state) > maximum) return 0;
+        if (engineExternalBufferThreshold(heapBase, state) > maximum) {
+            setEngineExternalBufferThreshold(heapBase, state, maximum);
+        }
         /* A smaller live maximum must also cap the image's initial pressure
          * limits; otherwise an allocation could cross the new mapping before
          * it ever reaches the logical-growth path. */
@@ -101,6 +105,41 @@
         setEngineNativeMaximumLimit(heapBase, state, maximum);
         setEngineGCStackBase(heapBase, state, maximum);
         setEngineGCStackLimit(heapBase, state, startupHeapCapacityKernel(maximum));
+        return 1;
+    }
+
+    /* Serialized external pointers are image-relative payload offsets. Rebind
+     * them without changing either file bytes or live record addresses. */
+    function rebindStartupBuffersKernel(heapBase, imageBase, heapLength,
+                                        services, memcpyPointer) {
+        var address = RecordLayout.HEAP_FIRST_RECORD;
+        var callocPointer = platformCallocPointer(heapBase, services);
+        var freePointer = platformFreePointer(heapBase, services);
+        while (address < heapLength) {
+            if (recordType(heapBase, address) === RecordLayout.HEAP_TYPE_BUFFER_BACKING) {
+                var pointer = heapBase + address + RecordLayout.BUFFER_BACKING_DATA;
+                if ((recordFlags(heapBase, address) & RecordLayout.BUFFER_BACKING_EXTERNAL_FLAG) !== 0) {
+                    var length = bufferBackingLength(heapBase, address);
+                    pointer = callNativeI32(callocPointer, length, 1);
+                    if (pointer === 0) {
+                        var previous = RecordLayout.HEAP_FIRST_RECORD;
+                        while (previous < address) {
+                            if (recordType(heapBase, previous) === RecordLayout.HEAP_TYPE_BUFFER_BACKING) {
+                                if ((recordFlags(heapBase, previous) & RecordLayout.BUFFER_BACKING_EXTERNAL_FLAG) !== 0) {
+                                    var freed = callNativeI32(freePointer, bufferBackingPointer(heapBase, previous));
+                                }
+                            }
+                            previous = previous + recordSize(heapBase, previous);
+                        }
+                        return 0;
+                    }
+                    var copied = callNativeI32(memcpyPointer, pointer,
+                        imageBase + bufferBackingPointer(heapBase, address), length);
+                }
+                setBufferBackingPointer(heapBase, address, pointer);
+            }
+            address = address + recordSize(heapBase, address);
+        }
         return 1;
     }
 
@@ -8936,10 +8975,42 @@
         return 0;
     }
 
-    /* Keep the complete logical reservation so byte budgets, record walks and
-     * canonical snapshots do not depend on the allocation strategy. Large
-     * native backings use calloc without dirtying their reserved inline bytes.
-     * All fallible work precedes publication of either backing or view. */
+    function bufferBackingRecordBytesKernel(heapBase, state, byteLength) {
+        if (heapBase !== 0 && byteLength >= RecordLayout.LARGE_BUFFER_BYTES) {
+            var services = enginePlatformServices(heapBase, state);
+            if (platformCallocPointer(heapBase, services) !== 0 &&
+                    platformFreePointer(heapBase, services) !== 0) return BUFFER_BACKING_DATA;
+        }
+        return (BUFFER_BACKING_DATA + byteLength + RecordLayout.RECORD_ALIGNMENT_MASK) &
+            ~RecordLayout.RECORD_ALIGNMENT_MASK;
+    }
+
+    function reserveExternalBufferKernel(heapBase, state, byteLength) {
+        var used = engineExternalBufferBytes(heapBase, state);
+        var threshold = engineExternalBufferThreshold(heapBase, state);
+        if (byteLength > threshold - used) {
+            setEngineExternalBufferRequest(heapBase, state, byteLength);
+            setEngineAllocationFailed(heapBase, state, 1);
+            return 0;
+        }
+        return 1;
+    }
+
+    function refreshExternalBufferThresholdKernel(heapBase, state) {
+        var used = engineExternalBufferBytes(heapBase, state);
+        var maximum = engineNativeMaximumLimit(heapBase, state);
+        var headroom = used >> 1;
+        if (headroom < RecordLayout.LARGE_BUFFER_BYTES) headroom = RecordLayout.LARGE_BUFFER_BYTES;
+        if (headroom < engineExternalBufferRequest(heapBase, state)) {
+            headroom = engineExternalBufferRequest(heapBase, state);
+        }
+        var threshold = maximum;
+        if (headroom < maximum - used) threshold = used + headroom;
+        setEngineExternalBufferThreshold(heapBase, state, threshold);
+        return threshold;
+    }
+
+    /* All fallible work precedes publication of either backing or view. */
     function initializeBufferBackingKernel(heapBase, state, backing,
                                            backingBytes, byteLength) {
         var external = 0;
@@ -8948,12 +9019,16 @@
             var services = enginePlatformServices(heapBase, state);
             var callocPointer = platformCallocPointer(heapBase, services);
             if (callocPointer !== 0 && platformFreePointer(heapBase, services) !== 0) {
+                if (reserveExternalBufferKernel(heapBase, state, byteLength) === 0) return 0;
                 pointer = callNativeI32(callocPointer, byteLength, 1);
                 if (pointer === 0) {
                     setEngineAllocationFailed(heapBase, state, 1);
                     return 0;
                 }
                 external = RecordLayout.BUFFER_BACKING_EXTERNAL_FLAG;
+                setEngineExternalBufferBytes(heapBase, state,
+                    engineExternalBufferBytes(heapBase, state) + byteLength);
+                setEngineExternalBufferRequest(heapBase, state, 0);
             }
         }
         var clearBytes = backingBytes;
@@ -8979,9 +9054,9 @@
     function allocateArrayBufferKernel(heapBase, state, targetCell,
                                        byteLength, prototype) {
         if (byteLength < 0) return 0;
-        if (byteLength > 1073741823) return 0;
-        var backingBytes = (BUFFER_BACKING_DATA + byteLength + 7) & -8;
-        if (backingBytes < byteLength) return 0;
+        if (byteLength > RecordLayout.MAXIMUM_BUFFER_BYTES) return 0;
+        var backingBytes = bufferBackingRecordBytesKernel(heapBase, state, byteLength);
+        if (backingBytes < BUFFER_BACKING_DATA) return 0;
         var allocationBytes = backingBytes + BUFFER_VIEW_RECORD_BYTES;
         if (allocationBytes < backingBytes) return 0;
         if (reserveNativeAllocationKernel(
@@ -9378,9 +9453,9 @@
 
     function allocateBufferKernel(heapBase, state, intrinsicTarget,
                                   bufferAllocSize, stringSupport) {
+        if (bufferAllocSize < 0 || bufferAllocSize > RecordLayout.MAXIMUM_BUFFER_BYTES) return 0;
         var bufferAllocValid = 1;
-        var bufferBackingBytes =
-            (BUFFER_BACKING_DATA + bufferAllocSize + 7) & -8;
+        var bufferBackingBytes = bufferBackingRecordBytesKernel(heapBase, state, bufferAllocSize);
         var bufferAllocationBytes = bufferBackingBytes +
             BUFFER_VIEW_RECORD_BYTES;
         if (bufferAllocValid === 1) {
@@ -14612,9 +14687,11 @@
         setEngineNativeFreeRegion(heapBase, state, 0);
         var tailBump = heapBump;
         var liveBytes = 0;
+        var externalBytes = 0;
         while (address < heapBump) {
             var size = recordSize(heapBase, address);
-            if (recordType(heapBase, address) === RecordLayout.HEAP_TYPE_FREE) {
+            var type = recordType(heapBase, address);
+            if (type === RecordLayout.HEAP_TYPE_FREE) {
                 if (recordFlags(heapBase, address) === 0) {
                     if (address + size === heapBump) {
                         tailBump = address;
@@ -14624,10 +14701,17 @@
                 }
             } else {
                 liveBytes = liveBytes + size;
+                if (type === RecordLayout.HEAP_TYPE_BUFFER_BACKING) {
+                    if ((recordFlags(heapBase, address) & RecordLayout.BUFFER_BACKING_EXTERNAL_FLAG) !== 0) {
+                        externalBytes = externalBytes + bufferBackingLength(heapBase, address);
+                    }
+                }
             }
             address = address + size;
         }
         setEngineNativeRegionEnd(heapBase, state, 0);
+        setEngineExternalBufferBytes(heapBase, state, externalBytes);
+        var externalThreshold = refreshExternalBufferThresholdKernel(heapBase, state);
         setEngineNativeTailBump(heapBase, state, tailBump);
         setEngineNativeRegionActive(heapBase, state, 0);
         setEngineNativeRetiredRegion(heapBase, state, 0);
@@ -14827,8 +14911,10 @@
                     var maximumTailLimit = engineNativeMaximumLimit(
                         heapBase, state);
                     shouldCollect = 0;
-                    if (currentTailLimit >= maximumTailLimit &&
-                            engineLargeReserveReleased(heapBase, state) !== 0) {
+                    var externalExhausted = engineExternalBufferRequest(heapBase, state) >
+                        maximumTailLimit - engineExternalBufferBytes(heapBase, state);
+                    if (externalExhausted || (currentTailLimit >= maximumTailLimit &&
+                            engineLargeReserveReleased(heapBase, state) !== 0)) {
                         collectionCanResume = 0;
                     } else {
                         if (currentTailLimit >= maximumTailLimit) {
@@ -18521,6 +18607,10 @@
             startupHeapMaximumKernel: startupHeapMaximumKernel,
             startupHeapCapacityKernel: startupHeapCapacityKernel,
             configureStartupHeapKernel: configureStartupHeapKernel,
+            rebindStartupBuffersKernel: rebindStartupBuffersKernel,
+            bufferBackingRecordBytesKernel: bufferBackingRecordBytesKernel,
+            reserveExternalBufferKernel: reserveExternalBufferKernel,
+            refreshExternalBufferThresholdKernel: refreshExternalBufferThresholdKernel,
             relativeIndexKernel: relativeIndexKernel,
             grownArrayCapacityKernel: HeapRecords.grownArrayCapacity,
             argumentRegisterTailKernel: argumentRegisterTailKernel,
@@ -18862,7 +18952,8 @@
             }
             var compilerOptions = {
                 additionalEntries: ["reportGuestStackKernel", "startupHeapMaximumKernel",
-                    "startupHeapCapacityKernel", "configureStartupHeapKernel"],
+                    "startupHeapCapacityKernel", "configureStartupHeapKernel",
+                    "rebindStartupBuffersKernel"],
                 optimization: runtime.kernelOptimization,
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
@@ -18980,6 +19071,8 @@
         this.freeIndexRebuildCount = 0;
         this.freeIndexRebuildElapsedMs = 0;
         this.stateAddress = runtime.heapRecords.allocateEngineState();
+        runtime.heapRecords.setEngineExternalBufferBytes(this.stateAddress,
+            runtime.heapRecords.externalBackingBytes);
         this.statePayload = runtime.heapRecords.engineStatePayloadAddress(
             this.stateAddress);
         runtime.heapRecords.setEngineGCRoot(
@@ -19633,6 +19726,20 @@
     /* Transfer every reusable span back to the portable allocator. With a
      * pending collection, discard derived indexes and rebuild only after
      * sweep; otherwise restore a certified index or reconstruct it. */
+    NativeInterpreter.prototype.prepareExternalBufferAllocation = function (length) {
+        var records = this.runtime.heapRecords, state = this.stateAddress;
+        var used = records.engineExternalBufferBytes(state);
+        var maximum = this.runtime.linearHeap.maximumAllocationLimit;
+        if (length > records.engineExternalBufferThreshold(state) - used) {
+            this.runtime.collect();
+            used = records.engineExternalBufferBytes(state);
+            if (length > maximum - used) throw new RangeError("external buffer budget exhausted");
+            var headroom = Math.max(length, LARGE_BUFFER_BYTES, Math.floor(used / 2));
+            records.setEngineExternalBufferThreshold(state,
+                headroom > maximum - used ? maximum : used + headroom);
+        }
+    };
+
     NativeInterpreter.prototype.releaseAllocatorOwnership =
             function (deferIndexRebuild) {
         var records = this.runtime.heapRecords;

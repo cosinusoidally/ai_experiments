@@ -2408,10 +2408,13 @@
             }
         }
         var externalBackings = this.heapRecords.externalBufferBackings(addresses);
-        var snapshotMemory = this.linearHeap.memory.createRegionSnapshot(regions);
+        var regionBytes = 0;
+        for (index = 0; index < regions.length; index++) regionBytes += regions[index].length;
+        var snapshotBytes = this.heapRecords.layoutExternalBufferSnapshot(externalBackings, regionBytes);
+        var snapshotMemory = this.linearHeap.memory.createRegionSnapshot(regions, snapshotBytes - regionBytes);
         try {
             this.heapRecords.copyExternalBufferDataToSnapshot(snapshotMemory,
-                externalBackings, regions);
+                externalBackings);
         } catch (error) {
             this.linearHeap.memory.destroySnapshot(snapshotMemory);
             throw error;
@@ -2437,7 +2440,7 @@
         }
         this.linearHeap.memory.restoreRegionSnapshot(
             snapshot.memory, snapshot.regions);
-        this.heapRecords.restoreExternalBufferSnapshotContents(snapshot.externalBackings);
+        this.heapRecords.restoreExternalBufferSnapshotContents(snapshot.externalBackings, snapshot.memory);
         /* Storage epochs and GC marks have rolled back. They cannot guard
          * weak views captured on the abandoned execution timeline. This also
          * covers handles first adopted after the snapshot was created. */

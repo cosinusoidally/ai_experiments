@@ -319,8 +319,8 @@
         this.host.free(snapshot);
     };
 
-    LinearMemory.prototype.createRegionSnapshot = function (regions) {
-        var total = 0;
+    LinearMemory.prototype.createRegionSnapshot = function (regions, extraBytes) {
+        var total = extraBytes || 0;
         var index = 0;
         while (index < regions.length) total += regions[index++].length;
         var allocation = this.host.allocate(total, false);

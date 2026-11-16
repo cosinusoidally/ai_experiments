@@ -94,10 +94,11 @@
     }
 
     Heap.Types = Types;
+    Heap.alignRecordBytes = align8;
     Heap.SizePolicy = SizePolicy;
-    /* Large native byte backings keep their logical heap reservation for
-     * accounting/snapshot layout, but own separately calloc'ed data. */
-    Heap.BufferBackingPolicy = {EXTERNAL: 1, LARGE_BYTES: 1048576};
+    /* Large native byte backings are compact descriptors owning calloc data. */
+    Heap.BufferBackingPolicy = {EXTERNAL: 1, LARGE_BYTES: SizePolicy.MIB,
+        MAXIMUM_BYTES: SizePolicy.MAXIMUM_MIB * SizePolicy.MIB - 1};
     /* Minimum useful allocation headroom after a complete collection. Both
      * embedding and standalone collectors use the same policy constant. */
     Heap.GCPolicy = {MINIMUM_HEADROOM_BYTES: 1024 * 1024};
@@ -141,7 +142,7 @@
     };
 
     Heap.prototype.allocateRecordWords = function (
-            type, payloadBytes, word0, word1, word2, word3, externalBufferMetadataBytes) {
+            type, payloadBytes, word0, word1, word2, word3) {
         if (!Types || type <= Types.FREE || type > Heap.LastRecordType) {
             throw new TypeError("invalid heap record type");
         }
@@ -149,21 +150,13 @@
         if (payloadBytes < 0 || payloadBytes !== Math.floor(payloadBytes)) {
             throw new RangeError("invalid heap record payload size");
         }
-        if (externalBufferMetadataBytes !== undefined &&
-                (type !== Types.BUFFER_BACKING ||
-                 externalBufferMetadataBytes < 4 * WORD_BYTES ||
-                 externalBufferMetadataBytes > payloadBytes ||
-                 externalBufferMetadataBytes !== Math.floor(externalBufferMetadataBytes))) {
-            throw new RangeError("invalid external backing metadata size");
-        }
         var size = align8(HEADER_SIZE + payloadBytes);
         var candidates = this.freeBlocks.length ? 1 : 0;
         var provider = this.recordAllocationProvider;
         /* Initial words with observable coercions retain the general path.
          * Ordinary typed constructors can reserve, clear and initialize in
-         * one allocator-owned transaction. External byte backings must not
-         * clear their separately owned logical data span here. */
-        if (externalBufferMetadataBytes === undefined && typeof type === "number" && provider &&
+         * one allocator-owned transaction. */
+        if (typeof type === "number" && provider &&
                 provider.allocateRecordWords && size <= this.maximumAllocationLimit &&
                 (typeof word0 === "number" || word0 === undefined) &&
                 (typeof word1 === "number" || word1 === undefined) &&
@@ -207,13 +200,7 @@
         /* A collection may lower the bump pointer over a dead tail, so even a
          * bump allocation can cover previously used bytes. Clear every host
          * allocation before publishing its header. */
-        /* A byte backing may reserve its complete logical span while owning
-         * its data separately. Only its header/metadata are inline then. */
-        var initializedBytes = size;
-        if (externalBufferMetadataBytes !== undefined) {
-            initializedBytes = HEADER_SIZE + externalBufferMetadataBytes;
-        }
-        this.memory.fill(address, initializedBytes, 0);
+        this.memory.fill(address, size, 0);
         if (this.recordInitializer && size >= HEADER_SIZE + 16) {
             this.recordInitializer.initialize(address, type, size,
                 word0, word1, word2, word3);

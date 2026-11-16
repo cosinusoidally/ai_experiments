@@ -599,7 +599,7 @@
             layout.entryOffset + assembler.labels.standalone_image_anchor);
         assembler.movLocalEax(IMAGE_BASE_LOCAL);
 
-        assembler.movEaxImmediate(layout.heapImageLength);
+        assembler.movEaxImmediate(layout.heapRequired);
         assembler.pushEax();
         assembler.movEaxImmediate(layout.heapMaximum);
         assembler.pushEax();
@@ -662,42 +662,8 @@
         imageAddress(layout.codeOffset + layout.configureStartupHeapOffset);
         assembler.callEax();
         discardCallWords(3);
-
-        /* Buffer records contain process-local data pointers for fast FFI.
-         * They are zero in the file image and reconstructed from the newly
-         * mapped heap base before any guest instruction can observe them. */
-        var bufferRebind = layout.bufferRebind;
-        assembler.movEaxLocal(HEAP_BASE_LOCAL);
-        assembler.movEsiEax();
-        assembler.movEaxImmediate(bufferRebind.firstRecord);
-        assembler.movEbxEax();
-        assembler.label("standalone_rebind_buffer_loop");
-        assembler.movEaxEbx();
-        assembler.compareEaxImmediate(layout.heapImageLength);
-        assembler.jumpGreaterOrEqual("standalone_rebind_buffer_done");
-        assembler.movEaxEbx();
-        assembler.movEaxDwordPtrRegisterPlusEax(
-            "esi", bufferRebind.recordType);
-        assembler.compareEaxImmediate(bufferRebind.bufferBackingType);
-        assembler.jumpNotEqual("standalone_rebind_buffer_next");
-        assembler.movEaxEbx();
-        assembler.addEaxEsi();
-        assembler.addEaxImmediate(bufferRebind.bufferPointer);
-        assembler.movEcxEax();
-        assembler.movEaxEbx();
-        assembler.addEaxEsi();
-        assembler.addEaxImmediate(bufferRebind.bufferData);
-        assembler.movDwordPtrEcxEax();
-        assembler.label("standalone_rebind_buffer_next");
-        assembler.movEaxEbx();
-        assembler.movEaxDwordPtrRegisterPlusEax(
-            "esi", bufferRebind.recordSize);
-        assembler.movEcxEax();
-        assembler.movEaxEbx();
-        assembler.addEaxEcx();
-        assembler.movEbxEax();
-        assembler.jump("standalone_rebind_buffer_loop");
-        assembler.label("standalone_rebind_buffer_done");
+        assembler.testEaxEax();
+        assembler.jumpEqual("standalone_heap_option_error");
 
         /* Rebind the one capability supplied by the loader.  This is a named
          * guest-heap field chosen by HeapRecords, not an open-coded layout. */
@@ -716,6 +682,23 @@
             storeBindingPayload(nativeBinding.payload,
                                 nativeBinding.suppliedDlsym);
         }
+
+        resolveSymbol(layout.memcpyNameOffset);
+        assembler.movEaxLocal(SYMBOL_POINTER_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.platformServicesAddress);
+        assembler.pushEax();
+        assembler.movEaxImmediate(layout.heapImageLength);
+        assembler.pushEax();
+        assembler.movEaxLocal(IMAGE_BASE_LOCAL);
+        assembler.pushEax();
+        assembler.movEaxLocal(HEAP_BASE_LOCAL);
+        assembler.pushEax();
+        imageAddress(layout.codeOffset + layout.rebindStartupBuffersOffset);
+        assembler.callEax();
+        discardCallWords(5);
+        assembler.testEaxEax();
+        assembler.jumpEqual("standalone_runtime_error");
 
         function storeRuntimeArgument(payloadAddress, argumentIndex) {
             assembler.movEaxLocal(HEAP_BASE_LOCAL);
@@ -897,7 +880,7 @@
         var stackUnknownBytes = standaloneStringBytes("<bootstrap>");
         var heapOptionErrorBytes = standaloneStringBytes(
             "--vm-max-heap-mib requires an integer from 64 to 1024 " +
-            "and enough space for the initialized snapshot heap\n");
+            "and enough space for the initialized heap and external buffers\n");
         var unsupportedFormatBytes = standaloneStringBytes(
             "guest VM unsupported opcode %d at bytecode pc %d " +
             "(detail %d, allocation %d; GC %u, live %u, " +
@@ -918,9 +901,11 @@
             heapCapacity: 0,
             heapOptionErrorOffset: 0,
             heapMaximum: heap.maximumAllocationLimit,
+            heapRequired: 0,
             startupHeapMaximumOffset: result.symbols.kernel_function_startupHeapMaximumKernel,
             startupHeapCapacityOffset: result.symbols.kernel_function_startupHeapCapacityKernel,
             configureStartupHeapOffset: result.symbols.kernel_function_configureStartupHeapKernel,
+            rebindStartupBuffersOffset: result.symbols.kernel_function_rebindStartupBuffersKernel,
             heapImageLength: 0,
             nativeBindings: runtime.standaloneNativeBindings(frame.context),
             argumentCells: expectedProgramPath === null ?
@@ -990,9 +975,13 @@
         }
         var heapImageLength = heap.bump;
         var heapCapacity = heap.memory.byteLength;
-        layout.heapOffset = alignStandalone(layout.codeOffset + result.length,
-                                            4096);
+        var savedBufferPointers = records.bufferBackingsForSnapshot();
+        var payloadEnd = records.layoutExternalBufferSnapshot(savedBufferPointers,
+            layout.codeOffset + result.length);
+        layout.heapOffset = alignStandalone(payloadEnd, 4096);
         layout.heapImageLength = heapImageLength;
+        layout.heapRequired = Math.max(heapImageLength,
+            records.engineExternalBufferBytes(nativeInterpreter.stateAddress));
         layout.heapCapacity = heapCapacity;
         var fileLength = layout.heapOffset + heapImageLength;
         layout.fileLength = fileLength;
@@ -1039,8 +1028,7 @@
         var savedPlatformPointers =
             records.suspendPlatformPointersForSnapshot(
                 nativeInterpreter.platformServicesAddress);
-        var savedBufferPointers =
-            records.suspendBufferPointersForSnapshot();
+        records.suspendBufferPointersForSnapshot(savedBufferPointers);
         var savedNativeBindingValues = [];
         bindingIndex = 0;
         while (bindingIndex < layout.nativeBindings.length) {
@@ -1057,7 +1045,7 @@
         var heapImage = null;
         try {
             heapImage = heap.memory.createSnapshot(heapImageLength);
-            records.copyExternalBufferDataToSnapshot(heapImage, savedBufferPointers);
+            records.writeSnapshotBufferPointers(heapImage, savedBufferPointers);
         } finally {
             bindingIndex = 0;
             while (bindingIndex < layout.nativeBindings.length) {
@@ -1133,6 +1121,7 @@
                 bindingIndex++;
             }
             output.copyCode(layout.codeOffset, result);
+            records.copyExternalBufferDataToSnapshot(output.allocation, savedBufferPointers);
             if (debugBytes) {
                 var debugOutput = new SnapshotOutput(heap.memory, debugBytes.length);
                 try {

@@ -24,8 +24,8 @@ object SHA-256 is
 `080182b567eabf208f60fcba6182d9c7a11c5f2421398dec530bc9dded852004`,
 matching the reference stage-01 object. The pre-test final native-bootstrap
 object was preserved and restored after this check. No mishmashvm source was
-modified. This establishes the override's usefulness, not a memory saving;
-the default-cap failure and the backing-representation problem remain.
+modified. This established the override's usefulness, not a memory saving;
+the descriptor cutover below subsequently fixes the default-cap failure.
 
 Historical whole-bootstrap measurements, before the recent compact source-map
 change: SpiderMonkey 79,616 KiB RSS, guest 558,340 KiB. These are not fresh
@@ -61,27 +61,40 @@ also consume memory. Startup changes only the anonymous runtime heap, never
 the snapshot file or embedded executable image. The outer runtime selection
 does not change the builder's explicit/default target options.
 
-## Next: external buffer descriptors
+## Implemented: external buffer descriptors (contract 109)
 
-Large native backings currently own a calloc payload but also reserve a full
-payload-sized linear-heap record. Only the inline metadata is initialized;
-therefore this is not necessarily two resident copies. It does nevertheless
-consume contiguous heap space and force the allocator high-water mark upward.
+Large native backings now use a 32-byte GC-managed descriptor instead of a
+payload-sized linear-heap reservation. The stable calloc payload remains owned
+by that backing and shared by all views. Native engine fields track external
+bytes, collection headroom and a pending request. Crossing the threshold yields
+to the existing collector before allocation; post-sweep indexing recounts live
+payloads and grants enough headroom for the request. External bytes are bounded
+by the selected maximum independently of the linear heap. This is not a hard
+bound on combined process RSS.
 
-Replace the shadow reservation with a small GC-managed descriptor and an
-external, stable-address payload. Keep ownership with the backing, shared by
-all views; free only when the backing becomes unreachable. Track external
-bytes explicitly for allocation/collection pressure rather than pretending
-that a descriptor represents the whole managed working set.
+Canonical serialization copies payloads into an aligned area before the heap
+template and stores image-relative offsets in external descriptors. Kernel JS
+startup reconstructs them after binding libc services. Context snapshots append
+payloads after record regions and restore directly to the same native pointer.
+Neither form relocates live backings or writes payloads into a shadow span.
+The normal loader, application sources and libc interfaces are unchanged.
 
-This cutover must include canonical snapshot and in-process region snapshot
-handling. Current canonical serialization copies external bytes into the
-reserved inline span. Removing that span without replacing serialization
-would corrupt snapshots. Define an inspectable, deterministic payload layout
-and rebuild native pointers at load; never serialize live native addresses.
-Do not merely shrink the record in the allocator.
+The live-buffer snapshot test also exposed an omitted GC ownership edge:
+embedding collection could reclaim persistent-root chain nodes still owned by
+the native engine. Both reference and kernel graph visitors now trace engine
+global/context/callback/persistent-root heads. The fixture reloads and survives
+49 forced collections with its bytes and slice aliasing intact; a heap graph
+audit also passes. No collection was disabled to avoid the failure.
 
-Then profile frontend working storage and phase lifetimes. Prioritize retained
+Initial default-cap stage-01 result: **91.91 s / 476,680 KiB peak RSS**, down
+from the same-image runtime-override baseline of **99.97 s / 635,196 KiB**.
+That is approximately 25% less peak RSS, with the reference compiler-object
+hash preserved. Unlike the baseline, this succeeds at the ordinary 512-MiB
+maximum without a runtime override. Full-bootstrap acceptance is separate.
+
+## Remaining investigation
+
+Profile frontend working storage and phase lifetimes. Prioritize retained
 temporary data and oversized integer metadata/capacity, preserving function
 source, locations and build speed. Use the existing read-only process memory
 profiler to distinguish resident free pages, live records, external payloads,
