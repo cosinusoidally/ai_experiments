@@ -293,8 +293,8 @@ rules must distinguish primitive values, wrappers and class identity.
 ## Buffers and typed views
 
 `BUFFER_VIEW` references a `BUFFER_BACKING`, offset, length, prototype,
-named properties and explicit kind. Buffer, ArrayBuffer and the eight typed
-array kinds share the backing mechanism but not indexing semantics. A
+named properties and explicit kind. Buffer, ArrayBuffer and the typed-array
+kinds share the backing mechanism but not indexing semantics. A
 subarray/slice view keeps its backing alive; a copy owns another backing.
 Element count is not byte length for multi-byte kinds.
 

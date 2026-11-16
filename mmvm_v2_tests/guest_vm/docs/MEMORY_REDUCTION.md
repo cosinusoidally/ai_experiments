@@ -94,6 +94,61 @@ maximum without a runtime override. Full-bootstrap acceptance is separate.
 
 ## Remaining investigation
 
+### Goal acceptance, 2026-11-16
+
+The full unmodified mishmashvm `bootstrap.sh` completes with the ordinary
+default-512-MiB snapshot executable: no larger build setting and no runtime
+heap override. The eight existing output objects were moved to a recoverable
+artifact directory first; all eight newly generated outputs compare byte for
+byte with those preserved references. The bootstrap's four own hash checks
+also report OK. Source trees and external test corpora are unchanged.
+
+- Whole bootstrap: **236.36 seconds / 476,612 KiB peak RSS**.
+- Historical whole-bootstrap guest result: 233.45 seconds / 558,340 KiB.
+  Peak RSS is approximately 14.6% lower; the elapsed times are similar, but
+  this is not a controlled repeated timing comparison.
+- The stronger matched-stage comparison above reduces peak RSS by about 25%.
+- Reference SHA-256 values (each `.new` counterpart is identical):
+  - `my_libc.o`: `0e8e02c852a11ebec585650d3c6fa5917fb51d7b66dd1d458d3e51680c660964`
+  - `stubs.o`: `0cdb519efb42f22eba96bf90407e10b87868355e1d793d3a70271f09d47aa403`
+  - `tcc_bin/libtcc1.o`: `59483d03266a9eadb84ceafaf4ed8a37e5a5231aaf773f296a7ca097679307b3`
+  - `tcc_bin/tcc_boot3.o`: `b64ff3010f2de6eb50762169fc5309b66ef704924cfc21648e7b75f088af3365`
+
+Additional focused acceptance: the Node core suite passes after the engine-root
+ownership fix; js_min core passes with compact backings; a js_min-built image
+containing a live external backing reloads, passes 49 forced collections and
+preserves slice aliasing. Its graph audit reports 40,219 reachable records and
+zero missing marks. Full ECMA/Test262/Octane, all graphical demos, fresh normal
+cross-host/self-hosted fixed-point builds and Windows acceptance have **not**
+been rerun for contract 109. The contract-108 checkpoint below must not be
+mistaken for those missing fresh checks. Work paused at the user's request
+after the stated bootstrap-memory goal was achieved.
+
+### Remaining substantial space use (not implemented)
+
+The read-only profiler now ignores mutable GC marks when locating the heap
+and recognizes a heap occupying the suffix of a merged anonymous mapping.
+The first attempted profile collected no heap samples because the old locator
+assumed a stable full header at the mapping start; its timing was not used.
+The corrected run collected 26 samples and completed with the correct initial
+compiler-object hash; the final native-bootstrap object was restored afterward.
+
+The remaining peak is principally frontend temporary storage, not another
+128-MiB backing shadow. Around 31 seconds, the sample has 169,236,248 bytes of
+VALUE_VECTOR records, 59,752,616 bytes of property storage and 84,411,360 bytes
+of FREE records; the executing function is `propagateRegisterState` in the
+bytecode optimizer. Spare vector capacity is only 8,577,744 bytes, so simply
+reducing growth slack would miss most of that vector footprint. Around 38
+seconds, after compilation and collection, occupied records fall to 29,470,680
+bytes while free spans total about 440.5 MB; the 128-MiB external buffer is
+separate and its tracked byte count agrees with the record walk. Resident
+pages previously touched by frontend work remain mapped. Profile timings are
+perturbed by stopped-process inspection, not stock performance measurements.
+
+Future work should examine the optimizer's dataflow-state representation and
+lifetime before changing general GC policy or adding allocator tricks. No such
+optimization was started after the user requested a pause.
+
 Profile frontend working storage and phase lifetimes. Prioritize retained
 temporary data and oversized integer metadata/capacity, preserving function
 source, locations and build speed. Use the existing read-only process memory

@@ -168,7 +168,9 @@ js --no-ion 03_mk_libc_stubs.js
 
 This initial checkpoint predates the full-bootstrap extension above.
 
-The shell image uses the existing `--vm-max-heap-mib 1024` reservation option:
+Historical bring-up setting (no longer required with contract 109; see
+[default-heap bootstrap acceptance](docs/MEMORY_REDUCTION.md#goal-acceptance-2026-11-16)):
+the shell image used the existing `--vm-max-heap-mib 1024` reservation option:
 the Emscripten compiler requests a 128 MiB ArrayBuffer, and the current external
 backing representation also reserves its logical span in the guest heap.
 The initial 512 MiB image exhausted contiguous address space after source

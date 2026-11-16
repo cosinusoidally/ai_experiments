@@ -196,8 +196,8 @@ words. Only the named wrapper/kernel service knows this internal ABI; record
 constructors do not use it directly. Entry/return preserve execution, budget
 and frame state. The service clears every inline payload byte, including
 padding, using libc memset when available and the equivalent kernel loop on
-emulated memory. External buffer data spans retain their separate metadata-only
-initialization path, rather than clearing a large logical span unnecessarily.
+emulated memory. Large native buffer payloads are separately owned allocations;
+only their compact descriptors pass through heap record initialization.
 
 Record access follows the same single-validation principle: `requireRecord`
 checks the complete header against both the live heap prefix and physical
@@ -228,7 +228,7 @@ It selects the reservation, updates the copied engine maximum and collector
 workspace, and caps the initial pressure bounds when selecting a smaller
 maximum. This does not mutate the snapshot or set a hard process-RSS limit.
 See [runtime memory reduction](MEMORY_REDUCTION.md) for ownership constraints,
-measurements and the remaining external-buffer shadow reservation.
+measurements and the removal of the external-buffer shadow reservation.
 
 Weak string/metadata maps are invalidated or pruned after collection; numeric
 property-slot hints are reset. Cached frames cannot retain an untraced old graph indefinitely.

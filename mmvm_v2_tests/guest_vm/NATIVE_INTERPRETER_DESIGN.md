@@ -1072,6 +1072,11 @@ interpreter operation-pair optimization, not source recognition or alternate
 benchmark code; no guest bytecode format or JS reference semantics change.
 ## Large native byte backings (2026-10-27)
 
+Historical implementation below: contract 109 removes the logical shadow
+reservation and adds external-byte collection pressure and separate snapshot
+payloads. See the authoritative [buffer representation](docs/data-structures.md#buffers-and-typed-views)
+and [memory acceptance report](docs/MEMORY_REDUCTION.md).
+
 Buffers and ArrayBuffers of at least `Heap.BufferBackingPolicy.LARGE_BYTES`
 (currently 1 MiB) use directly called libc `calloc` for their bytes on the
 native backend. The backing record still reserves its complete logical span

@@ -55,7 +55,7 @@
     }
     if (!engine) throw new Error("snapshot has no native engine");
     var signature = image.slice(imageHeapOffset + Heap.FIRST_RECORD,
-        imageHeapOffset + Heap.FIRST_RECORD + Heap.HEADER_SIZE);
+        imageHeapOffset + Heap.FIRST_RECORD + Heap.HeaderFields.MARK);
     image = null;
     var output = fs.openSync(prefix + ".jsonl", "wx");
     var log = fs.openSync(prefix + ".log", "wx");
@@ -102,12 +102,20 @@
                 if (heapBase && maps[i].start <= heapBase && maps[i].end > heapBase) heapMap = maps[i];
                 if (!heapBase && !maps[i].name && maps[i].permissions.indexOf("rw") === 0 &&
                         maps[i].end - maps[i].start >= heapCapacity) {
-                    fs.readSync(descriptor, small, 0, small.length, maps[i].start + Heap.FIRST_RECORD);
-                    if (small.equals(signature)) {
-                        fs.readSync(descriptor, small, 0, small.length, maps[i].start + engine);
-                        if (small.readUInt32LE(Heap.HeaderFields.TYPE) === Heap.Types.ENGINE_STATE) {
-                            heapBase = maps[i].start;
-                            heapMap = maps[i];
+                    /* GC marks are mutable. Match only immutable type/size,
+                     * then verify the engine at its independent known offset.
+                     * A large calloc below the heap can merge VMAs before our
+                     * first sample; the heap may then be the mapping suffix. */
+                    var candidates = [maps[i].start, maps[i].end - heapCapacity];
+                    for (var candidateIndex = 0; candidateIndex < candidates.length && !heapBase; candidateIndex++) {
+                        var candidate = candidates[candidateIndex];
+                        fs.readSync(descriptor, small, 0, small.length, candidate + Heap.FIRST_RECORD);
+                        if (small.slice(0, signature.length).equals(signature)) {
+                            fs.readSync(descriptor, small, 0, small.length, candidate + engine);
+                            if (small.readUInt32LE(Heap.HeaderFields.TYPE) === Heap.Types.ENGINE_STATE) {
+                                heapBase = candidate;
+                                heapMap = maps[i];
+                            }
                         }
                     }
                 }
