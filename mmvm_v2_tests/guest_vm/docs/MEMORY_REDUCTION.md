@@ -10,6 +10,12 @@ backends. Do not use threads or page-discard advice.
 
 ## Measurements, 2026-11-15
 
+For a newer, separate measurement of the VM building itself with default
+settings, see [2026-11-16 self-build and packaging memory](self-build-memory-2026-11-16.md):
+Linux self-hosted 483964 KiB, Windows/Wine self-hosted 484268 KiB, Node JIT
+266584 KiB and Node jitless 226604 KiB. All produce identical snapshots without
+a heap override. These are not mishmashvm bootstrap measurements.
+
 A fresh default-512-MiB snapshot, built from the current source before this
 change, fails in mishmashvm's `01_mk_tcc.js` at `tcc_em.js:1167`, creating the
 128-MiB ArrayBuffer. GNU time reports 40.97 seconds and 454,508 KiB peak RSS.

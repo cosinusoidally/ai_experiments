@@ -1,5 +1,9 @@
 # Self-hosting and standalone snapshots
 
+Fresh default-build memory/time and cross-host snapshot/packager identity
+measurements (Linux, Wine, Node JIT/jitless) are recorded in
+[the 2026-11-16 measurement](self-build-memory-2026-11-16.md).
+
 An existing standalone snapshot can also be wrapped in a dynamically linked
 i386 executable without a compiler or linker. See
 [Snapshot executables](snapshot-executable.md). This is packaging only: it

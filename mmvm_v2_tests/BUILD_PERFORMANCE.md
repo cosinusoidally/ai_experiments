@@ -1,5 +1,18 @@
 # Guest build performance investigation
 
+## 2026-11-16: fresh default self-build and packaging RSS
+
+Default 512-MiB target/outer settings, no heap override: Linux self-hosted
+**81.06 s / 483964 KiB**, Windows/Wine self-hosted **84.11 s / 484268 KiB**,
+Node JIT **5.24 s / 266584 KiB**, Node jitless **17.27 s / 226604 KiB**.
+All snapshots match byte for byte. The observed Linux/Wine RSS difference
+is only 304 KiB, not evidence of a material platform difference from one pair.
+
+Standalone ELF/PE packaging was also timed separately on all four hosts,
+with identical bytes for each target format. Full exact results, settings,
+commands and Wine/RSS caveats are in
+[the measurement report](guest_vm/docs/self-build-memory-2026-11-16.md).
+
 ## 2026-11-15: disable final backing sharing by default
 
 The final string-backing sharing pass is now opt-in through
