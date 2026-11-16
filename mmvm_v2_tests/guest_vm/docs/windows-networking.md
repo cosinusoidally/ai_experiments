@@ -91,7 +91,9 @@ URL decoding, errors, traversal rejection, stdout logging, incomplete requests,
 slow readers, and 80 simultaneous connections (above the common 64-entry C
 fd_set default). Test fixtures/logs are temporary under artifacts.
 
-These are Wine results, not a claim of tested native XP networking.
+These are Wine acceptance results. A subsequent Windows XP Pro SP3/QEMU run
+passes the basic HTTP smoke test with 256 MiB RAM; see the
+[XP smoke report and reproduction](windows-xp-smoke.md).
 
 - Final lazy-loaded image: both explicit loopback and default all-interface
   Wine HTTP runs pass **106 checks** each, **2.21 s** each. The isolated Linux

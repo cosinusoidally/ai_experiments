@@ -130,8 +130,10 @@ space; reserving a range does not remove fragmentation or commitment limits.
   Windows kernel debugger remain separate work.
 - The implementation imports vectored-exception APIs, so versions predating
   that facility are not supported. The user confirmed the pre-networking VM
-  works on Windows XP. New networking acceptance is under Wine so far; actual
-  XP networking remains an explicit follow-up test.
+  works on Windows XP. Networking now also passes a bounded HTTP smoke test on
+  XP Professional SP3 under QEMU TCG with 256 MiB guest RAM; see the
+  [XP test report](windows-xp-smoke.md). Broader networking acceptance is under
+  Wine, not a complete XP suite run.
 
 ## Initial working-point validation
 
