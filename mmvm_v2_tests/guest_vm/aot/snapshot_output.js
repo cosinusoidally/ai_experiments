@@ -110,6 +110,7 @@
     };
 
     SnapshotOutput.prototype.write = function (path, image, imageLength) {
+        if (root.GuestVMWSHHost) return root.GuestVMWSHHost.writeSnapshot(this, path, image, imageLength);
         return this.allocation.isNative ? this.writeNative(path, image, imageLength) :
             this.writeNode(path, image, imageLength);
     };

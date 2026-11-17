@@ -89,6 +89,10 @@
         }
     };
 
+    /* A no-op created inside compileGraph can retain that entire activation
+     * (including IR/assembler storage) on classic scope-chain engines. */
+    function noExecutableToDestroy() {}
+
     X86Backend.prototype.createAssembler = function () {
         var assembler = new Assembler(this.captureAssembly);
         if (this.ffi.isMMVM && !this.captureBytes) {
@@ -128,7 +132,7 @@
         var result = {fn: null, pointer: 0, length: assembler.length,
                       bytes: assembler.bytes, assembly: assembler.dump(),
                       symbols: assembler.labels,
-                      ir: ir, backend: "i386", destroy: function () {}};
+                      ir: ir, backend: "i386", destroy: noExecutableToDestroy};
         if (!this.ffi.isMMVM || !this.installExecutable) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.length / 4096) * 4096);
@@ -238,7 +242,7 @@
                       symbols: assembler.labels,
                       ir: graph, backend: "i386",
                       registerAllocation: registerAllocations,
-                      destroy: function () {}};
+                      destroy: noExecutableToDestroy};
         if (debugFunctions.length) result.debug = {functions: debugFunctions};
         if (!backend.ffi.isMMVM || !backend.installExecutable) return result;
         var allocationLength = Math.max(4096,
@@ -352,7 +356,7 @@
                       ir: ir, backend: "i386",
                       registerAllocation: describeRegisterAllocation(
                           ir, state.registerMap),
-                      destroy: function () {}};
+                      destroy: noExecutableToDestroy};
         if (!backend.ffi.isMMVM || !backend.installExecutable) return result;
         var allocationLength = Math.max(4096,
             Math.ceil(assembler.length / 4096) * 4096);

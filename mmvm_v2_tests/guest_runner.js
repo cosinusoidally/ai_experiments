@@ -22,6 +22,7 @@ if (typeof __guestVMStandaloneRunGuestRunner === "function" &&
 var guestRunnerIsNode = typeof process !== "undefined" && process.argv &&
                         process.versions && process.versions.node &&
                         typeof require === "function";
+var guestRunnerIsWSH = typeof GuestVMWSHHost !== "undefined";
 var GuestRunnerVM;
 var GuestRunnerNodeEnvironment;
 var guestRunnerArguments = [];
@@ -243,9 +244,9 @@ if (guestRunnerNativeSamples) {
     load("guest_vm/native_sampler.js");
     guestRunnerSampler = new GuestVMNativeSampler(__guestVMStandaloneImageBase);
 }
-var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode || !!guestRunnerSnapshot,
-                                        rawFFIBridge: guestRunnerIsNode && guestRunnerSnapshot ?
-                                            require("./guest_vm/host_ffi.js").snapshotBindings() : null,
+var guestProgramVM = new GuestRunnerVM({rawFFI: (!guestRunnerIsNode && !guestRunnerIsWSH) || !!guestRunnerSnapshot,
+                                        rawFFIBridge: guestRunnerSnapshot && (guestRunnerIsNode || guestRunnerIsWSH) ?
+                                            (guestRunnerIsNode ? require("./guest_vm/host_ffi.js") : GuestVMHostFFI).snapshotBindings() : null,
                                         profile: guestRunnerProfile,
                                         traceExceptions:
                                             guestRunnerTraceExceptions,
@@ -269,6 +270,7 @@ var guestProgramVM = new GuestRunnerVM({rawFFI: !guestRunnerIsNode || !!guestRun
                                         threadedCompile: !guestRunnerNative &&
                                             (!guestRunnerIsNode ||
                                              guestRunnerThreaded)});
+if (guestRunnerIsWSH) GuestVMWSHHost.collectBuildGarbage();
 if (guestRunnerSnapshot) {
     print("constructed guest runtime in " +
         (new Date().getTime() - guestRuntimeConstructionStarted) + " ms");

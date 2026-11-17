@@ -65,6 +65,8 @@
         this.snapshotBootstrap = !!snapshotBootstrap;
         this.nodeHost = typeof module !== "undefined" && module.exports &&
                         typeof require === "function";
+        this.wshHost = root.GuestVMWSHHost || null;
+        this.serviceHost = this.nodeHost || !!this.wshHost;
         this.exitCode = 0;
         this.exiting = false;
         this.exitMarker = {guestNodeExit: true};
@@ -75,6 +77,12 @@
             this.hostHttp = require("http");
             this.HostBuffer = require("buffer").Buffer;
             this.hostProcess = process;
+        } else if (this.wshHost) {
+            this.hostFs = this.wshHost.fs;
+            this.hostNet = this.wshHost.net;
+            this.hostHttp = this.wshHost.http;
+            this.HostBuffer = this.wshHost.buffer;
+            this.hostProcess = this.wshHost.process;
         } else {
             if (typeof NodeLibc === "undefined") {
                 load("node_compat/libc.js");
@@ -141,7 +149,7 @@
 
     GuestNodeEnvironment.prototype.environmentValue = function (name) {
         if (this.snapshotBootstrap) return undefined;
-        if (this.nodeHost) return this.hostProcess.env[name];
+        if (this.serviceHost) return this.hostProcess.env[name];
         return NodeMemory.cString(NodeLibc.getenv(name));
     };
 
@@ -150,23 +158,26 @@
         var index = 0;
         while (index < args.length) parts.push(String(args[index++]));
         var text = parts.join(" ") + "\n";
-        if (this.nodeHost) {
+        if (this.serviceHost) {
             if (fd === 2) this.hostProcess.stderr.write(text);
             else this.hostProcess.stdout.write(text);
         } else NodeMemory.writeAll(fd, text);
     };
 
     GuestNodeEnvironment.prototype.enqueueHost = function (callback) {
+        if (this.wshHost) { this.wshHost.enqueue(callback); return; }
         if (this.nodeHost) setTimeout(callback, 0);
         else NodeRuntime.enqueue(callback);
     };
 
     GuestNodeEnvironment.prototype.setHostTimeout = function (callback, delay) {
+        if (this.wshHost) return this.wshHost.setTimeout(callback, delay);
         return this.nodeHost ? setTimeout(callback, delay) :
                                NodeRuntime.setTimeout(callback, delay);
     };
 
     GuestNodeEnvironment.prototype.clearHostTimeout = function (id) {
+        if (this.wshHost) { this.wshHost.clearTimeout(id); return; }
         if (this.nodeHost) clearTimeout(id);
         else NodeRuntime.clearTimeout(id);
     };
@@ -209,12 +220,12 @@
     };
 
     GuestNodeEnvironment.prototype.hostNow = function () {
-        return this.nodeHost ? new Date().getTime() : NodeRuntime.now();
+        return this.serviceHost ? new Date().getTime() : NodeRuntime.now();
     };
 
     GuestNodeEnvironment.prototype.isExit = function (value) {
         return value === this.exitMarker ||
-               (!this.nodeHost && NodeProcess.isExit(value));
+               (!this.serviceHost && NodeProcess.isExit(value));
     };
 
     GuestNodeEnvironment.prototype.keep = function (value) {
@@ -286,6 +297,7 @@
     };
 
     GuestNodeEnvironment.prototype.guestBuffer = function (hostBuffer) {
+        if (this.wshHost) hostBuffer = this.wshHost.bytes(hostBuffer);
         var bytes = hostBuffer && hostBuffer._nodeBytes ? hostBuffer._nodeBytes : hostBuffer;
         if (!bytes) bytes = [];
         var result = this.runtime.bufferSupport.allocate(bytes.length);
@@ -306,7 +318,7 @@
             bytes.push(this.runtime.bufferSupport.read(value, index));
             index++;
         }
-        return this.nodeHost ? this.HostBuffer.from(bytes) : new this.HostBuffer(bytes);
+        return this.serviceHost ? this.HostBuffer.from(bytes) : new this.HostBuffer(bytes);
     };
 
     GuestNodeEnvironment.prototype.invoke = function (callable, receiver, args) {
@@ -1013,7 +1025,7 @@
                         return normalizePosixPath(resolved);
                     }
                 }
-                var cwd = environment.nodeHost ?
+                var cwd = environment.serviceHost ?
                     environment.hostProcess.cwd() :
                     environment.environmentValue("PWD") || ".";
                 return normalizePosixPath(String(cwd) + "/" + resolved);
@@ -1029,7 +1041,7 @@
                 if (typeof args[0] !== "string") {
                     throw new TypeError("module search directory must be a string");
                 }
-                var cwd = environment.nodeHost ? environment.hostProcess.cwd() :
+                var cwd = environment.serviceHost ? environment.hostProcess.cwd() :
                     environment.environmentValue("PWD") || ".";
                 var directory = String(args[0]);
                 var current = normalizePosixPath(directory.charAt(0) === "/" ?
@@ -1129,7 +1141,7 @@
             function (receiver, args) {
                 environment.exitCode = args.length ? Number(args[0]) | 0 : 0;
                 environment.exiting = true;
-                if (environment.nodeHost) environment.hostProcess.exitCode = environment.exitCode;
+                if (environment.serviceHost) environment.hostProcess.exitCode = environment.exitCode;
                 else {
                     NodeProcess.exitCode = environment.exitCode;
                     NodeProcess.exiting = true;
@@ -1158,7 +1170,7 @@
         var libcObject = this.object({});
         this.runtime.setProperty(libcObject, "memmove",
             this.makeFunction("NodeLibc.memmove", function (receiver, args) {
-                if (environment.nodeHost) {
+                if (environment.serviceHost) {
                     throw new Error("NodeLibc.memmove requires native MMVM buffers");
                 }
                 NodeLibc.memmove(Number(args[0]), Number(args[1]), Number(args[2]));
@@ -1204,7 +1216,7 @@
             runnerArguments) {
         this.runnerArguments = runnerArguments;
         this.snapshotBootstrap = false;
-        if (!this.nodeHost) NodeProcess.install(runnerArguments);
+        if (!this.serviceHost) NodeProcess.install(runnerArguments);
         var argv = ["artifacts/js_min.exe", runnerArguments[0]];
         var index = 1;
         while (index < runnerArguments.length) {
@@ -1224,7 +1236,8 @@
     };
 
     GuestNodeEnvironment.prototype.run = function () {
-        if (!this.nodeHost) {
+        if (this.wshHost) this.wshHost.run();
+        else if (!this.serviceHost) {
             NodeRuntime.run();
             this.exitCode = NodeProcess.exitCode;
         }

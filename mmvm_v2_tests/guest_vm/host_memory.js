@@ -480,6 +480,16 @@
         return this.isMMVM ? "mmvm-native" : "node-array-emulation";
     };
 
+    /* Select the WSH provider at module initialization. Existing Node/native
+     * scalar functions have no new per-access condition or indirection. */
+    if (root.GuestVMWSHMemory) {
+        readPagedByte = root.GuestVMWSHMemory.readByte;
+        writePagedByte = root.GuestVMWSHMemory.writeByte;
+        readPagedWordLE = root.GuestVMWSHMemory.readWord;
+        writePagedWordLE = root.GuestVMWSHMemory.writeWord;
+        HostMemory.prototype.copyAllocationRange = root.GuestVMWSHMemory.copy;
+        HostMemory.prototype.fillAllocationRange = root.GuestVMWSHMemory.fill;
+    }
     root.GuestVMHostMemory = HostMemory;
     if (typeof module !== "undefined" && module.exports) module.exports = HostMemory;
 }(this));

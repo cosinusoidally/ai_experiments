@@ -19019,7 +19019,11 @@
          * graph.  Node has no executable-memory backend, so it continues to
          * compile and execute this exact IR through the JS backend. */
         if (!loadedSnapshot && !x86Backend.ffi.isMMVM) {
+            if (runtime.nativeSnapshotWrite) reportSnapshot("compiling JS execution kernel");
+            var jsCompilationStarted = runtime.nativeSnapshotWrite ? new Date().getTime() : 0;
             this.js = new JSBackend().compile(this.ir);
+            if (runtime.nativeSnapshotWrite) reportSnapshot("compiled JS execution kernel in " +
+                (new Date().getTime() - jsCompilationStarted) + " ms");
         } else this.js = null;
         var jsBackendFinished = constructionStarted ?
             new Date().getTime() : 0;
@@ -19490,19 +19494,19 @@
                 console.log(timingLine);
             }
         }
-        if (this.nativeResult.fn && !runtime.retainNativeBuildIR) {
-            /* The installed native entry point and its mapping are the only
-             * executable state needed after compilation. Keeping the shared
-             * IR, generated JS reference source, and assembler byte array
-             * alive makes large guest heaps compete with bootstrap compiler
-             * products that the MMVM backend can never execute again. The
-             * snapshot writer has already consumed the bytes above. Node's
-             * backend has no native fn and deliberately retains this.js. */
+        if (!runtime.retainNativeBuildIR) {
+            /* Both execution backends are already compiled. IR is diagnostic
+             * state, not an execution dependency. Cross-builds retain their
+             * JS functions and x86 bytes for execution/serialization, whereas
+             * an installed native entry no longer needs either copy. */
             this.ir = null;
-            this.js = null;
             this.nativeResult.ir = null;
-            this.nativeResult.bytes = null;
             this.nativeResult.assembly = "";
+            if (this.js) this.js.ir = null;
+            if (this.nativeResult.fn) {
+                this.js = null;
+                this.nativeResult.bytes = null;
+            }
         }
         runtime.linearHeap.setRecordAllocationProvider(this);
     }

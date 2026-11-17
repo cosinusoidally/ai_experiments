@@ -52,7 +52,8 @@
         Digest = root.GuestVMDebugDigest;
         pe = root.GuestVMSnapshotExePE;
     }
-    io = node ? ioModule.nodeAdapter(require("fs")) :
+    io = root.GuestVMWSHHost ? root.GuestVMWSHHost.packagerIO() :
+        node ? ioModule.nodeAdapter(require("fs")) :
         ioModule.nativeAdapter(root.GuestVMHostFFI);
     ioModule.convert(io, args[0], args[1], win32 ? pe : elf, Assembler, format, debugPath, DebugELF, Digest);
     if (node) console.log("wrote executable: " + args[1]);
