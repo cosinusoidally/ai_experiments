@@ -62,6 +62,10 @@ Start here:
 
 Design and acceptance checklist:
 
+- [cscript bootstrap assessment and benchmark](cscript-bootstrap-benchmark.md):
+  Microsoft JScript 5.7 checks, bounded cross-host measurements, WSH adapter
+  requirements and mandatory snapshot/executable byte identity. The cscript
+  build adapter is not implemented yet; only the benchmark runs on that host.
 - [Windows snapshot executable investigation and plan](windows-snapshot-plan.md):
   proposed `--win32` PE32 packaging, dual-DLL resolver, native dependency
   inventory, calling conventions, reserve/commit memory design and staged
