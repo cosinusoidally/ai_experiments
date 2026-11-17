@@ -122,6 +122,15 @@ function load(filename) {
                 var offset = 0;
                 while (offset < length) {
                     var limit = Math.min(offset + 16384, length), chunk = [];
+                    /* Serialize complete little-endian words through the
+                     * existing memory API. No per-byte COM calls or dependence
+                     * on the provider's private page representation. */
+                    while (offset + 4 <= limit) {
+                        var word = output.host.read32LETrusted(a, offset);
+                        chunk.push(pairs[word & 255], pairs[(word >>> 8) & 255],
+                            pairs[(word >>> 16) & 255], pairs[word >>> 24]);
+                        offset += 4;
+                    }
                     while (offset < limit) chunk.push(pairs[output.host.read8Trusted(a, offset++)]);
                     target.Write(chunk.join(""));
                 }

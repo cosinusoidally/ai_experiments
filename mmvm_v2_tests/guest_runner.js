@@ -342,6 +342,7 @@ try {
         print("preparing standalone runtime");
         var guestStandalonePreparationStarted = new Date().getTime();
         guestNodeEnvironment.prepareStandaloneRuntimeSnapshot();
+        if (guestRunnerIsWSH) GuestVMWSHHost.collectBuildGarbage();
         print("prepared standalone runtime in " +
             (new Date().getTime() - guestStandalonePreparationStarted) + " ms");
         var guestSnapshotSerializationStarted = new Date().getTime();

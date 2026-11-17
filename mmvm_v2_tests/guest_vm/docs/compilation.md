@@ -344,6 +344,14 @@ the supported adapters and the current acceptance boundaries.
 The compile result includes `.fn`, generated `.source`, `.ir` and backend
 identity; a graph result also exposes generated helper functions.
 
+After NativeInterpreter consumes those results, diagnostic IR is discarded on
+both execution backends unless `retainNativeBuildIR` is enabled. The JS path
+keeps its compiled functions/source and cross-build x86 bytes; the native path
+keeps the installed mapping instead. Compilation result no-op destructors are
+module-owned functions, not closures retaining a compiler activation on classic
+scope-chain engines. Standalone backend compilation results still expose their
+IR normally; this lifetime policy belongs to the consuming interpreter.
+
 [`backend_x86.js`](../aot/backend_x86.js) lowers the same IR through
 [`x86_assembler.js`](../aot/x86_assembler.js). The assembler owns instruction
 encoding, labels, relative calls/jumps, code storage and fixups. Higher-level

@@ -3746,12 +3746,15 @@
                 return "function " + (receiver.name || "") + "() { [native code] }";
             }, "intrinsic", NativeIntrinsics.FUNCTION_TO_STRING);
         if (this.functionPrototype) {
-            var functionMethodName;
-            for (functionMethodName in this.functionMethods) {
-                if (own(this.functionMethods, functionMethodName)) {
-                    this.defineBuiltinProperty(this.functionPrototype, functionMethodName,
-                                     this.functionMethods[functionMethodName]);
-                }
+            /* Fixed builtin installation order is part of the bootstrap
+             * contract. Classic JScript's DontEnum bug omits an own toString
+             * from for-in, so host enumeration cannot define this catalog. */
+            var functionMethodNames = ["call", "apply", "bind", "toString"];
+            var functionMethodIndex = 0;
+            while (functionMethodIndex < functionMethodNames.length) {
+                var functionMethodName = functionMethodNames[functionMethodIndex++];
+                this.defineBuiltinProperty(this.functionPrototype, functionMethodName,
+                                 this.functionMethods[functionMethodName]);
             }
         }
         this.numberMethods = {};

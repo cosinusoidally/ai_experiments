@@ -454,7 +454,9 @@
             else if (code === 116) escapedSegment = "\t";
             else if (code === 98) escapedSegment = "\b";
             else if (code === 102) escapedSegment = "\f";
-            else if (code === 118) escapedSegment = "\v";
+            /* JScript 5.x treats a host-source \v escape as plain 'v'.
+             * Spell the guest vertical-tab value portably on every host. */
+            else if (code === 118) escapedSegment = "\x0b";
             else if (code >= 48 && code <= 57) {
                 var nextEscapeCode = this.codeAt(0);
                 if (code === 48 && !isDecimalDigit(nextEscapeCode)) {

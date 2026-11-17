@@ -92,7 +92,7 @@ All booleans default false unless stated otherwise.
 | `forbidHostCalls` | Reject explicit host-mode CALL/CONSTRUCT with HostCallError. Does not reject every portable semantic fallback. |
 | `logHostCalls` | Log those explicit embedding transitions, names/locations/value kinds. Not a trace of every FFI operation or native exit. |
 | `verifyNativeHeap` | Additional native-heap/frame/free-index verification; diagnostic overhead. |
-| `retainNativeBuildIR` | Keep normally discarded build IR for diagnostics. |
+| `retainNativeBuildIR` | Keep normally discarded build IR for diagnostics on either JS or native execution backend. |
 | `compactProgramStorage` | Compact retained program storage; defaults true for snapshot output, false otherwise. Does not change JS semantics. |
 | `snapshot` | Explicit output path; requires native interpretation. Low-level kernel/image builder option, not an application checkpoint API. |
 | `deferSnapshotWrite` | Defer output so the runner can prepare the generic standalone runtime. |

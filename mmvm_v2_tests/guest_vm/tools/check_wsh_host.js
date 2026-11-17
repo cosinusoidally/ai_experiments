@@ -50,5 +50,42 @@
             require("fs").writeFileSync(args[0], bytes);
         } else GuestVMWSHHost.writeSnapshot({host: memory, allocation: b, length: size}, args[0], null, 0);
         out("host memory/serialization passed: " + checks + " bytes; checksum=" + hash);
+        var io = node ? require("./snapshot_exe_io.js").nodeAdapter(require("fs")) : GuestVMWSHHost.packagerIO();
+        var input = -1, target = -1, copyPath = args[0] + ".copy", temporaryPath = copyPath + ".tmp";
+        try {
+            input = io.openInput(args[0]); target = io.createOutput(temporaryPath);
+            check(io.length(input) === size, "binary input length");
+            var count;
+            while ((count = io.read(input, 1024)) > 0) io.write(target, count);
+            io.close(input); input = -1; io.close(target); target = -1;
+            io.publish(temporaryPath, copyPath); io.remove(temporaryPath);
+            var rejected = false;
+            try { target = io.createOutput(copyPath); } catch (error) { rejected = true; }
+            check(rejected, "exclusive output creation");
+            target = io.createOutput(temporaryPath); io.set(0, 173); io.write(target, 1);
+            io.close(target); target = -1; rejected = false;
+            try { io.publish(temporaryPath, copyPath); } catch (error) { rejected = true; }
+            check(rejected, "publication refuses existing destination"); io.remove(temporaryPath);
+            input = io.openInput(copyPath); var offset = 0;
+            while ((count = io.read(input, 1024)) > 0) {
+                for (i = 0; i < count; i++) check(io.get(i) === expected[offset++], "streamed binary byte");
+            }
+            check(offset === size, "copy length and no-clobber contents");
+            io.close(input); input = -1;
+            out("streaming binary I/O and no-clobber publication passed");
+            /* Actual UTF-8 bytes, not the host's ANSI text encoding. Include
+             * a BOM, multibyte BMP/non-BMP characters and Windows newlines. */
+            var utf8Hex = "efbbbf41e282acf09f98800d0a", textPath = args[0] + ".utf8";
+            target = io.createOutput(textPath);
+            for (i = 0; i < utf8Hex.length; i += 2) io.set(i / 2, parseInt(utf8Hex.substr(i, 2), 16));
+            io.write(target, utf8Hex.length / 2); io.close(target); target = -1;
+            var decoded = node ? require("fs").readFileSync(textPath, "utf8") : read(textPath);
+            check(decoded === "\ufeffA\u20ac\ud83d\ude00\r\n", "UTF-8 source decoding");
+            out("UTF-8 source decoding passed");
+        } finally {
+            if (input >= 0) io.close(input);
+            if (target >= 0) io.close(target);
+            io.dispose();
+        }
     } finally { memory.free(a); memory.free(b); }
 }(this));
