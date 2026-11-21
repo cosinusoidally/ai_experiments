@@ -56,3 +56,15 @@ checks. Do not repeat every full suite for every small edit.
   are not a statistical speedup claim. Receipts: ignored
   `artifacts/cleanup-operands-*`. Full suites are deferred to the combined
   semantic checkpoint rather than repeated for byte-identical instructions.
+
+2026-11-21, property ownership boundary:
+
+- Key/index classification, primitive name resolution and membership now
+  belong to `object_operations_kernel.js`, alongside the existing wrapper,
+  descriptor and enumeration rules. The interpreter supplies allocation and
+  numeric formatting dependencies through the existing explicit graph.
+- Removed six manual interpreter dependency registrations in favor of the
+  module's single function catalog. No alternate copies remain in dispatch.
+- Default native instructions remain byte-identical (699151 bytes), and Node
+  core passes. This establishes the ownership boundary; it does not yet unify
+  callback-bearing conversion or remove the portable execution implementation.

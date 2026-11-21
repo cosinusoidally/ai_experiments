@@ -10941,46 +10941,6 @@
         return 1;
     }
 
-    /* Negative numbers are names, not dense storage offsets. Preserve -0's
-     * canonical index zero. Other existing key conversions retain their
-     * normal dispatch; this classification never invokes user code. */
-    function nonnegativeNumericPropertyKeyKernel(cell) {
-        var tag = valueCellTag(0, cell);
-        if (tag !== VALUE_TAG_INT32 && tag !== VALUE_TAG_DOUBLE) return 0;
-        if (negativeNumericPropertyKeyKernel(cell) === 1) return 0;
-        return 1;
-    }
-
-    function negativeNumericPropertyKeyKernel(cell) {
-        var tag = valueCellTag(0, cell);
-        if (tag === VALUE_TAG_INT32) return valueCellInt32(0, cell) < 0;
-        if (tag !== VALUE_TAG_DOUBLE) return 0;
-        var high = valueCellDoubleHigh(0, cell);
-        if (high >= 0) return 0;
-        if ((high & IEEE754_ABSOLUTE_MASK) === 0 && valueCellDoubleLow(0, cell) === 0) return 0;
-        return 1;
-    }
-
-    function propertyNameReferenceKernel(heapBase, state, keyCell, stringSupport, platformServices) {
-        var tag = valueCellTag(0, keyCell);
-        /* ES5 ToString for nonnumeric primitives uses the runtime's rooted
-         * canonical strings. No allocation or user callback is required. */
-        var primitiveName = -1;
-        if (tag === VALUE_TAG_UNDEFINED) primitiveName = RuntimeSupportLayout.TYPE_UNDEFINED;
-        else if (tag === VALUE_TAG_NULL) primitiveName = RuntimeSupportLayout.NULL_STRING;
-        else if (tag === VALUE_TAG_TRUE) primitiveName = RuntimeSupportLayout.TRUE_STRING;
-        else if (tag === VALUE_TAG_FALSE) primitiveName = RuntimeSupportLayout.FALSE_STRING;
-        if (primitiveName >= 0) return valueCellReference(0,
-            vectorCellAddress(heapBase, stringSupport, primitiveName));
-        if (tag === VALUE_TAG_INT32 || tag === VALUE_TAG_DOUBLE) {
-            var temporary = engineScratchLeftAddress(heapBase, state);
-            if (numberCellToStringKernel(heapBase, state, temporary,
-                    keyCell, tag, platformServices) !== 1) return 0;
-            return valueCellReference(0, temporary);
-        }
-        return propertyStringKeyReferenceKernel(heapBase, keyCell, stringSupport);
-    }
-
     function numberCellToStringKernel(
             heapBase, state, intrinsicTarget, numberCell, numberTag,
             platformServices) {
@@ -15539,164 +15499,6 @@
         return cell;
     }
 
-    function propertyKeyMatchesIndexKernel(heapBase, key, index) {
-        if (index < 0) return 0;
-        if (propertyKeyIndexKernel(heapBase, key) === index) return 1;
-        return 0;
-    }
-
-    function propertyKeyIndexKernel(heapBase, key) {
-        var length = stringLength(heapBase, key);
-        if (length === 0) return -1;
-        if (length > 1) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 48) {
-                return -1;
-            }
-        }
-        var parsed = 0;
-        var characterIndex = 0;
-        while (characterIndex < length) {
-            var character = stringCharacterCodeUnit(
-                heapBase, key, characterIndex) & 65535;
-            if (character < 48) return -1;
-            if (character > 57) return -1;
-            if (parsed > divideI32(MAX_SIGNED_INT32, 10)) return -1;
-            parsed = parsed * 10 + character - 48;
-            if (parsed < 0) return -1;
-            characterIndex = characterIndex + 1;
-        }
-        return parsed;
-    }
-
-    /* Implement the ES5 `in` lookup entirely against guest records.  The
-     * result includes inherited properties and the indexed/length properties
-     * synthesized by arrays and typed buffer views.  A zero return means the
-     * operands require a coercion or exception path not handled by this
-     * kernel; one means targetCell contains the boolean result. */
-    function hasPropertyKernel(heapBase, state, targetCell, keyCell, objectCell,
-                               arrayLengthKey, stringSupport) {
-        var objectTag = valueCellTag(0, objectCell);
-        if (objectTag !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
-        var keyTag = valueCellTag(0, keyCell);
-        var keyPayload = valueCellReference(0, keyCell);
-        var key = 0;
-        var keyIndex = 0;
-        var numericKey = 0;
-        if (keyTag === VALUE_TAG_INT32) {
-            keyIndex = keyPayload;
-            if (keyIndex >= 0) numericKey = 1;
-        } else if (keyTag === VALUE_TAG_DOUBLE) {
-            keyIndex = toInt32F64(loadF64(keyCell + RecordLayout.VALUE_CELL_LOW));
-            if (keyIndex >= 0) {
-                setEngineScratchLeft(heapBase, state, keyIndex);
-                if (equalF64(loadF64(keyCell + RecordLayout.VALUE_CELL_LOW),
-                             loadI32F64(engineScratchLeftAddress(
-                                 heapBase, state))) === 1) {
-                    numericKey = 1;
-                }
-            }
-        } else if (keyTag === RecordLayout.VALUE_TAG_REFERENCE) {
-            key = keyPayload;
-            var keyType = recordType(heapBase, key);
-            if (keyType !== RecordLayout.HEAP_TYPE_STRING) return 0;
-        } else {
-            key = propertyNameReferenceKernel(heapBase, state, keyCell,
-                stringSupport, enginePlatformServices(heapBase, state));
-            if (key === 0) return 0;
-        }
-
-        /* Negative/fractional/nonfinite numeric keys require ToString; an
-         * unsuccessful integer-index probe is not a missing-property result. */
-        if (key === 0 && numericKey === 0) return 0;
-        var current = valueCellReference(0, objectCell);
-        while (current !== 0) {
-            var currentType = recordType(heapBase, current);
-            if (stringWrapperOwnPropertyKeyKernel(heapBase, current, keyCell,
-                    arrayLengthKey, stringSupport) === 1) {
-                setValueCellTrue(targetCell);
-                return 1;
-            }
-            var property = 0;
-            var propertyAncestor = 0;
-            if (currentType === RecordLayout.HEAP_TYPE_ARRAY) {
-                if (numericKey === 1) {
-                    var elements = arrayElements(heapBase, current);
-                    var elementCount = vectorLength(heapBase, elements);
-                    if (keyIndex < elementCount) {
-                        var elementCell = vectorCellAddress(
-                            heapBase, elements, keyIndex);
-                        var elementTag = valueCellTag(0, elementCell);
-                        if (elementTag !== 0) {
-                            setValueCellTrue(targetCell);
-                            return 1;
-                        }
-                    }
-                } else if (key === arrayLengthKey) {
-                    setValueCellTrue(targetCell);
-                    return 1;
-                }
-                var currentArrayProperties = lastOwnPropertyEntryKernel(heapBase, current);
-                var currentArrayPrototype = arrayPrototype(
-                    heapBase, current);
-                property = currentArrayProperties;
-                propertyAncestor = currentArrayPrototype;
-            } else if (currentType >= RecordLayout.HEAP_TYPE_OBJECT) {
-                if (currentType <= RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
-                    var currentObjectProperties = lastOwnPropertyEntryKernel(heapBase, current);
-                    var currentObjectPrototype = objectPrototype(
-                        heapBase, current);
-                    property = currentObjectProperties;
-                    propertyAncestor = currentObjectPrototype;
-                } else if (currentType === RecordLayout.HEAP_TYPE_REGEXP) {
-                    var currentRegexpProperties = lastOwnPropertyEntryKernel(heapBase, current);
-                    var currentRegexpPrototype = regexpPrototype(
-                        heapBase, current);
-                    property = currentRegexpProperties;
-                    propertyAncestor = currentRegexpPrototype;
-                } else if (currentType === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                    if (numericKey === 1) {
-                        var viewLength = bufferViewLength(heapBase, current);
-                        if (keyIndex < viewLength) {
-                            setValueCellTrue(targetCell);
-                            return 1;
-                        }
-                    } else if (key === arrayLengthKey) {
-                        setValueCellTrue(targetCell);
-                        return 1;
-                    }
-                    var currentViewProperties = lastOwnPropertyEntryKernel(heapBase, current);
-                    var currentViewPrototype = bufferViewPrototype(
-                        heapBase, current);
-                    property = currentViewProperties;
-                    propertyAncestor = currentViewPrototype;
-                } else return 0;
-            } else return 0;
-
-            while (property !== 0) {
-                var candidateKey = ownPropertyEntryKeyKernel(heapBase, current, property);
-                if (numericKey === 1) {
-                    var numericMatches = propertyKeyMatchesIndexKernel(
-                        heapBase, candidateKey, keyIndex);
-                    if (numericMatches === 1) {
-                        setValueCellTrue(targetCell);
-                        return 1;
-                    }
-                } else {
-                    var stringMatches = stringKeysEqualKernel(
-                        heapBase, candidateKey, key);
-                    if (stringMatches === 1) {
-                        setValueCellTrue(targetCell);
-                        return 1;
-                    }
-                }
-                property = previousOwnPropertyEntryKernel(heapBase, current, property);
-            }
-            current = propertyAncestor;
-        }
-        setValueCellFalse(targetCell);
-        return 1;
-    }
-
     function instanceofKernel(heapBase, targetCell, valueCell,
                               constructorCell, stringSupport) {
         if (valueCellTag(0, constructorCell) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
@@ -18692,7 +18494,6 @@
             formatDoubleStringKernel: formatDoubleStringKernel,
             getKeysKernel: getKeysKernel,
             growNativeHeapLimitKernel: growNativeHeapLimitKernel,
-            hasPropertyKernel: hasPropertyKernel,
             clearNativePropertyCacheKernel: clearNativePropertyCacheKernel,
             findCachedOwnObjectPropertyKernel: findCachedOwnObjectPropertyKernel,
             hintedOwnPropertyEntryKernel: hintedOwnPropertyEntryKernel,
@@ -18743,9 +18544,6 @@
             numericOwnPropertyEntryKernel: numericOwnPropertyEntryKernel,
             numericStringKeyMatchesKernel: numericStringKeyMatchesKernel,
             numberCellToStringKernel: numberCellToStringKernel,
-            negativeNumericPropertyKeyKernel: negativeNumericPropertyKeyKernel,
-            nonnegativeNumericPropertyKeyKernel: nonnegativeNumericPropertyKeyKernel,
-            propertyNameReferenceKernel: propertyNameReferenceKernel,
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
             integerRadixStringKernel: integerRadixStringKernel,
@@ -18767,9 +18565,7 @@
             isASCIIDecimalDigitKernel: isASCIIDecimalDigitKernel,
             isNaNIntrinsicKernel: isNaNIntrinsicKernel,
             parseIntIntrinsicKernel: parseIntIntrinsicKernel,
-            propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
             namedArrayIndexCellKernel: namedArrayIndexCellKernel,
-            propertyKeyIndexKernel: propertyKeyIndexKernel,
             primitiveWrapperValueCellKernel: primitiveWrapperValueCellKernel,
             programArgumentCellKernel: programArgumentCellKernel,
             programBooleanArgumentKernel: programBooleanArgumentKernel,
