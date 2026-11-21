@@ -188,8 +188,14 @@ Acceptance so far: unchanged Penguin Puzzle accepts repeated `i`/other keys and
 closes cleanly in optimized and -g -O0 standalone ELF builds, with approximately
 31--33 FPS before/after on this host. Core suite passes both native-JS operand
 modes: 12 programs / 321 assertions, including the added event-key map coverage.
-Full Test262 regression verification is in progress; temporary receipts live
-under `artifacts/mish-i-*` and are not checked in.
+Full optimized standalone Test262 verification passes 3292/3292, with zero
+failures/timeouts/unrun tests, in 365.85 s (512660 KiB peak RSS). Temporary
+receipts live under `artifacts/mish-i-*` and are not checked in; the run history
+is in [TEST262_STATUS.md](../../TEST262_STATUS.md).
+Fresh snapshot construction under js_min (97.11 s, 380208 KiB peak RSS) and
+the standalone guest itself (82.72 s, 479756 KiB peak RSS) both complete with
+outputs byte-identical to the Node-built snapshot. These timings are current
+measurements, not an isolated before/after build-performance comparison.
 
 ## Diagnostics
 

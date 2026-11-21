@@ -1,5 +1,19 @@
 # Test262 status
 
+2026-11-21, unmapped mishmashvm keyboard fix (`0ccc504`, contract 110):
+
+- Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
+  0 timed out / 0 not run**, unchanged corpus, selectors and default limits.
+- Harness **365144.783 ms**, summed test time **344454.346 ms**; process
+  **365.85 s**, peak RSS **512660 KiB**, exit 0. This is one serial full run.
+- Core suite also passes both native-JS operand modes: 12 programs / 321
+  assertions. Unchanged mishmashvm `test(16)` survives repeated `i` key events
+  and a clean close in optimized and -g -O0 ELF builds (about 31--33 FPS).
+- Receipts: ignored `artifacts/mish-i-test262.log`, `.time`,
+  `artifacts/mish-i-core3.log`, `artifacts/mish-i-fixed16.log` and
+  `artifacts/mish-i-debug16.log`. These are keyboard/property-conversion
+  validation results, not a new full ECMA or Octane measurement.
+
 2026-11-16, Windows networking checkpoint (`832b4ae`):
 
 - Full Wine executable run: **3292 executed / 3292 passed / 0 failed /
