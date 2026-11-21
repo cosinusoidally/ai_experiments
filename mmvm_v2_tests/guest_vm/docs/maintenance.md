@@ -206,6 +206,9 @@ measurements, not an isolated before/after build-performance comparison.
   supports standalone use; read its header for the different host invocations.
   Its rejection details use the same `NativeInterpreter.CallDiagnostics`
   catalog as kernel bindings and profile output, not a positional name list.
+  Dynamic property reads/writes, deletion and membership print labelled
+  receiver/key cells; addition prints left/right cells. Inspection is bounded
+  and does not invoke user getters or coercion methods.
   `NativeInterpreter.describeCallRejectReason(code)` formats named simple
   reasons and encoded payloads; intrinsic/value-tag/heap-type payloads include
   enum names when known. Composite pair/GC payloads remain numeric rather

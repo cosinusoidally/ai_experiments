@@ -108,3 +108,16 @@ in `heap_records.js`, and tests connecting both backends are the coordination
 points. The implementation still has transition-era metadata tables and
 legacy property layouts; the documentation must not present migration plans
 as completed work.
+
+The shared property-operations module now owns native key/index classification,
+primitive name resolution and membership alongside wrappers/descriptors.
+Named membership reuses the guarded packed/linked own-entry lookup; it does
+not maintain a second name-scan implementation. The interpreter supplies
+numeric formatting/allocation dependencies through the existing compiled
+function graph. Callback-bearing opcode coercion remains separate work.
+
+Migrated property instruction operands use a compiler-checked accessor whose
+representation comes from the bytecode schema, rather than a caller-selected
+register scale. Other instruction families retain legacy accessors during the
+staged migration. See [the current cleanup log](cleanup-2026-11.md) for precise
+scope, measured acceptance and remaining work.

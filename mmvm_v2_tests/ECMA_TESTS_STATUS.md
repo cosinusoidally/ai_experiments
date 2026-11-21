@@ -2,6 +2,22 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Shared property cleanup audit, 2026-11-21
+
+- Default optimized Linux executable `f82b7e5` / contract 111: **998 passed /
+  331 failed (38 timeouts included) / 4 configured skips / 0 not run**;
+  all 1333 selected files have final statuses, 1329 executed.
+- Every one of the 1333 statuses matches the preceding contract-110 full run:
+  **0 changed / 0 missing / 0 extra statuses / 0 lost passes**. Relative to
+  the retained `5163ff6` matrix, the only delta remains the watchdog-boundary
+  middle-redefinition file documented below; it passes here in **9524.281 ms**.
+  This is not a new semantic compliance claim.
+- Per-tree pass/fail: ecma **473/147**, ecma_2 **149/23**, ecma_3 **177/48**,
+  ecma_5 **199/113**; timeouts **11/0/1/26**. No corpus/harness/policy changes.
+- Harness **604277.030 ms**, process **604.57 s**, peak RSS **463968 KiB**,
+  exit 1 for existing failures. Previous observation: 608.40 s / 464080 KiB.
+- Receipts: ignored `artifacts/cleanup-shared-lookup-ecma.log` and `.time`.
+
 ### Keyboard/property-name fix audit, 2026-11-21
 
 - Fresh default optimized Linux executable, VM fix `0ccc504` / contract 110:

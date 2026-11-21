@@ -134,13 +134,21 @@ function inspectExitWrapRun(originalRun) {
         }
     }
     if (program && (result.opcode === inspectExitBytecode.ADD ||
+                    result.opcode === inspectExitBytecode.IN ||
+                    result.opcode === inspectExitBytecode.DELETE_PROPERTY ||
                     result.opcode === inspectExitBytecode.GET_PROPERTY ||
                     result.opcode === inspectExitBytecode.SET_PROPERTY)) {
         var leftOffset = result.opcode === inspectExitBytecode.SET_PROPERTY ? 1 : 2;
         var rightOffset = result.opcode === inspectExitBytecode.SET_PROPERTY ? 2 : 3;
-        inspectExitPrint("left: " + inspectExitCell(this.runtime,
+        var leftLabel = "receiver", rightLabel = "key";
+        if (result.opcode === inspectExitBytecode.ADD) {
+            leftLabel = "left"; rightLabel = "right";
+        } else if (result.opcode === inspectExitBytecode.IN) {
+            leftLabel = "key"; rightLabel = "receiver";
+        }
+        inspectExitPrint(leftLabel + ": " + inspectExitCell(this.runtime,
             records.frameRegisterCell(result.frame, program.code[result.pc + leftOffset])));
-        inspectExitPrint("right: " + inspectExitCell(this.runtime,
+        inspectExitPrint(rightLabel + ": " + inspectExitCell(this.runtime,
             records.frameRegisterCell(result.frame, program.code[result.pc + rightOffset])));
     }
     if (program && (result.opcode === inspectExitBytecode.CALL ||

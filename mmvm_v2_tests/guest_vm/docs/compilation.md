@@ -352,8 +352,9 @@ rejecting constant-pool indices and other non-register operands. The same
 schema's execution-view mask selects `BYTECODE_REGISTER_SCALE` for decoded
 operands or `VALUE_CELL_BYTES` for canonical indices. The accessor lowers to
 the existing address expression; it does not introduce a runtime opcode test
-or a new JS/x86 backend operation. The bytecode schema must be loaded before
-compiling code using this accessor. Legacy address accessors remain available
+or a new JS/x86 backend operation. Shell hosts must load the bytecode schema
+before `kernel_compiler.js` when using this accessor; CommonJS loads that
+dependency automatically. Legacy address accessors remain available
 while instruction families migrate; they do not perform this validation.
 
 After NativeInterpreter consumes those results, diagnostic IR is discarded on

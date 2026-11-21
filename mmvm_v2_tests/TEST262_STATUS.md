@@ -1,5 +1,15 @@
 # Test262 status
 
+2026-11-21, shared property ownership/lookup (`f82b7e5`, contract 111):
+
+- Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
+  0 timed out / 0 not run**, unchanged corpus/harness/default limits.
+- Harness **338610.357 ms**, summed tests **322931.698 ms**; process **339.23 s**,
+  peak RSS **512532 KiB**, exit 0. The preceding contract-110 observation was
+  365.85 s / 512660 KiB; this is a 7.3% shorter individual run, not a controlled
+  attribution claim. No concurrency was used.
+- Receipts: ignored `artifacts/cleanup-shared-lookup-test262.log` and `.time`.
+
 2026-11-21, unmapped mishmashvm keyboard fix (`0ccc504`, contract 110):
 
 - Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
