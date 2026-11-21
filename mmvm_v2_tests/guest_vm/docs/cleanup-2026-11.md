@@ -68,3 +68,17 @@ checks. Do not repeat every full suite for every small edit.
 - Default native instructions remain byte-identical (699151 bytes), and Node
   core passes. This establishes the ownership boundary; it does not yet unify
   callback-bearing conversion or remove the portable execution implementation.
+
+2026-11-21, shared named membership lookup (contract 111):
+
+- Removed membership's private string-key entry scan. It now calls the same
+  guarded own-entry lookup as named reads and descriptors; numeric-index and
+  virtual-property handling is unchanged. Getter invocation is not involved.
+- Optional index construction retains its existing allocation contract: it
+  does not collect, preserves an existing allocation-failure flag and falls
+  back to scanning if an accelerator cannot be allocated. No new root or
+  allocation protocol is introduced by this caller.
+- Node core passes. A genuine old-seed build matches the fresh Node image
+  byte for byte, taking 86.25 s / 478800 KiB peak RSS. The preceding observation
+  was 82.34 s / 479712 KiB; this difference is recorded rather than claimed as
+  an improvement. Broader runtime/build comparisons are pending.

@@ -755,24 +755,25 @@
                 } else return 0;
             } else return 0;
 
-            while (property !== 0) {
-                var candidateKey = ownPropertyEntryKeyKernel(heapBase, current, property);
-                if (numericKey === 1) {
+            if (numericKey === 0) {
+                /* Named membership uses the same guarded packed/linked
+                 * lookup as reads and descriptors. Do not bypass optional
+                 * indexes by maintaining a second prototype-list scan. */
+                if (findOwnPropertyEntryKernel(heapBase, state, current, key) !== 0) {
+                    setValueCellTrue(targetCell);
+                    return 1;
+                }
+            } else {
+                while (property !== 0) {
+                    var candidateKey = ownPropertyEntryKeyKernel(heapBase, current, property);
                     var numericMatches = propertyKeyMatchesIndexKernel(
                         heapBase, candidateKey, keyIndex);
                     if (numericMatches === 1) {
                         setValueCellTrue(targetCell);
                         return 1;
                     }
-                } else {
-                    var stringMatches = stringKeysEqualKernel(
-                        heapBase, candidateKey, key);
-                    if (stringMatches === 1) {
-                        setValueCellTrue(targetCell);
-                        return 1;
-                    }
+                    property = previousOwnPropertyEntryKernel(heapBase, current, property);
                 }
-                property = previousOwnPropertyEntryKernel(heapBase, current, property);
             }
             current = propertyAncestor;
         }
