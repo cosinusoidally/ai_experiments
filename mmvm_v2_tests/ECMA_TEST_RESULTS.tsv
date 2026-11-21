@@ -1,7 +1,8 @@
 # ECMA per-file results; corpus and harness policy unchanged
 # Historical column: bfc122f run, 2026-11-11/12; recovered test log only, no backup code used
 # Previous column: fa4b98f run, 2026-11-14; full default executable sweep
-# Current column: 5163ff6 VM sources, 2026-11-15; full default Linux executable sweep
+# Latest retained full column: 5163ff6 VM sources, 2026-11-15; full default Linux executable sweep
+# 2026-11-21 contract-110 audit: all statuses below match except ecma_5/Object/15.2.3.6-middle-redefinition-7-of-8.js passed in the full run, then timed out on isolated repeat. Full measured totals and this exact delta are recorded in ECMA_TESTS_STATUS.md.
 # FAIL includes watchdog timeouts. Four configured skips remain SKIP.
 file	bfc122f	fa4b98f	5163ff6
 ecma/Array/15.4-1.js	FAIL	FAIL	FAIL

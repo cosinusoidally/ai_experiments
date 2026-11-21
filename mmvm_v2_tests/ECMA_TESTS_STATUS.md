@@ -2,6 +2,37 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Keyboard/property-name fix audit, 2026-11-21
+
+- Fresh default optimized Linux executable, VM fix `0ccc504` / contract 110:
+  **998 passed / 331 failed (38 timeouts included) / 4 configured skips /
+  0 not run**. All 1333 selected files have a final status; 1329 executed.
+  No harness, corpus, watchdog, instruction-limit or skip-policy changes.
+- Exact filename comparison with the retained `5163ff6` column in
+  [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv): **997 old passes preserved /
+  1 FAIL-to-PASS / 0 lost passes / 0 missing or extra statuses**. All other
+  1332 statuses match that column, so the following single delta completely
+  specifies the new full-run results without duplicating the unchanged matrix.
+- The sole gain is
+  `ecma_5/Object/15.2.3.6-middle-redefinition-7-of-8.js`, PASS in **10006.130 ms**
+  (per-test timing includes worker overhead). An immediate isolated repeat
+  **timed out in 10025.354 ms**, with the same executable and default settings.
+  This is an unstable watchdog-boundary pass, **not evidence that the keyboard
+  fix repaired an additional ECMA feature**. There are no confirmed stable new
+  passes in this audit. Keep the repeat outcome separate from the completed
+  full-run totals; do not silently turn the measured full-run PASS into FAIL.
+- Per-tree full-run pass/fail: ecma **473/147**, ecma_2 **149/23**,
+  ecma_3 **177/48**, ecma_5 **199/113**. Timeouts **11/0/1/26** respectively.
+- Harness **606738.125 ms**, process **608.40 s**, peak RSS **464080 KiB**;
+  exit 1 reports existing corpus failures. The previous full Linux process
+  was 609.77 s / 463900 KiB; these observations show similar overall cost,
+  not an isolated performance attribution experiment.
+- Command: `./artifacts/mish-i-final.exe ecma_tests_runner.js`, run serially.
+  Executable SHA-256:
+  `ec86c053eafa80121419e7cc72fb8d854896457535a5d1848fc48b3c06dd09ac`.
+  Ignored receipts: `artifacts/ecma-keyboard-2026-11-21.log`, `.time`,
+  `artifacts/ecma-keyboard-gain-repeat.log` and `.time`.
+
 ### Existing Linux harness versus Win32 harness, 2026-11-16
 
 - Fresh full Linux fork-supervised run: **997 passed / 332 failed (39 timeouts
