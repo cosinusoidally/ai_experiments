@@ -6,6 +6,21 @@ assertEqual(NaN !== NaN, true, "global NaN");
 assertEqual(Infinity > 1e308, true, "global Infinity");
 assertEqual(Boolean(0), false, "Boolean false conversion");
 assertEqual(Boolean("guest"), true, "Boolean true conversion");
+/* Event handlers can receive unmapped keys. Membership, writes and reads
+ * must agree on ToString(key), including inherited primitive-named entries. */
+function KeyboardState() {}
+KeyboardState.prototype[null] = "inherited";
+var keyboardState = new KeyboardState();
+var keyboardKeys = [undefined, true, false];
+for (var keyboardIndex = 0; keyboardIndex < keyboardKeys.length; keyboardIndex++) {
+    var keyboardKey = keyboardKeys[keyboardIndex];
+    assertEqual(keyboardKey in keyboardState, false, "unseen event key");
+    keyboardState[keyboardKey] = keyboardIndex + 1;
+    assertEqual(keyboardKey in keyboardState, true, "recorded event key");
+    assertEqual(keyboardState[keyboardKey], keyboardIndex + 1, "read recorded event key");
+}
+assertEqual(null in keyboardState, true, "inherited primitive key");
+assertEqual(keyboardState[null], "inherited", "read inherited primitive key");
 assertEqual(typeof Function, "function", "Function constructor exists");
 var dynamicAdd = Function("left", "right", "return left + right;");
 assertEqual(dynamicAdd(19, 23), 42,

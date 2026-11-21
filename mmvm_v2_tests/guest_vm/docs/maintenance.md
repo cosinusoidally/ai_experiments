@@ -169,6 +169,28 @@ tests, known ECMA gaps, an existing extra standalone integration failure,
 Demo8 mode checks and performance regressions. Do not treat an older bring-up
 report or one green smoke test as the current complete status.
 
+### 2026-11-21: unmapped mishmashvm keyboard input
+
+Penguin Puzzle (`test(16)`) passes an undefined keyCode for unmapped SDL keys,
+including `i`. Its `key in currentlyDownKeys` must test the name `"undefined"`,
+not exit the standalone interpreter with unsupported opcode IN. Native
+membership and named bracket access now share primitive-name conversion using
+the rooted runtime strings for undefined, null and booleans. No host callback,
+allocation, SDL workaround or modification to mishmashvm is involved.
+
+SET_PROPERTY retains canonical register indices in optional predecode mode;
+its numeric dispatch and register accesses use canonical value-cell accessors,
+not the offset-decoding accessor used by predecoded GET_PROPERTY. Contract 110
+invalidates older executable kernels. Rebuild snapshots/executables to receive
+the fix; changing the source checkout cannot patch an already built image.
+
+Acceptance so far: unchanged Penguin Puzzle accepts repeated `i`/other keys and
+closes cleanly in optimized and -g -O0 standalone ELF builds, with approximately
+31--33 FPS before/after on this host. Core suite passes both native-JS operand
+modes: 12 programs / 321 assertions, including the added event-key map coverage.
+Full Test262 regression verification is in progress; temporary receipts live
+under `artifacts/mish-i-*` and are not checked in.
+
 ## Diagnostics
 
 - `inspectHeapRecord`, `inspectExecution` and `inspectNativeFrames` expose

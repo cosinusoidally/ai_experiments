@@ -982,7 +982,9 @@
                     /* A string key selects named lookup only after the
                      * receiver has passed ToObject's null/undefined guard. */
                     if (arrayGetSupported === 1) arrayGetSupported = 3;
-                } else arrayGetSupported = 0;
+                } else {
+                    if (arrayGetSupported === 1) arrayGetSupported = 3;
+                }
                 var arrayGetObject = valueCellReference(0, arrayGetObjectCell);
                 var arrayGetOriginalObjectType = 0;
                 if (arrayGetObjectTag === RecordLayout.VALUE_TAG_REFERENCE) {
@@ -1560,13 +1562,12 @@
                     pc = 0;
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.SET_PROPERTY &&
-                    valueCellTag(0, bytecodeRegisterCellAddress(0, registerAddress,
-                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) !==
-                    RecordLayout.VALUE_TAG_REFERENCE &&
-                    negativeNumericPropertyKeyKernel(bytecodeRegisterCellAddress(0, registerAddress,
-                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) === 0) {
+                    nonnegativeNumericPropertyKeyKernel(valueCellAddress(0, registerAddress,
+                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) === 1) {
                 /* Numeric indexing stays on the dense/typed-array path.
-                 * Reference keys share the named-write dispatch below. */
+                 * All other keys share the named-write dispatch below.
+                 * SET_PROPERTY operands remain canonical register indices
+                 * even when the read/arithmetic families are predecoded. */
                 var arraySetObjectIndex = load32(
                     bytecodeAddress +
                     (pc + FIRST_OPERAND) * WORD_BYTES);
@@ -1576,10 +1577,10 @@
                 var arraySetSourceIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var arraySetObjectCell = registerAddress +
-                    arraySetObjectIndex * RecordLayout.VALUE_CELL_BYTES;
-                var arraySetKeyCell = registerAddress +
-                    arraySetKeyIndex * RecordLayout.VALUE_CELL_BYTES;
+                var arraySetObjectCell = valueCellAddress(
+                    0, registerAddress, arraySetObjectIndex);
+                var arraySetKeyCell = valueCellAddress(
+                    0, registerAddress, arraySetKeyIndex);
                 var arraySetSupported = 1;
                 if (load32(arraySetObjectCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
                     arraySetSupported = 0;
@@ -1624,8 +1625,8 @@
                         if (arraySetObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
                             var numericSetResult = numericPropertyAccessKernel(
                                 heapBase, state, 0, arraySetObject,
-                                arraySetIndex, registerAddress +
-                                    arraySetSourceIndex * RecordLayout.VALUE_CELL_BYTES,
+                                arraySetIndex, valueCellAddress(
+                                    0, registerAddress, arraySetSourceIndex),
                                 NUMERIC_PROPERTY_WRITE);
                             if (numericSetResult === 1) {
                                 arraySetSupported = 3;
@@ -1709,8 +1710,8 @@
                         }
                     }
                 }
-                var arraySetSource = registerAddress +
-                    arraySetSourceIndex * RecordLayout.VALUE_CELL_BYTES;
+                var arraySetSource = valueCellAddress(
+                    0, registerAddress, arraySetSourceIndex);
                 if (arraySetSupported === 1) {
                     var argumentEnvironment = arrayReserved(heapBase, arraySetObject);
                     if (argumentEnvironment !== 0 && argumentEnvironment !== RecordLayout.ARGUMENTS_UNMAPPED_ENVIRONMENT) {
@@ -10942,6 +10943,13 @@
     /* Negative numbers are names, not dense storage offsets. Preserve -0's
      * canonical index zero. Other existing key conversions retain their
      * normal dispatch; this classification never invokes user code. */
+    function nonnegativeNumericPropertyKeyKernel(cell) {
+        var tag = valueCellTag(0, cell);
+        if (tag !== VALUE_TAG_INT32 && tag !== VALUE_TAG_DOUBLE) return 0;
+        if (negativeNumericPropertyKeyKernel(cell) === 1) return 0;
+        return 1;
+    }
+
     function negativeNumericPropertyKeyKernel(cell) {
         var tag = valueCellTag(0, cell);
         if (tag === VALUE_TAG_INT32) return valueCellInt32(0, cell) < 0;
@@ -10954,6 +10962,15 @@
 
     function propertyNameReferenceKernel(heapBase, state, keyCell, stringSupport, platformServices) {
         var tag = valueCellTag(0, keyCell);
+        /* ES5 ToString for nonnumeric primitives uses the runtime's rooted
+         * canonical strings. No allocation or user callback is required. */
+        var primitiveName = -1;
+        if (tag === VALUE_TAG_UNDEFINED) primitiveName = RuntimeSupportLayout.TYPE_UNDEFINED;
+        else if (tag === VALUE_TAG_NULL) primitiveName = RuntimeSupportLayout.NULL_STRING;
+        else if (tag === VALUE_TAG_TRUE) primitiveName = RuntimeSupportLayout.TRUE_STRING;
+        else if (tag === VALUE_TAG_FALSE) primitiveName = RuntimeSupportLayout.FALSE_STRING;
+        if (primitiveName >= 0) return valueCellReference(0,
+            vectorCellAddress(heapBase, stringSupport, primitiveName));
         if (tag === VALUE_TAG_INT32 || tag === VALUE_TAG_DOUBLE) {
             var temporary = engineScratchLeftAddress(heapBase, state);
             if (numberCellToStringKernel(heapBase, state, temporary,
@@ -15581,7 +15598,11 @@
             key = keyPayload;
             var keyType = recordType(heapBase, key);
             if (keyType !== RecordLayout.HEAP_TYPE_STRING) return 0;
-        } else return 0;
+        } else {
+            key = propertyNameReferenceKernel(heapBase, state, keyCell,
+                stringSupport, enginePlatformServices(heapBase, state));
+            if (key === 0) return 0;
+        }
 
         /* Negative/fractional/nonfinite numeric keys require ToString; an
          * unsuccessful integer-index probe is not a missing-property result. */
@@ -18722,6 +18743,7 @@
             numericStringKeyMatchesKernel: numericStringKeyMatchesKernel,
             numberCellToStringKernel: numberCellToStringKernel,
             negativeNumericPropertyKeyKernel: negativeNumericPropertyKeyKernel,
+            nonnegativeNumericPropertyKeyKernel: nonnegativeNumericPropertyKeyKernel,
             propertyNameReferenceKernel: propertyNameReferenceKernel,
             numberFormatKernel: numberFormatKernel,
             numberToStringKernel: numberToStringKernel,
