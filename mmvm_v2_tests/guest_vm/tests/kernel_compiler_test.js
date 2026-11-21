@@ -4,6 +4,42 @@
             return (((left + right) * 3) ^ (left - right)) | 0;
         }
         var compiler = new Compiler();
+        var Instruction = typeof module !== "undefined" && module.exports ?
+            require("../bytecode.js") : root.GuestVMBytecode;
+        var cellBytes = (typeof module !== "undefined" && module.exports ?
+            require("../value_cell.js") : root.GuestVMValueCells).PAYLOAD_BYTES;
+        function operandAddressKernel(base, registers, operand) {
+            return instructionRegisterCellAddress(base, registers,
+                Instruction.GET_PROPERTY, 2, operand) +
+                instructionRegisterCellAddress(base, registers,
+                    Instruction.SET_PROPERTY, 2, operand);
+        }
+        /* One mixed-instruction fixture checks both execution views through
+         * both backends; the store must remain canonical in predecode mode. */
+        for (var operandMode = 0; operandMode < 2; operandMode++) {
+            var operandScale = operandMode ? 1 : cellBytes;
+            var operandIR = compiler.compile(operandAddressKernel, {
+                constantBindings: {VALUE_CELL_BYTES: cellBytes, BYTECODE_REGISTER_SCALE: operandScale},
+                constantNamespaces: {Instruction: Instruction}});
+            var operandJS = new JSBackend().compile(operandIR);
+            var operandX86 = new X86Backend().compile(operandIR);
+            try {
+                var expectedAddress = 2 * (100 + 200) + 3 * (operandScale + cellBytes);
+                if (operandJS.fn(null, 100, 200, 3) !== expectedAddress ||
+                        operandX86.fn && operandX86.fn(100, 200, 3) !== expectedAddress) {
+                    throw new Error("instruction register representation differs between backends");
+                }
+            } finally { operandX86.destroy(); }
+        }
+        function invalidOperandKernel(base, registers, operand) {
+            return instructionRegisterCellAddress(base, registers,
+                Instruction.GET_PROPERTY_CONST, 3, operand);
+        }
+        var invalidOperandRejected = false;
+        try { compiler.compile(invalidOperandKernel, {
+            constantNamespaces: {Instruction: Instruction}}); }
+        catch (invalidOperandError) { invalidOperandRejected = invalidOperandError instanceof SyntaxError; }
+        if (!invalidOperandRejected) throw new Error("constant-pool operand accepted as a register");
         /* Compare normal JavaScript with both backends, rather than asserting
          * a particular private IR shape for the loop implementation. */
         var ChecksumLayout = {COLUMNS: 3, FINAL_ROWS: 2};

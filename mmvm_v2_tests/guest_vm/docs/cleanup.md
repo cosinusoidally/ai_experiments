@@ -39,6 +39,14 @@ adding runtime loads or calls to hot code.
 
 ## Current issue register
 
+The next staged cutover is tracked in
+[Shared semantics and execution contracts](cleanup-2026-11.md). It begins with
+schema-checked instruction operand access after the unmapped-keyboard-input
+fix. This is ongoing work, not closure of the issues below. Current corpus
+measurements supersede old counts in historical entries: see
+[ECMA status](../../ECMA_TESTS_STATUS.md) and
+[Test262 status](../../TEST262_STATUS.md).
+
 The next property/root cutover is tracked in
 [property-unification.md](property-unification.md), with a separate
 [validation log](../../PROPERTY_CLEANUP_VALIDATION_2026-11-05.md). It shares

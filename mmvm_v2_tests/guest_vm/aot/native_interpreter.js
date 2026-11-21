@@ -937,10 +937,10 @@
                 var arrayGetKeyOperand = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var arrayGetObjectCell = bytecodeRegisterCellAddress(
-                    0, registerAddress, arrayGetObjectOperand);
-                var arrayGetKeyCell = bytecodeRegisterCellAddress(
-                    0, registerAddress, arrayGetKeyOperand);
+                var arrayGetObjectCell = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.GET_PROPERTY, SECOND_OPERAND, arrayGetObjectOperand);
+                var arrayGetKeyCell = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.GET_PROPERTY, THIRD_OPERAND, arrayGetKeyOperand);
                 var arrayGetSupported = 1;
                 var arrayGetObjectTag = load32(arrayGetObjectCell);
                 if (arrayGetObjectTag !== RecordLayout.VALUE_TAG_REFERENCE) {
@@ -1010,8 +1010,8 @@
                     var arrayGetObjectType = recordType(
                         heapBase, arrayGetObject);
                     if (arrayGetObjectType === RecordLayout.HEAP_TYPE_STRING) {
-                        var indexedStringTarget = bytecodeRegisterCellAddress(
-                            0, registerAddress, arrayGetTargetOperand);
+                        var indexedStringTarget = instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.GET_PROPERTY, FIRST_OPERAND, arrayGetTargetOperand);
                         var indexedStringLength = stringLength(
                             heapBase, arrayGetObject);
                         if (arrayGetIndex >= indexedStringLength) {
@@ -1088,8 +1088,8 @@
                 if (arrayGetSupported <= 2) {
                     if (arrayGetIndex < 0) arrayGetSupported = 0;
                 }
-                var arrayGetTarget = bytecodeRegisterCellAddress(
-                    0, registerAddress, arrayGetTargetOperand);
+                var arrayGetTarget = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.GET_PROPERTY, FIRST_OPERAND, arrayGetTargetOperand);
                 var indexedGetterEntered = 0;
                 var arrayGetVector = 0, arrayGetLength = 0;
                 if (arrayGetSupported === 1 && arrayGetOriginalObjectType === RecordLayout.HEAP_TYPE_ARRAY && arrayGetIndex >= 0) {
@@ -1562,7 +1562,8 @@
                     pc = 0;
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.SET_PROPERTY &&
-                    nonnegativeNumericPropertyKeyKernel(valueCellAddress(0, registerAddress,
+                    nonnegativeNumericPropertyKeyKernel(instructionRegisterCellAddress(0, registerAddress,
+                        Bytecode.SET_PROPERTY, SECOND_OPERAND,
                         load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) === 1) {
                 /* Numeric indexing stays on the dense/typed-array path.
                  * All other keys share the named-write dispatch below.
@@ -1577,10 +1578,10 @@
                 var arraySetSourceIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var arraySetObjectCell = valueCellAddress(
-                    0, registerAddress, arraySetObjectIndex);
-                var arraySetKeyCell = valueCellAddress(
-                    0, registerAddress, arraySetKeyIndex);
+                var arraySetObjectCell = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.SET_PROPERTY, FIRST_OPERAND, arraySetObjectIndex);
+                var arraySetKeyCell = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.SET_PROPERTY, SECOND_OPERAND, arraySetKeyIndex);
                 var arraySetSupported = 1;
                 if (load32(arraySetObjectCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
                     arraySetSupported = 0;
@@ -1625,8 +1626,8 @@
                         if (arraySetObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
                             var numericSetResult = numericPropertyAccessKernel(
                                 heapBase, state, 0, arraySetObject,
-                                arraySetIndex, valueCellAddress(
-                                    0, registerAddress, arraySetSourceIndex),
+                                arraySetIndex, instructionRegisterCellAddress(
+                                    0, registerAddress, Bytecode.SET_PROPERTY, THIRD_OPERAND, arraySetSourceIndex),
                                 NUMERIC_PROPERTY_WRITE);
                             if (numericSetResult === 1) {
                                 arraySetSupported = 3;
@@ -1710,8 +1711,8 @@
                         }
                     }
                 }
-                var arraySetSource = valueCellAddress(
-                    0, registerAddress, arraySetSourceIndex);
+                var arraySetSource = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.SET_PROPERTY, THIRD_OPERAND, arraySetSourceIndex);
                 if (arraySetSupported === 1) {
                     var argumentEnvironment = arrayReserved(heapBase, arraySetObject);
                     if (argumentEnvironment !== 0 && argumentEnvironment !== RecordLayout.ARGUMENTS_UNMAPPED_ENVIRONMENT) {

@@ -3,9 +3,11 @@
 (function (root) {
     var Parser = root.GuestVMParser;
     var KernelSlots = root.GuestVMKernelSlots;
+    var Bytecode = root.GuestVMBytecode;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("../parser.js");
         KernelSlots = require("./kernel_slots.js");
+        Bytecode = require("../bytecode.js");
     }
 
     function KernelCompiler() {}
@@ -2020,6 +2022,10 @@
                     index: symbol.index, type: "i32"};
         }
         if (node.type === "MemberExpression") return lowerKernelNamespaceField(node, symbols);
+        if (node.type === "CallExpression" && node.callee.type === "Identifier" &&
+                node.callee.name === "instructionRegisterCellAddress") {
+            return instructionRegisterAddress(node.arguments, symbols);
+        }
         if (node.type === "CallExpression" &&
             node.callee.type === "Identifier" &&
             INDEXED_ADDRESS_ACCESSORS[node.callee.name] &&
@@ -2251,6 +2257,34 @@
     function indexedAddress(name, argumentsList, symbols) {
         return indexedAddressDescriptor(
             INDEXED_ADDRESS_ACCESSORS[name], argumentsList, symbols);
+    }
+
+    /* The instruction schema, not the caller, chooses whether a register
+     * operand contains an index or a predecoded byte offset. Opcode and
+     * operand position are compile-time metadata: no execution-time branch. */
+    function instructionRegisterAddress(argumentsList, symbols) {
+        if (argumentsList.length !== 5 || !Bytecode) {
+            throw new SyntaxError("instruction register accessor requires bytecode schema and five arguments");
+        }
+        var opcode = lowerKernelExpression(argumentsList[2], symbols);
+        var operand = lowerKernelExpression(argumentsList[3], symbols);
+        if (opcode.op !== "const_i32" || operand.op !== "const_i32") {
+            throw new SyntaxError("instruction opcode and operand position must be constant");
+        }
+        var sources = Bytecode.SOURCE_OPERANDS[opcode.value];
+        var isRegister = Bytecode.DESTINATION_OPERANDS[opcode.value] === operand.value;
+        if (sources) {
+            for (var index = 0; index < sources.length; index++) {
+                if (sources[index] === operand.value) isRegister = true;
+            }
+        }
+        if (!sources || operand.value <= 0 || !isRegister) {
+            throw new SyntaxError("instruction accessor does not name a register operand");
+        }
+        var decoded = (Bytecode.NATIVE_REGISTER_MASKS[opcode.value] || 0) & (1 << operand.value);
+        return indexedAddressDescriptor({fieldValue: 0,
+            stride: decoded ? "BYTECODE_REGISTER_SCALE" : "VALUE_CELL_BYTES"},
+            [argumentsList[0], argumentsList[1], argumentsList[4]], symbols);
     }
 
     function indexedAddressDescriptor(descriptor, argumentsList, symbols) {

@@ -344,6 +344,18 @@ the supported adapters and the current acceptance boundaries.
 The compile result includes `.fn`, generated `.source`, `.ir` and backend
 identity; a graph result also exposes generated helper functions.
 
+The instruction-aware address accessor is
+`instructionRegisterCellAddress(base, registers, opcode, position, operand)`.
+The opcode and one-based operand position must lower to constants. Compilation
+checks the position against `bytecode.js` source/destination register metadata,
+rejecting constant-pool indices and other non-register operands. The same
+schema's execution-view mask selects `BYTECODE_REGISTER_SCALE` for decoded
+operands or `VALUE_CELL_BYTES` for canonical indices. The accessor lowers to
+the existing address expression; it does not introduce a runtime opcode test
+or a new JS/x86 backend operation. The bytecode schema must be loaded before
+compiling code using this accessor. Legacy address accessors remain available
+while instruction families migrate; they do not perform this validation.
+
 After NativeInterpreter consumes those results, diagnostic IR is discarded on
 both execution backends unless `retainNativeBuildIR` is enabled. The JS path
 keeps its compiled functions/source and cross-build x86 bytes; the native path
