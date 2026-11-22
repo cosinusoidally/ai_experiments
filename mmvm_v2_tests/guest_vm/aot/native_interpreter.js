@@ -1053,9 +1053,7 @@
                                 setRecordMark(heapBase, indexedString, 0);
                                 setRecordFlags(heapBase, indexedString, 0);
                                 setStringLength(heapBase, indexedString, 1);
-                                setStringHash(heapBase, indexedString,
-                                    (-2128831035 ^ indexedStringCode) *
-                                    16777619);
+                                setStringHash(heapBase, indexedString, 0);
                                 setStringCharacterByte(
                                     heapBase, indexedString, 0,
                                     indexedStringCode & 255);
@@ -2451,7 +2449,6 @@
                         setRecordFlags(heapBase, concatenationAddress, 0);
                         setStringLength(heapBase, concatenationAddress,
                                         concatenationLength);
-                        var concatenationHash = -2128831035;
                         var concatenationIndex = 0;
                         while (concatenationIndex < concatenationLength) {
                             var concatenationCode = 0;
@@ -2520,12 +2517,9 @@
                                 concatenationAddress,
                                 concatenationIndex * 2 + 1,
                                 (concatenationCode >>> 8) & 255);
-                            concatenationHash = (concatenationHash ^
-                                concatenationCode) * 16777619;
                             concatenationIndex = concatenationIndex + 1;
                         }
-                        setStringHash(heapBase, concatenationAddress,
-                                      concatenationHash);
+                        setStringHash(heapBase, concatenationAddress, 0);
                         if (concatenationNative !== 0) {
                             var concatenationFreeResult = callNativeI32(
                                 platformFreePointer(
@@ -7944,7 +7938,6 @@
                                         stringConvertLength);
                         var stringConvertIndex =
                             stringConvertLength - 1;
-                        var stringConvertHash = -2128831035;
                         while (stringConvertIndex >=
                                stringConvertNegative) {
                             var stringConvertDigit = 0;
@@ -7982,20 +7975,7 @@
                             setStringCharacterByte(heapBase,
                                 stringConvertResult, 1, 0);
                         }
-                        var stringConvertHashIndex = 0;
-                        while (stringConvertHashIndex <
-                               stringConvertLength) {
-                            var stringConvertHashCode =
-                                stringCharacterCodeUnit(heapBase,
-                                    stringConvertResult,
-                                    stringConvertHashIndex) & 65535;
-                            stringConvertHash = (stringConvertHash ^
-                                stringConvertHashCode) * 16777619;
-                            stringConvertHashIndex =
-                                stringConvertHashIndex + 1;
-                        }
-                        setStringHash(heapBase, stringConvertResult,
-                                      stringConvertHash);
+                        setStringHash(heapBase, stringConvertResult, 0);
                         setEngineHeapBump(heapBase, state,
                             stringConvertResult + stringConvertBytes);
                         setValueCellReference(intrinsicTarget, stringConvertResult);
@@ -10071,7 +10051,6 @@
         setRecordMark(heapBase, toStringResult, 0);
         setRecordFlags(heapBase, toStringResult, 0);
         setStringLength(heapBase, toStringResult, toStringUnitCount);
-        var toStringHash = -2128831035;
         var toStringInput = 0;
         var toStringOutput = 0;
         while (toStringInput < toStringByteLength) {
@@ -10108,8 +10087,6 @@
                 setStringCharacterByte(heapBase, toStringResult,
                     toStringOutput * 2 + 1,
                     (toStringHighSurrogate >>> 8) & 255);
-                toStringHash = (toStringHash ^ toStringHighSurrogate) *
-                               16777619;
                 toStringOutput = toStringOutput + 1;
                 toStringCode = 56320 + (toStringCode & 1023);
             }
@@ -10117,11 +10094,10 @@
                 toStringOutput * 2, toStringCode & 255);
             setStringCharacterByte(heapBase, toStringResult,
                 toStringOutput * 2 + 1, (toStringCode >>> 8) & 255);
-            toStringHash = (toStringHash ^ toStringCode) * 16777619;
             toStringOutput = toStringOutput + 1;
             toStringInput = toStringInput + 1;
         }
-        setStringHash(heapBase, toStringResult, toStringHash);
+        setStringHash(heapBase, toStringResult, 0);
         setEngineHeapBump(heapBase, state,
                           toStringResult + toStringRecordBytes);
         setValueCellReference(intrinsicTarget, toStringResult);
@@ -11001,15 +10977,7 @@
             setStringCharacterByte(
                 heapBase, resultString, index * 2 + 1, 0);
         }
-        var hash = RecordLayout.STRING_HASH_OFFSET_BASIS;
-        index = 0;
-        while (index < resultLength) {
-            code = stringCharacterCodeUnit(
-                heapBase, resultString, index) & 65535;
-            hash = (hash ^ code) * RecordLayout.STRING_HASH_PRIME;
-            index = index + 1;
-        }
-        setStringHash(heapBase, resultString, hash);
+        setStringHash(heapBase, resultString, 0);
         setEngineHeapBump(heapBase, state, resultString + stringBytes);
         setValueCellReference(intrinsicTarget, resultString);
         return 1;
@@ -11071,14 +11039,7 @@
             setStringCharacterByte(heapBase, result, index * 2, code);
             setStringCharacterByte(heapBase, result, index * 2 + 1, 0);
         }
-        var hash = -2128831035;
-        index = 0;
-        while (index < length) {
-            hash = (hash ^ (stringCharacterCodeUnit(
-                heapBase, result, index) & 65535)) * 16777619;
-            index = index + 1;
-        }
-        setStringHash(heapBase, result, hash);
+        setStringHash(heapBase, result, 0);
         setEngineHeapBump(heapBase, state, result + bytes);
         setValueCellReference(target, result);
         return 1;
@@ -11314,7 +11275,6 @@
         setRecordMark(heapBase, resultString, 0);
         setRecordFlags(heapBase, resultString, 0);
         setStringLength(heapBase, resultString, resultLength);
-        var hash = -2128831035;
         var index = resultLength;
         while (index > 0) {
             index = index - 1;
@@ -11323,19 +11283,8 @@
                 heapBase, resultString, index * 2, code);
             setStringCharacterByte(
                 heapBase, resultString, index * 2 + 1, 0);
-            hash = (hash ^ code) * 16777619;
         }
-        /* The backwards copy computed FNV in reverse order; recompute the
-         * canonical forward hash over the now-final UTF-16 representation. */
-        hash = -2128831035;
-        index = 0;
-        while (index < resultLength) {
-            code = stringCharacterCodeUnit(
-                heapBase, resultString, index) & 65535;
-            hash = (hash ^ code) * 16777619;
-            index = index + 1;
-        }
-        setStringHash(heapBase, resultString, hash);
+        setStringHash(heapBase, resultString, 0);
         setEngineHeapBump(heapBase, state, resultString + stringBytes);
         setValueCellReference(intrinsicTarget, resultString);
         return 1;
@@ -12738,7 +12687,6 @@
         setRecordMark(heapBase, caseResult, 0);
         setRecordFlags(heapBase, caseResult, 0);
         setStringLength(heapBase, caseResult, caseLength);
-        var caseHash = -2128831035;
         var caseFirst = ASCII_LOWER_A;
         var caseLast = ASCII_LOWER_Z;
         var caseDelta = ASCII_UPPER_A - ASCII_LOWER_A;
@@ -12762,10 +12710,9 @@
             setStringCharacterByte(
                 heapBase, caseResult, caseIndex * 2 + 1,
                 (caseCharacter >>> 8) & 255);
-            caseHash = (caseHash ^ caseCharacter) * 16777619;
             caseIndex = caseIndex + 1;
         }
-        setStringHash(heapBase, caseResult, caseHash);
+        setStringHash(heapBase, caseResult, 0);
         setEngineHeapBump(heapBase, state, caseResult + caseBytes);
         setValueCellReference(intrinsicTarget, caseResult);
         return 1;
@@ -13155,7 +13102,6 @@
                 setRecordMark(heapBase, splitPart, 0);
                 setRecordFlags(heapBase, splitPart, 0);
                 setStringLength(heapBase, splitPart, splitPartLength);
-                var splitPartHash = -2128831035;
                 var splitPartCharacter = 0;
                 while (splitPartCharacter < splitPartLength) {
                     var splitPartCode = stringCharacterCodeUnit(
@@ -13166,10 +13112,9 @@
                     setStringCharacterByte(heapBase, splitPart,
                         splitPartCharacter * 2 + 1,
                         (splitPartCode >>> 8) & 255);
-                    splitPartHash = (splitPartHash ^ splitPartCode) * 16777619;
                     splitPartCharacter = splitPartCharacter + 1;
                 }
-                setStringHash(heapBase, splitPart, splitPartHash);
+                setStringHash(heapBase, splitPart, 0);
                 setEngineHeapBump(heapBase, state,
                     splitPart + splitPartBytes);
             }
@@ -13248,7 +13193,6 @@
                 setRecordFlags(heapBase, fromCharCodeResult, 0);
                 setStringLength(heapBase, fromCharCodeResult,
                                 intrinsicArgumentCount);
-                var fromCharCodeHash = -2128831035;
                 var fromCharCodeIndex = 0;
                 while (fromCharCodeIndex <
                        intrinsicArgumentCount) {
@@ -13312,14 +13256,11 @@
                             fromCharCodeResult,
                             fromCharCodeIndex * 2 + 1,
                             (fromCharCodeValue >>> 8) & 255);
-                        fromCharCodeHash = (fromCharCodeHash ^
-                            fromCharCodeValue) * 16777619;
                     }
                     fromCharCodeIndex = fromCharCodeIndex + 1;
                 }
                 if (fromCharCodeValid === 1) {
-                    setStringHash(heapBase, fromCharCodeResult,
-                                  fromCharCodeHash);
+                    setStringHash(heapBase, fromCharCodeResult, 0);
                     setEngineHeapBump(heapBase, state,
                         fromCharCodeResult +
                         fromCharCodeBytes);
@@ -13575,8 +13516,7 @@
                                 setStringCharacterByte(heapBase,
                                     charAtResultAddress, 1,
                                     (charAtCode >>> 8) & 255);
-                                setStringHash(heapBase, charAtResultAddress,
-                                    (-2128831035 ^ charAtCode) * 16777619);
+                                setStringHash(heapBase, charAtResultAddress, 0);
                                 setEngineHeapBump(heapBase, state,
                                     charAtResultAddress + charAtStringBytes);
                             }
@@ -13780,7 +13720,6 @@
                                     replaceResultLength);
                     var replaceSourceIndex = 0;
                     var replaceResultIndex = 0;
-                    var replaceHash = -2128831035;
                     while (replaceSourceIndex <
                            replaceSourceLength) {
                         var replaceSourceCode =
@@ -13804,8 +13743,6 @@
                                     replaceResult,
                                     replaceResultIndex * 2 + 1,
                                     (replaceCode >>> 8) & 255);
-                                replaceHash = (replaceHash ^
-                                    replaceCode) * 16777619;
                                 replaceResultIndex =
                                     replaceResultIndex + 1;
                                 replaceCopyIndex =
@@ -13820,16 +13757,13 @@
                                 replaceResult,
                                 replaceResultIndex * 2 + 1,
                                 (replaceSourceCode >>> 8) & 255);
-                            replaceHash = (replaceHash ^
-                                replaceSourceCode) * 16777619;
                             replaceResultIndex =
                                 replaceResultIndex + 1;
                         }
                         replaceSourceIndex =
                             replaceSourceIndex + 1;
                     }
-                    setStringHash(heapBase, replaceResult,
-                                  replaceHash);
+                    setStringHash(heapBase, replaceResult, 0);
                     setEngineHeapBump(heapBase, state,
                         replaceResult + replaceResultBytes);
                     setValueCellReference(intrinsicTarget, replaceResult);
@@ -14017,7 +13951,6 @@
         setRecordMark(heapBase, result, 0);
         setRecordFlags(heapBase, result, 0);
         setStringLength(heapBase, result, length);
-        var hash = -2128831035;
         var index = 0;
         while (index < length) {
             var code = 0;
@@ -14031,10 +13964,9 @@
                 heapBase, result, index * 2, code & 255);
             setStringCharacterByte(
                 heapBase, result, index * 2 + 1, (code >>> 8) & 255);
-            hash = (hash ^ code) * 16777619;
             index = index + 1;
         }
-        setStringHash(heapBase, result, hash);
+        setStringHash(heapBase, result, 0);
         setEngineHeapBump(heapBase, state, result + bytes);
         return result;
     }
@@ -16422,7 +16354,6 @@
                 setRecordFlags(heapBase, joinResult, 0);
                 setStringLength(heapBase, joinResult,
                                 joinCharacterLength);
-                var joinHash = -2128831035;
                 var joinOutputIndex = 0;
                 var joinElementIndex = 0;
                 while (joinElementIndex < joinLength) {
@@ -16442,7 +16373,6 @@
                         setStringCharacterByte(heapBase, joinResult,
                             joinOutputIndex * 2 + 1,
                             (joinCode >>> 8) & 255);
-                        joinHash = (joinHash ^ joinCode) * 16777619;
                         joinOutputIndex = joinOutputIndex + 1;
                         joinCopyIndex = joinCopyIndex + 1;
                     }
@@ -16465,7 +16395,6 @@
                             setStringCharacterByte(heapBase, joinResult,
                                 joinOutputIndex * 2 + 1,
                                 (joinCode >>> 8) & 255);
-                            joinHash = (joinHash ^ joinCode) * 16777619;
                             joinOutputIndex = joinOutputIndex + 1;
                             joinCopyIndex = joinCopyIndex + 1;
                         }
@@ -16480,14 +16409,13 @@
                                 joinOutputIndex * 2, joinCode);
                             setStringCharacterByte(heapBase, joinResult,
                                 joinOutputIndex * 2 + 1, 0);
-                            joinHash = (joinHash ^ joinCode) * 16777619;
                             joinOutputIndex = joinOutputIndex + 1;
                             joinIntegerIndex = joinIntegerIndex + 1;
                         }
                     }
                     joinElementIndex = joinElementIndex + 1;
                 }
-                setStringHash(heapBase, joinResult, joinHash);
+                setStringHash(heapBase, joinResult, 0);
                 setEngineHeapBump(heapBase, state,
                                   joinResult + joinBytes);
                 setValueCellReference(targetCell, joinResult);
@@ -17558,15 +17486,7 @@
             }
             sourceIndex = sourceIndex + 1;
         }
-        var hash = -2128831035;
-        resultIndex = 0;
-        while (resultIndex < resultLength) {
-            code = stringCharacterCodeUnit(
-                heapBase, result, resultIndex) & 65535;
-            hash = (hash ^ code) * 16777619;
-            resultIndex = resultIndex + 1;
-        }
-        setStringHash(heapBase, result, hash);
+        setStringHash(heapBase, result, 0);
         setEngineHeapBump(heapBase, state, result + resultBytes);
         setValueCellReference(targetCell, result);
         return 1;
@@ -17727,14 +17647,7 @@
                 heapBase, result, resultIndex, code);
             sourceIndex = sourceIndex + consumed;
         }
-        var hash = -2128831035;
-        resultIndex = 0;
-        while (resultIndex < resultLength) {
-            code = stringCharacterCodeUnit(heapBase, result, resultIndex) & 65535;
-            hash = (hash ^ code) * 16777619;
-            resultIndex = resultIndex + 1;
-        }
-        setStringHash(heapBase, result, hash);
+        setStringHash(heapBase, result, 0);
         setEngineHeapBump(heapBase, state, result + bytes);
         setValueCellReference(targetCell, result);
         return 1;

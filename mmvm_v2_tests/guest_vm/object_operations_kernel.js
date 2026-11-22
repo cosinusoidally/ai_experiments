@@ -118,7 +118,7 @@
         setRecordMark(heapBase, result, 0);
         setRecordFlags(heapBase, result, 0);
         setStringLength(heapBase, result, 1);
-        setStringHash(heapBase, result, stringHashStep(STRING_HASH_OFFSET_BASIS, code));
+        setStringHash(heapBase, result, 0);
         setStringCharacterByte(heapBase, result, 0, code & 255);
         setStringCharacterByte(heapBase, result, 1, code >>> 8);
         setEngineHeapBump(heapBase, state, result + bytes);

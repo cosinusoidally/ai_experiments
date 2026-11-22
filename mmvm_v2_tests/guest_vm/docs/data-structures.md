@@ -203,6 +203,15 @@ Its `stringKeysEqualKernel` handles code-unit equality and
 `Records.findPropertyStorageEntry` provides the corresponding portable
 property-lookup path. Hash equality alone is never string equality.
 
+An unhashed string initializes `STRING_HASH` to zero, with
+`STRING_KEY_HASH_FLAG` clear. Readers must check that flag before using the
+cache. Canonical hashing uses `stringHashStep` (exact split-word FNV
+multiplication), then publishes the hash and validity flag. Producers that
+already need a canonical property-key hash may publish both together.
+Do not compute an unused eager hash with ordinary JavaScript multiplication:
+besides wasting a character scan, double and word backends can put different
+invalid cache bytes into an otherwise identical snapshot.
+
 `internStringAddress` returns the canonical live heap address;
 `internString` returns its decoded primitive text. `computedStringAddress`
 uses the same index but accounts for newly allocated computed strings in the

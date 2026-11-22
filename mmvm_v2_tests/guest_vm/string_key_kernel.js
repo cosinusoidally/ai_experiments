@@ -1,6 +1,8 @@
 /* Allocation-free guest string-key operations, shared by property lookup
  * and both interpreter backends. Accesses use named record primitives;
- * hashing may cache a hash but never allocates or invokes guest code. */
+ * hashing may cache a hash but never allocates or invokes guest code.
+ * Producers initialize an invalid cache to zero; canonical key hashing
+ * publishes the computed hash together with its validity flag. */
 (function (root) {
     function stringKeysEqualKernel(heapBase, left, right) {
         if (left === right) return 1;

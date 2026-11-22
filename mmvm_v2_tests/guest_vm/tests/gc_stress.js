@@ -67,7 +67,7 @@
     function auditHeap() {
         var heap = vm.runtime.linearHeap, records = vm.runtime.heapRecords;
         checkEngineLinks();
-        var boundFunctions = 0;
+        var boundFunctions = [];
         var boundaries = {}, position = Heap.FIRST_RECORD;
         var freeCount = 0, freeIndex = {}, index;
         while (position < heap.bump) {
@@ -177,7 +177,7 @@
             }
             if (live.type === Heap.Types.NATIVE_FUNCTION &&
                     records.functionMetadata(position) === NativeIntrinsics.BOUND_FUNCTION) {
-                boundFunctions++;
+                boundFunctions.push(position);
             }
             position += live.size;
         }
@@ -204,12 +204,26 @@
                 vm.collect();
                 auditHeap();
             }));
-        auditHeap();
+        /* Runtime-owned pristine invocation helpers may themselves be bound
+         * functions. Establish their exact live identities after collection;
+         * workload-created bound functions must not survive the final GC.
+         * These diagnostic addresses are not guest roots. */
+        vm.collect();
+        var baselineBoundFunctions = auditHeap();
         vm.run(source, "guest_vm/tests/gc_stress_workload.js");
         vm.collect();
-        if (auditHeap() !== 0) throw new Error("GC stress: discarded bound functions remain rooted");
+        var survivingBoundFunctions = auditHeap();
+        if (survivingBoundFunctions.length !== baselineBoundFunctions.length) {
+            throw new Error("GC stress: discarded bound functions remain rooted");
+        }
+        for (var boundIndex = 0; boundIndex < baselineBoundFunctions.length; boundIndex++) {
+            if (survivingBoundFunctions[boundIndex] !== baselineBoundFunctions[boundIndex]) {
+                throw new Error("GC stress: runtime bound-function identities changed");
+            }
+        }
         output("GC structural checks passed: audits=" + audits + ", edges=" + edges +
             ", property-index audits=" + indexAudits +
+            ", runtime bound functions=" + baselineBoundFunctions.length +
             ", embedding collections=" + vm.runtime.collectionCount +
             ", maximum observed bump=" + maximumBump + ", guest heap cap=" + heapCap +
             ", workload/check time=" + (new Date().getTime() - started) + " ms");
