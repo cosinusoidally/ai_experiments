@@ -4,10 +4,12 @@
     var Parser = root.GuestVMParser;
     var KernelSlots = root.GuestVMKernelSlots;
     var Bytecode = root.GuestVMBytecode;
+    var StringHash = root.GuestVMStringHash;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("../parser.js");
         KernelSlots = require("./kernel_slots.js");
         Bytecode = require("../bytecode.js");
+        StringHash = require("../string_hash.js");
     }
 
     function KernelCompiler() {}
@@ -65,9 +67,7 @@
             captureFunctionSource: true, compactLiterals: true
         }).parseProgram();
         var parsedAt = new Date().getTime();
-        var FNV1A_OFFSET_BASIS = -2128831035;
-        var FNV1A_PRIME = 16777619;
-        var hash = FNV1A_OFFSET_BASIS;
+        var hash = StringHash.offsetBasis;
         var textHashes = {};
         var fieldSchemas = {};
         var STRUCTURAL_HASH_MULTIPLIER = 65599;
@@ -80,13 +80,7 @@
             var key = "$" + text;
             var digest = textHashes[key];
             if (digest === undefined) {
-                digest = FNV1A_OFFSET_BASIS;
-                var index = 0;
-                while (index < text.length) {
-                    var code = text.charCodeAt(index++);
-                    digest = ((digest ^ (code & 255)) * FNV1A_PRIME) | 0;
-                    digest = ((digest ^ (code >>> 8)) * FNV1A_PRIME) | 0;
-                }
+                digest = StringHash.hashStringBytes(text);
                 textHashes[key] = digest;
             }
             return digest;

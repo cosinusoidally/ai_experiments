@@ -118,7 +118,7 @@
         setRecordMark(heapBase, result, 0);
         setRecordFlags(heapBase, result, 0);
         setStringLength(heapBase, result, 1);
-        setStringHash(heapBase, result, 0);
+        initializeUnhashedStringKernel(heapBase, result);
         setStringCharacterByte(heapBase, result, 0, code & 255);
         setStringCharacterByte(heapBase, result, 1, code >>> 8);
         setEngineHeapBump(heapBase, state, result + bytes);
@@ -467,11 +467,7 @@
      * temporary decimal key string. The returned address is transient. */
     function indexedOwnPropertyDescriptorKernel(heapBase, state, owner, index) {
         var digits = integerDecimalLengthKernel(index);
-        var hash = STRING_HASH_OFFSET_BASIS, digit = 0;
-        while (digit < digits) {
-            hash = stringHashStep(hash, integerDecimalCodeUnitKernel(index, digit));
-            digit = digit + 1;
-        }
+        var hash = integerPropertyKeyHashKernel(index, digits);
         var entry = numericOwnPropertyEntryKernel(heapBase, state, owner, index, digits, hash);
         if (entry === 0) return 0;
         return ownPropertyEntryDescriptorKernel(heapBase, owner, entry);

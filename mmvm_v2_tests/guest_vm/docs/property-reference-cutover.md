@@ -101,3 +101,55 @@ Preserve genuine cross-host/self-hosted fixed-point snapshot construction.
   Full Test262/ECMA/Octane runs have not been repeated for this intermediate
   producer cleanup; the previous combined-checkpoint results remain the broad
   suite baseline, not a new acceptance claim for the reference cutover.
+
+## Hash consolidation before further reference work (2026-11-22)
+
+Contract 115 consolidates string-hash arithmetic and constants in
+`string_hash.js`. Heap-record hashing now calls the existing shared
+`stringKeyHashKernel` rather than decoding the string and repeating the
+character fold in portable JavaScript. Cached hash reads keep their prior
+path; uncached calls validate the string record before entering the kernel.
+Numeric access and descriptor probing share `integerPropertyKeyHashKernel`,
+passing their already-computed decimal length rather than recomputing it.
+Compiler token fingerprints use the same exact arithmetic through an explicit
+UTF-16LE byte adapter. Their former rounded multiplication is removed.
+The diagnostic number samples also obtain the constants from this module.
+Native producers call `initializeUnhashedStringKernel` instead of scattered
+zero-cache writes. This named allocation-time operation requires a new header
+whose hash-valid flag is clear. It deliberately does not hash every temporary
+string; the common hashing kernel computes and publishes a cache only on use.
+
+The ES3 shell loader, Node imports, shell executable packager and kernel debug
+source catalog include the new module. This change does not advance the
+unfinished reference bytecodes or their additional integration cases.
+
+Validation of the consolidation:
+
+- Core suites pass on Node and i386 js_min; the final Node rerun also passes
+  after the named initializer was added (12 programs / 321 assertions).
+- Node, js_min and genuine self-hosted snapshots are bit identical:
+  SHA-256 `0555438748449421503ebe1f43b23b0316688a10bb7f37c614680e3cf26fc32d`.
+  Final self-build: 84.58 s / 479500 KiB peak RSS, versus the previous
+  83.88 s / 479452 KiB observation. Final js_min build: 102.04 s /
+  319156 KiB, versus 94.17 s / 388588 KiB previously. The js_min observation
+  is slower despite lower RSS; do not claim build-time improvement or full
+  performance neutrality from these individual runs.
+- All seven standalone program checks and all eleven demo/server checks pass
+  with the source snapshot moved aside. GC stress passes 24 rounds, 27 audits,
+  123498 checked edges, 221 property-index audits and 81 embedding collections
+  under an 8 MiB heap cap; only the one expected runtime bound function survives.
+- Full Test262: 3292 executed / 3292 passed / 0 failed / 0 timed out /
+  0 not run, 357.06 s / 512396 KiB peak RSS. See `TEST262_STATUS.md`.
+- Native code is 692758 bytes (previous 697391); the snapshot is 7629496
+  bytes (previous 7630336). Full ECMA and full Octane are not rerun for this
+  consolidation; their older results are not new acceptance claims.
+- Paired stock Octane observations against the preceding contract-114
+  executable: CodeLoad 92 -> 93, Box2D 395 -> 405, PdfJS 759 -> 781. Each
+  benchmark completes with its normal correctness checks. These individual
+  pairs show no regression in the sampled workloads, not controlled speedups.
+- The executable packager runs under Node, js_min and the standalone guest;
+  all three produce bit-identical executables from the same snapshot bytes.
+- An optimized `-g` snapshot build completes with the updated source catalog.
+  The committed property integration fixture passes under the standalone
+  executable; the additional unfinished ES5.1 reference cases remain outside
+  this checkpoint. No new full debugger or ECMA acceptance run is claimed.

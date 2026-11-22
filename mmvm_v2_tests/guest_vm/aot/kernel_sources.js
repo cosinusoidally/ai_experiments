@@ -10,7 +10,7 @@
         "guest_vm/aot/native_interpreter.js", "guest_vm/aot/heap_sweeper.js",
         "guest_vm/aot/free_index_kernel.js", "guest_vm/native_free_index_kernel.js",
         "guest_vm/property_storage_kernel.js", "guest_vm/property_semantics_kernel.js",
-        "guest_vm/string_key_kernel.js", "guest_vm/number_format_kernel.js",
+        "guest_vm/string_hash.js", "guest_vm/string_key_kernel.js", "guest_vm/number_format_kernel.js",
         "guest_vm/object_operations_kernel.js", "guest_vm/memory_transfer_kernel.js",
         "guest_vm/lexical_environment_kernel.js", "guest_vm/heap_records.js",
         "guest_vm/value_cell.js", "guest_vm/binary64.js", "guest_vm/aot/record_initializer.js",

@@ -34,8 +34,11 @@
     if (registersOnly) args = args.slice(1);
     if (args[0] === "--numbers") {
         var conversion = nodeHost ? require("../binary64.js") : GuestVMBinary64;
-        var samples = [1.7976931348623157e308, 5e-324, 16777619,
-                       -2128831035 * 16777619];
+        var hashing = nodeHost ? require("../string_hash.js") : GuestVMStringHash;
+        /* Exercise binary64 rounding at the FNV product's magnitude. This
+         * is a numeric-encoding sample, not another hash implementation. */
+        var samples = [1.7976931348623157e308, 5e-324, hashing.prime,
+                       hashing.offsetBasis * hashing.prime];
         var sampleIndex = 0;
         while (sampleIndex < samples.length) {
             var sample = samples[sampleIndex++];

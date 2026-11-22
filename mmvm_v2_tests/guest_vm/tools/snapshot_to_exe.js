@@ -35,6 +35,7 @@
         load("guest_vm/tokenizer.js");
         load("guest_vm/parser.js");
         load("guest_vm/aot/kernel_slots.js");
+        load("guest_vm/string_hash.js");
         load("guest_vm/aot/kernel_compiler.js");
         load("guest_vm/aot/backend_x86.js");
         load("guest_vm/tools/snapshot_launcher.js");

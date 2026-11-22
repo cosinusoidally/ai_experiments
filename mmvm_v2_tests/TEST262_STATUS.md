@@ -1,5 +1,17 @@
 # Test262 status
 
+2026-11-22, approximately 13:21 GMT, shared string hashing (contract 115):
+
+- Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
+  0 timed out / 0 not run**, unchanged corpus, harness and default limits.
+- Harness **356372.763 ms**, summed tests **336733.018 ms**; process **357.06 s**,
+  peak RSS **512396 KiB**, exit 0. The earlier contract-111 run was 339.23 s;
+  these are individual observations across multiple cleanup commits, not a
+  controlled attribution to the hash consolidation. The four long lexical
+  cases remain the dominant cost. Testing was serial, with the executable's
+  source snapshot physically moved aside.
+- Receipts: ignored `artifacts/hash-consolidated-test262.log` and `.time`.
+
 2026-11-21, shared property ownership/lookup (`f82b7e5`, contract 111):
 
 - Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /

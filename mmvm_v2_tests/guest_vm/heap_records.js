@@ -6,17 +6,19 @@
     var ValueCells = root.GuestVMValueCells;
     var Bytecode = root.GuestVMBytecode;
     var ProgramDebugLayout = root.GuestVMProgramDebugLayout;
+    var StringHash = root.GuestVMStringHash;
     if (typeof module !== "undefined" && module.exports) {
         Heap = require("./heap.js");
         ValueCells = require("./value_cell.js");
         Bytecode = require("./bytecode.js");
         ProgramDebugLayout = require("./program_debug_layout.js");
+        StringHash = require("./string_hash.js");
     }
 
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
     var INITIAL_ARRAY_CAPACITY = 4;
     var MAX_VECTOR_LENGTH = 134217726;
-    /* The resolved (already guarded) descriptor algorithm is shared with
+    /* Record algorithms (property storage and strings) are shared with
      * native execution. Cache code only: the memory argument selects a heap
      * on every call, so no runtime/owner is retained by this service. */
     var propertyKernelEntries = {};
@@ -46,7 +48,7 @@
         }
         dependencies.stringHashStep = stringHashStep;
         var ir = new Compiler().compileGraph(
-            kernels[name], dependencies,
+            kernels[name] || strings[name], dependencies,
             {constantBindings: Records.KernelConstants,
              constantNamespaces: {RecordLayout: Records.KernelConstants}});
         var compiled = new Backend().compile(ir);
@@ -120,8 +122,8 @@
     var VECTOR_SHARED_METADATA_FLAG = 1;
     var STRING_SLICE_FLAG = 4;
     var STRING_KEY_HASH_FLAG = 8;
-    var STRING_HASH_OFFSET_BASIS = -2128831035;
-    var STRING_HASH_PRIME = 16777619;
+    var STRING_HASH_OFFSET_BASIS = StringHash.offsetBasis;
+    var STRING_HASH_PRIME = StringHash.prime;
     var STRING_SLICE_BACKING = 8;
     var STRING_SLICE_START = 12;
     var STRING_DECODE_CHUNK_UNITS = 256;
@@ -389,7 +391,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 114;
+    Records.NativeInterpreterContractVersion = 115;
     Records.HeapSizePolicy = Heap.SizePolicy;
     Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
@@ -755,14 +757,7 @@
         return this.heap.requireRecord(handle.heapAddress);
     };
 
-    /* Exact low-word multiplication using products representable in binary64.
-     * The same source is compiled into the native kernel. Ordinary JS's
-     * direct FNV multiplication can round away low bits before truncation. */
-    function stringHashStep(hash, code) {
-        var word = (hash ^ code) | 0;
-        return ((word & 65535) * STRING_HASH_PRIME +
-            ((((word >>> 16) * STRING_HASH_PRIME) & 65535) << 16)) | 0;
-    }
+    var stringHashStep = StringHash.step;
     Records.stringHashStep = stringHashStep;
 
     Records.prototype.allocateString = function (value) {
@@ -902,15 +897,15 @@
     };
 
     Records.prototype.stringHash = function (address) {
-        var flags = this.heap.flags(address);
-        if (!(flags & STRING_KEY_HASH_FLAG)) {
-            var text = this.readString(address);
-            var hash = STRING_HASH_OFFSET_BASIS, index = 0;
-            while (index < text.length) hash = stringHashStep(hash, text.charCodeAt(index++));
-            this.heap.writeTrustedFieldU32(address, STRING_HASH, hash, Heap.Types.STRING);
-            this.heap.setFlags(address, flags | STRING_KEY_HASH_FLAG);
+        if (this.heap.flags(address) & STRING_KEY_HASH_FLAG) {
+            return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
         }
-        return this.heap.readTrustedFieldU32(address, STRING_HASH, Heap.Types.STRING);
+        this.heap.requireRecord(address, Heap.Types.STRING);
+        if (!this.stringHashKernel) {
+            this.stringHashKernel = compilePropertyStorageKernel(
+                "stringKeyHashKernel", this.heap.memory);
+        }
+        return this.stringHashKernel(this.heap.memory, 0, address) >>> 0;
     };
 
     Records.prototype.stringIsRope = function (address) {

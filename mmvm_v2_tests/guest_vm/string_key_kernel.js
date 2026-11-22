@@ -86,11 +86,32 @@
      * A separate validity flag distinguishes a cached zero hash from unknown
      * and guarantees identical key hashes under both kernel backends. Hash
      * collisions still take the exact code-unit comparison above. */
+    /* Allocation-time cache initialization, not hash calculation. The caller
+     * has initialized the new record's layout flags with KEY_HASH clear.
+     * Keeping this leaf to one store lets normal kernel inlining preserve
+     * allocation cost; do not scan characters that may never need a hash. */
+    function initializeUnhashedStringKernel(heapBase, string) {
+        setStringHash(heapBase, string, 0);
+    }
+
     function stringKeyHashKernel(heapBase, string) {
         if ((recordFlags(heapBase, string) & RecordLayout.STRING_KEY_HASH_FLAG) === 0) {
             return computeStringKeyHashKernel(heapBase, string);
         }
         return stringHash(heapBase, string) | 0;
+    }
+
+    /* Hash a virtual decimal property name without allocating a string.
+     * Both indexed descriptor probing and numeric property access use this
+     * same spelling and code-unit stream, including negative integers. */
+    function integerPropertyKeyHashKernel(number, length) {
+        var hash = RecordLayout.STRING_HASH_OFFSET_BASIS;
+        var index = 0;
+        while (index < length) {
+            hash = stringHashStep(hash, integerDecimalCodeUnitKernel(number, index));
+            index = index + 1;
+        }
+        return hash;
     }
 
     function computeStringKeyHashKernel(heapBase, string) {
@@ -154,8 +175,10 @@
 
     var functions = {
         stringKeysEqualKernel: stringKeysEqualKernel,
+        initializeUnhashedStringKernel: initializeUnhashedStringKernel,
         stringKeyHashKernel: stringKeyHashKernel,
         computeStringKeyHashKernel: computeStringKeyHashKernel,
+        integerPropertyKeyHashKernel: integerPropertyKeyHashKernel,
         stringCharacterCodeUnit: stringCharacterCodeUnit,
         indirectStringCharacterCodeUnitKernel: indirectStringCharacterCodeUnitKernel
     };

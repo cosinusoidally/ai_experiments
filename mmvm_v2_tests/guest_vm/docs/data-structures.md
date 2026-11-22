@@ -203,11 +203,33 @@ Its `stringKeysEqualKernel` handles code-unit equality and
 `Records.findPropertyStorageEntry` provides the corresponding portable
 property-lookup path. Hash equality alone is never string equality.
 
+[`string_hash.js`](../string_hash.js) owns the FNV offset basis, prime and
+exact `stringHashStep` arithmetic. `Records.stringHashStep` remains an alias
+for compiler dependency wiring, not a second implementation. Both portable
+`Records.stringHash` and native execution calculate uncached heap hashes
+through the same compiled `stringKeyHashKernel`, without decoding strings
+onto the host heap. A valid cached hash retains the direct field-read path.
+`integerPropertyKeyHashKernel` feeds canonical decimal code units for virtual
+integer names, shared by indexed descriptor lookup and numeric property access;
+it does not allocate a temporary string.
+
+Compiler token fingerprints intentionally hash a different input stream:
+`StringHash.hashStringBytes` feeds each UTF-16 code unit as low then high byte
+through the same exact step. This encoding is not interchangeable with heap
+property-key hashing. Fingerprints no longer have a separate rounded FNV
+implementation; contract 115 invalidates older interpreter images.
+
 An unhashed string initializes `STRING_HASH` to zero, with
 `STRING_KEY_HASH_FLAG` clear. Readers must check that flag before using the
 cache. Canonical hashing uses `stringHashStep` (exact split-word FNV
 multiplication), then publishes the hash and validity flag. Producers that
 already need a canonical property-key hash may publish both together.
+Native producers express allocation-time initialization through
+`initializeUnhashedStringKernel`; its precondition is a newly initialized
+record header with the hash-valid flag clear. It does not calculate a hash
+or invalidate a previously published string. Zero is only the deterministic
+initial cache payload, not the test for whether a hash exists. Hashing stays
+lazy so temporary strings, ropes and slices do not require an eager scan.
 Do not compute an unused eager hash with ordinary JavaScript multiplication:
 besides wasting a character scan, double and word backends can put different
 invalid cache bytes into an otherwise identical snapshot.

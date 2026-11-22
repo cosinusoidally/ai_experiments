@@ -1053,7 +1053,7 @@
                                 setRecordMark(heapBase, indexedString, 0);
                                 setRecordFlags(heapBase, indexedString, 0);
                                 setStringLength(heapBase, indexedString, 1);
-                                setStringHash(heapBase, indexedString, 0);
+                                initializeUnhashedStringKernel(heapBase, indexedString);
                                 setStringCharacterByte(
                                     heapBase, indexedString, 0,
                                     indexedStringCode & 255);
@@ -2519,7 +2519,7 @@
                                 (concatenationCode >>> 8) & 255);
                             concatenationIndex = concatenationIndex + 1;
                         }
-                        setStringHash(heapBase, concatenationAddress, 0);
+                        initializeUnhashedStringKernel(heapBase, concatenationAddress);
                         if (concatenationNative !== 0) {
                             var concatenationFreeResult = callNativeI32(
                                 platformFreePointer(
@@ -7975,7 +7975,7 @@
                             setStringCharacterByte(heapBase,
                                 stringConvertResult, 1, 0);
                         }
-                        setStringHash(heapBase, stringConvertResult, 0);
+                        initializeUnhashedStringKernel(heapBase, stringConvertResult);
                         setEngineHeapBump(heapBase, state,
                             stringConvertResult + stringConvertBytes);
                         setValueCellReference(intrinsicTarget, stringConvertResult);
@@ -10097,7 +10097,7 @@
             toStringOutput = toStringOutput + 1;
             toStringInput = toStringInput + 1;
         }
-        setStringHash(heapBase, toStringResult, 0);
+        initializeUnhashedStringKernel(heapBase, toStringResult);
         setEngineHeapBump(heapBase, state,
                           toStringResult + toStringRecordBytes);
         setValueCellReference(intrinsicTarget, toStringResult);
@@ -10977,7 +10977,7 @@
             setStringCharacterByte(
                 heapBase, resultString, index * 2 + 1, 0);
         }
-        setStringHash(heapBase, resultString, 0);
+        initializeUnhashedStringKernel(heapBase, resultString);
         setEngineHeapBump(heapBase, state, resultString + stringBytes);
         setValueCellReference(intrinsicTarget, resultString);
         return 1;
@@ -11039,7 +11039,7 @@
             setStringCharacterByte(heapBase, result, index * 2, code);
             setStringCharacterByte(heapBase, result, index * 2 + 1, 0);
         }
-        setStringHash(heapBase, result, 0);
+        initializeUnhashedStringKernel(heapBase, result);
         setEngineHeapBump(heapBase, state, result + bytes);
         setValueCellReference(target, result);
         return 1;
@@ -11284,7 +11284,7 @@
             setStringCharacterByte(
                 heapBase, resultString, index * 2 + 1, 0);
         }
-        setStringHash(heapBase, resultString, 0);
+        initializeUnhashedStringKernel(heapBase, resultString);
         setEngineHeapBump(heapBase, state, resultString + stringBytes);
         setValueCellReference(intrinsicTarget, resultString);
         return 1;
@@ -12712,7 +12712,7 @@
                 (caseCharacter >>> 8) & 255);
             caseIndex = caseIndex + 1;
         }
-        setStringHash(heapBase, caseResult, 0);
+        initializeUnhashedStringKernel(heapBase, caseResult);
         setEngineHeapBump(heapBase, state, caseResult + caseBytes);
         setValueCellReference(intrinsicTarget, caseResult);
         return 1;
@@ -13114,7 +13114,7 @@
                         (splitPartCode >>> 8) & 255);
                     splitPartCharacter = splitPartCharacter + 1;
                 }
-                setStringHash(heapBase, splitPart, 0);
+                initializeUnhashedStringKernel(heapBase, splitPart);
                 setEngineHeapBump(heapBase, state,
                     splitPart + splitPartBytes);
             }
@@ -13260,7 +13260,7 @@
                     fromCharCodeIndex = fromCharCodeIndex + 1;
                 }
                 if (fromCharCodeValid === 1) {
-                    setStringHash(heapBase, fromCharCodeResult, 0);
+                    initializeUnhashedStringKernel(heapBase, fromCharCodeResult);
                     setEngineHeapBump(heapBase, state,
                         fromCharCodeResult +
                         fromCharCodeBytes);
@@ -13516,7 +13516,7 @@
                                 setStringCharacterByte(heapBase,
                                     charAtResultAddress, 1,
                                     (charAtCode >>> 8) & 255);
-                                setStringHash(heapBase, charAtResultAddress, 0);
+                                initializeUnhashedStringKernel(heapBase, charAtResultAddress);
                                 setEngineHeapBump(heapBase, state,
                                     charAtResultAddress + charAtStringBytes);
                             }
@@ -13763,7 +13763,7 @@
                         replaceSourceIndex =
                             replaceSourceIndex + 1;
                     }
-                    setStringHash(heapBase, replaceResult, 0);
+                    initializeUnhashedStringKernel(heapBase, replaceResult);
                     setEngineHeapBump(heapBase, state,
                         replaceResult + replaceResultBytes);
                     setValueCellReference(intrinsicTarget, replaceResult);
@@ -13873,7 +13873,9 @@
 
     var stringKeysEqualKernel = StringKeyKernels.stringKeysEqualKernel;
     var stringKeyHashKernel = StringKeyKernels.stringKeyHashKernel;
+    var initializeUnhashedStringKernel = StringKeyKernels.initializeUnhashedStringKernel;
     var computeStringKeyHashKernel = StringKeyKernels.computeStringKeyHashKernel;
+    var integerPropertyKeyHashKernel = StringKeyKernels.integerPropertyKeyHashKernel;
     var stringCharacterCodeUnit = StringKeyKernels.stringCharacterCodeUnit;
     var indirectStringCharacterCodeUnitKernel = StringKeyKernels.indirectStringCharacterCodeUnitKernel;
 
@@ -13898,7 +13900,7 @@
         setRecordMark(heapBase, result, 0);
         setRecordFlags(heapBase, result, RecordLayout.STRING_SLICE_FLAG);
         setStringLength(heapBase, result, length);
-        setStringHash(heapBase, result, 0);
+        initializeUnhashedStringKernel(heapBase, result);
         setStringSliceBacking(heapBase, result, backing);
         setStringSliceStart(heapBase, result, start);
         setEngineHeapBump(heapBase, state, result + RecordLayout.STRING_SLICE_RECORD_BYTES);
@@ -13925,7 +13927,7 @@
         setRecordMark(heapBase, rope, 0);
         setRecordFlags(heapBase, rope, RecordLayout.STRING_ROPE_FLAG);
         setStringLength(heapBase, rope, length);
-        setStringHash(heapBase, rope, 0);
+        initializeUnhashedStringKernel(heapBase, rope);
         setStringRopeLeft(heapBase, rope, left);
         setStringRopeRight(heapBase, rope, right);
         setStringRopeDepth(heapBase, rope, depth);
@@ -13966,7 +13968,7 @@
                 heapBase, result, index * 2 + 1, (code >>> 8) & 255);
             index = index + 1;
         }
-        setStringHash(heapBase, result, 0);
+        initializeUnhashedStringKernel(heapBase, result);
         setEngineHeapBump(heapBase, state, result + bytes);
         return result;
     }
@@ -16415,7 +16417,7 @@
                     }
                     joinElementIndex = joinElementIndex + 1;
                 }
-                setStringHash(heapBase, joinResult, 0);
+                initializeUnhashedStringKernel(heapBase, joinResult);
                 setEngineHeapBump(heapBase, state,
                                   joinResult + joinBytes);
                 setValueCellReference(targetCell, joinResult);
@@ -17486,7 +17488,7 @@
             }
             sourceIndex = sourceIndex + 1;
         }
-        setStringHash(heapBase, result, 0);
+        initializeUnhashedStringKernel(heapBase, result);
         setEngineHeapBump(heapBase, state, result + resultBytes);
         setValueCellReference(targetCell, result);
         return 1;
@@ -17647,7 +17649,7 @@
                 heapBase, result, resultIndex, code);
             sourceIndex = sourceIndex + consumed;
         }
-        setStringHash(heapBase, result, 0);
+        initializeUnhashedStringKernel(heapBase, result);
         setEngineHeapBump(heapBase, state, result + bytes);
         setValueCellReference(targetCell, result);
         return 1;
@@ -18299,13 +18301,8 @@
          * integers, including INT32_MIN, have canonical decimal names too;
          * the shared decimal helpers deliberately handle the negative domain. */
         var digitCount = integerDecimalLengthKernel(index);
-        var hash = RecordLayout.STRING_HASH_OFFSET_BASIS;
+        var hash = integerPropertyKeyHashKernel(index, digitCount);
         var digitIndex = 0;
-        while (digitIndex < digitCount) {
-            hash = stringHashStep(hash,
-                integerDecimalCodeUnitKernel(index, digitIndex));
-            digitIndex = digitIndex + 1;
-        }
         var currentObject = object;
         while (currentObject !== 0) {
             var objectType = recordType(heapBase, currentObject);
@@ -18437,7 +18434,9 @@
             findCachedOwnObjectPropertyKernel: findCachedOwnObjectPropertyKernel,
             hintedOwnPropertyEntryKernel: hintedOwnPropertyEntryKernel,
             stringKeyHashKernel: stringKeyHashKernel,
+            initializeUnhashedStringKernel: initializeUnhashedStringKernel,
             computeStringKeyHashKernel: computeStringKeyHashKernel,
+            integerPropertyKeyHashKernel: integerPropertyKeyHashKernel,
             stringHashStep: HeapRecords.stringHashStep,
             clearAbsentValueCellsKernel: clearAbsentValueCellsKernel,
             setArrayLengthKernel: setArrayLengthKernel,
