@@ -1,5 +1,16 @@
 # Test262 status
 
+2026-11-22, ES5.1 reference/operation cutover (`d656ede`, contract 116):
+
+- Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
+  0 timed out / 0 not run**, unchanged corpus, harness and default limits.
+- Harness **364722.743 ms**, summed tests **345402.830 ms**; process **365.42 s**,
+  peak RSS **512452 KiB**, exit 0. Previous contract-115 observation: 357.06 s /
+  512396 KiB. This individual run is 2.3% longer; no timing-parity or speedup
+  claim is made. The four long lexical cases remain dominant. Tests ran
+  serially with the executable's source snapshot moved aside.
+- Receipts: ignored `artifacts/property-accepted-test262.log` and `.time`.
+
 2026-11-22, approximately 13:21 GMT, shared string hashing (contract 115):
 
 - Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /

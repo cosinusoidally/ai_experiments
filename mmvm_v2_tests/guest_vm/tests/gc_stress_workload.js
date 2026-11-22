@@ -173,6 +173,32 @@
             throw new Error("GC stress: orphan large view lost its backing");
         }
     }
+    /* Force collection with reference conversion and accessor frames live,
+     * not only between completed graph operations. The compound write must
+     * keep one normalized key and retain both receiver and pending value. */
+    var referenceConversions = 0, referenceValue = 11, referenceProbe = {};
+    Object.defineProperty(referenceProbe, "retained", {
+        get: function () {
+            if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(rounds);
+            return referenceValue;
+        },
+        set: function (value) {
+            if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(rounds);
+            referenceValue = value;
+        }
+    });
+    var referenceKey = {toString: function () {
+        referenceConversions++;
+        if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(rounds);
+        /* A fresh slice, not the literal already rooted by the descriptor. */
+        return ("retained-" + referenceConversions).substring(0, 8);
+    }};
+    referenceProbe[referenceKey] += 7;
+    if (referenceConversions !== 1 || referenceValue !== 18) {
+        throw new Error("GC stress: suspended property reference lost its key or value");
+    }
+    referenceProbe = null;
+    referenceKey = null;
     slots = null;
     largeView = null;
     if (typeof __gcStressCheckpoint === "function") __gcStressCheckpoint(rounds);

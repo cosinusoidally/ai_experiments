@@ -2,6 +2,25 @@
 
 ## Current target: all Node-passing files except Date first
 
+### ES5.1 property-reference cutover audit, 2026-11-22
+
+- Default optimized Linux executable `d656ede` / contract 116: **997 passed /
+  332 failed (39 timeouts included) / 4 configured skips / 0 not run**;
+  all 1333 selected files have final statuses, 1329 executed.
+- Exact filename comparison against the contract-111 full run finds one
+  changed status: `ecma_5/Object/15.2.3.6-middle-redefinition-7-of-8.js`
+  times out at **10026.789 ms**, instead of passing at **9524.281 ms**.
+  Previous isolated repeats already timed out with the older executable;
+  this is an established watchdog-boundary instability, not a confirmed
+  semantic regression. Do not describe the current full run as 998 passes.
+  All other 1332 statuses match; no missing or extra files.
+- Per-tree pass/fail: ecma **473/147**, ecma_2 **149/23**, ecma_3 **177/48**,
+  ecma_5 **198/114**; timeouts **11/0/1/27**. Corpus, harness and policy unchanged.
+- Harness **602080.395 ms**, process **603.69 s**, peak RSS **463860 KiB**,
+  exit 1 for existing failures. Contract-111 observation: 604.57 s / 463968 KiB.
+  Tests ran serially with the executable's source snapshot moved aside.
+- Receipts: ignored `artifacts/property-accepted-ecma.log` and `.time`.
+
 ### Shared property cleanup audit, 2026-11-21
 
 - Default optimized Linux executable `f82b7e5` / contract 111: **998 passed /

@@ -34,9 +34,9 @@ Receipt: ignored `artifacts/property-build-hash-profile.log`.
 
 ## Contract 116 implementation checkpoint
 
-All four follow-up implementation stages are now present. Combined broad
-acceptance is still pending at this checkpoint; do not confuse the functional
-checks below with a fresh full-suite claim.
+All four follow-up implementation stages are now present. The implementation
+checkpoint is `d656ede`. The combined acceptance results below distinguish
+completed gates from measurements still in progress.
 
 - `CHECK_PROPERTY_BASE` and `PREPARE_PROPERTY_KEY` have explicit register
   schemas, verifier rules and portable/native implementations. The compiler
@@ -75,6 +75,45 @@ checks below with a fresh full-suite claim.
 - The optional legacy structured-source compiler declines new reference-op
   programs instead of using modern host reference timing. Shared kernel JS
   execution is fully supported. No demo or external corpus files are changed.
+
+## Combined acceptance, 2026-11-22
+
+- Node, js_min and genuine standalone self-build snapshots are bit identical:
+  SHA-256 `09a5ce1753a1832f70ccb044950065e704577dad3f627cffad2981764768fa8d`.
+  js_min builds in **93.91 s / 315292 KiB peak RSS**; the executable builds
+  itself in **82.13 s / 481424 KiB**. Previous observations were 102.04 s /
+  319156 KiB and 84.58 s / 479500 KiB respectively. These individual runs
+  show no observed build-time regression, not a controlled speedup estimate.
+- Native code is **679397 bytes**, down 13361 bytes from contract 115;
+  the snapshot is **7651280 bytes**, up 21784 bytes from additional guest
+  runtime data. No compression, discarded function source or host specialization.
+- Core suites pass under Node and i386 js_min: **15 guest programs / 321
+  assertion-intrinsic calls**, plus the property fixture's throwing checks.
+- Standalone executable gates pass **all seven programs and all eleven
+  demo/server applications**, with the source snapshot moved aside. This
+  includes the garage/autodrive scenarios and binary HTTP responses.
+- Strengthened GC stress passes **24 rounds / 30 structural audits / 141980
+  checked edges / 254 property-index audits / 84 embedding collections**;
+  only the expected one runtime bound function survives. Maximum observed
+  bump is 419208 bytes under an **8 MiB heap cap**. Collection is forced
+  inside key conversion and accessor callbacks; a fresh substring key must
+  survive the read/modify/write. Process **38.86 s / 330912 KiB** including
+  runtime construction. The bare-runtime fixture uses its supported substring
+  primitive, not the standard-library-only slice method.
+- Full Test262: **3292 executed / 3292 passed / 0 failed / 0 timed out /
+  0 not run**, **365.42 s / 512452 KiB**. The preceding observation was
+  357.06 s; this run is 2.3% longer, so no timing-parity claim is made.
+- Full ECMA: **997 passed / 332 failed (39 timeouts included) / 4 skips /
+  0 not run**, **603.69 s / 463860 KiB**. All 1333 files were compared:
+  1332 statuses match the preceding full run, and the sole changed result
+  is the previously documented watchdog-boundary descriptor test. See
+  `ECMA_TESTS_STATUS.md`; this is not an additional semantic pass claim.
+- Octane acceptance is in progress; do not substitute the earlier Box2D
+  spot check for a full fresh benchmark run.
+
+Receipts are ignored files prefixed `artifacts/property-accepted-`, including
+the `-jsmin`, `-self`, `-programs`, `-apps`, `-gc-final`, `-test262` and `-ecma`
+logs and timings. Source snapshots remain moved aside during executable gates.
 
 ## Execution design
 
