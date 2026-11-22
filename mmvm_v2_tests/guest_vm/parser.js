@@ -1,7 +1,12 @@
 (function (root) {
     var Tokenizer = root.GuestVMTokenizer;
+    var RegExpParser = root.GuestVMRegExpParser;
     if (typeof module !== "undefined" && module.exports) {
         Tokenizer = require("./tokenizer.js");
+        RegExpParser = require("./regexp_parser.js");
+    } else if (!RegExpParser && typeof load === "function") {
+        load("guest_vm/regexp_parser.js");
+        RegExpParser = root.GuestVMRegExpParser;
     }
 
     var strictFutureReserved = {
@@ -769,6 +774,14 @@
         var token = this.current;
         if (this.isKeyword("function")) return this.parseFunction(false);
         if (token.kind === "regexp") {
+            try {
+                new RegExpParser(token.value.pattern).parse();
+                RegExpParser.validateFlags(token.value.flags);
+            }
+            catch (patternError) {
+                if (!(patternError instanceof RegExpParser.SyntaxError)) throw patternError;
+                this.error("invalid regular expression: " + patternError.message);
+            }
             this.advance(false);
             return {type: "RegExpLiteral", pattern: token.value.pattern,
                     flags: token.value.flags};

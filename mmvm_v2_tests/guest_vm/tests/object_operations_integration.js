@@ -6,6 +6,29 @@
         if (!condition) throw new Error(message);
     }
     check(String() === "" && String(undefined) === "undefined", "String conversion distinguishes a missing argument");
+    var stringConversionOrder = [];
+    var stringReceiver = {toString: function () { stringConversionOrder.push("receiver"); return "abc"; }};
+    var stringSearch = {toString: function () { stringConversionOrder.push("search"); return "b"; }};
+    var stringPosition = {valueOf: function () { stringConversionOrder.push("position"); return 0.8; }};
+    check(String.prototype.indexOf.call(stringReceiver, stringSearch, stringPosition) === 1 &&
+          stringConversionOrder.join(",") === "receiver,search,position",
+          "String conversion order is shared with callback-capable arguments");
+    var originalRegExp = /a(b)?/gi;
+    originalRegExp.lastIndex = 3;
+    var copiedRegExp = new RegExp(originalRegExp, undefined);
+    check(RegExp(originalRegExp) === originalRegExp && copiedRegExp !== originalRegExp &&
+          copiedRegExp.source === originalRegExp.source && copiedRegExp.global &&
+          copiedRegExp.ignoreCase && copiedRegExp.lastIndex === 0,
+          "RegExp Call preserves identity and Construct copies without lastIndex");
+    var malformedPatternCaught = false, malformedPatternDetail = "no exception";
+    try { new RegExp("("); } catch (patternError) {
+        malformedPatternCaught = patternError instanceof SyntaxError;
+        malformedPatternDetail = String(patternError);
+    }
+    check(malformedPatternCaught, "RegExp constructor validates before the first match: " + malformedPatternDetail);
+    originalRegExp.lastIndex = 2;
+    "abxab".split(originalRegExp);
+    check(originalRegExp.lastIndex === 2, "String.split uses a private matcher without changing separator state");
     var enumerationSource = {first: 1, removed: 2, last: 3};
     var originalEnumerationSource = enumerationSource, enumerationSeen = [];
     for (var enumerationName in enumerationSource) {

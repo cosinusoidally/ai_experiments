@@ -340,6 +340,27 @@
          * pretty-printing differs between Node and old SpiderMonkey. */
         loadLibrary("guest_vm/indexed_view_policy.js");
         loadLibrary("guest_vm/object_runtime.js");
+        var stringPrimitives = runtime.makeObject();
+        var stringPrimitiveNames = ["charAt", "charCodeAt", "indexOf", "lastIndexOf",
+            "substring", "toLowerCase", "toUpperCase"];
+        for (var stringIndex = 0; stringIndex < stringPrimitiveNames.length; stringIndex++) {
+            var stringName = stringPrimitiveNames[stringIndex];
+            var stringMethod = runtime.getProperty(runtime.stringPrototype, stringName);
+            runtime.defineBuiltinProperty(stringPrimitives, stringName,
+                runtime.makeNativeFunction("String." + stringName, stringMethod.callback,
+                    "intrinsic", stringMethod.nativeIntrinsic));
+        }
+        context.installGlobal("__guestStringPrimitives", stringPrimitives);
+        loadLibrary("guest_vm/string_runtime.js");
+        var stringFallbacks = stringPrimitiveNames.concat([
+            "toLocaleLowerCase", "toLocaleUpperCase"]);
+        for (stringIndex = 0; stringIndex < stringFallbacks.length; stringIndex++) {
+            stringName = stringFallbacks[stringIndex];
+            installFallback(runtime.stringPrototype, stringName, "__guestString" +
+                stringName.charAt(0).toUpperCase() + stringName.substring(1));
+        }
+        installBuiltin(runtime.stringPrototype, "concat", "__guestStringConcat", "String.concat");
+        runtime.deleteProperty(context.globalObject, "__guestStringPrimitives", false);
         installFallback(context.globalObject, "String", "__guestStringConvert");
         installBuiltin(runtime.stringPrototype, "slice", "__guestStringSlice", "String.slice");
         installBuiltin(runtime.errorPrototypes.$Error, "toString", "__guestErrorToString", "Error.toString");
@@ -369,7 +390,16 @@
         installBuiltin(jsonObject, "stringify", "__guestJSONStringify", "JSON.stringify");
         if (runtime.regexpPrototype && runtime.numberPrototype) {
             loadLibrary("guest_vm/number_runtime.js");
+            var regexpConstructor = runtime.getGlobal(context, "RegExp");
+            context.installGlobal("__guestRegExpPrimitive",
+                runtime.makeNativeFunction("RegExp", regexpConstructor.callback,
+                    "intrinsic", regexpConstructor.nativeIntrinsic));
+            loadLibrary("guest_vm/regexp_parser.js");
             loadLibrary("guest_vm/regexp_runtime.js");
+            runtime.setGuestConstructorImplementation(regexpConstructor,
+                runtime.getGlobal(context, "__guestRegExpConstructor"));
+            runtime.deleteProperty(context.globalObject, "__guestRegExpConstructor", false);
+            runtime.deleteProperty(context.globalObject, "__guestRegExpPrimitive", false);
             install(runtime.regexpPrototype, "exec", "__guestRegExpExec", "RegExp.exec");
             install(runtime.regexpPrototype, "test", "__guestRegExpTest", "RegExp.test");
             install(runtime.regexpPrototype, "toString", "__guestRegExpToString", "RegExp.toString");
@@ -380,6 +410,8 @@
             install(runtime.stringPrototype, "trim", "__guestStringTrim", "String.trim");
             install(runtime.numberPrototype, "toFixed", "__guestNumberToFixed", "Number.toFixed");
         }
+        runtime.deleteProperty(context.globalObject, "__guestStringOperations", false);
+        runtime.deleteProperty(context.globalObject, "GuestVMRegExpParser", false);
         this.standardLibraryInstalled = true;
     };
 

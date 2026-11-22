@@ -407,7 +407,6 @@
         this.profileFunctionCounts = options.profile ? {} : null;
         this.profileInstructionCount = 0;
         this.profileNextReport = 1000000;
-        this.heapNativeBuiltins = !!options.nativeInterpreter;
         this.threadedCompiler = options.threadedCompile ?
             new ThreadedCompiler(this) : null;
         this.ensureLinearHeap();
@@ -521,6 +520,21 @@
         this.heapRecords.setFunctionClosure(callable.heapAddress, closure);
         callable.callback = function (receiver, args) {
             return runtime.invokePropertyFunction(implementation, receiver, args);
+        };
+        return callable;
+    };
+
+    /* Internal constructor algorithms receive the call/construct distinction
+     * as a strict boolean receiver, not as an observable user `this` value.
+     * The compiled interpreter uses the identical entry convention. */
+    Runtime.prototype.setGuestConstructorImplementation = function (callable, implementation) {
+        var runtime = this;
+        this.setGuestBuiltinImplementation(callable, implementation);
+        callable.callback = function (receiver, args) {
+            return runtime.invokePropertyFunction(implementation, false, args);
+        };
+        callable.constructCallback = function (args) {
+            return runtime.invokePropertyFunction(implementation, true, args);
         };
         return callable;
     };
@@ -2980,13 +2994,12 @@
         this.numberPrototype = this.makeObject();
         this.booleanPrototype = this.makeObject();
         this.regexpPrototype = null;
-        if (this.heapNativeBuiltins) {
-            /* ES5.1 15.10.6: the prototype is itself an empty RegExp,
-             * including its internal class and instance properties. */
-            this.regexpPrototype = this.makeRegExp("", "");
-            this.heapRecords.setObjectPrototype(this.regexpPrototype.heapAddress,
-                this.objectPrototype.heapAddress);
-        }
+        /* ES5.1 15.10.6: the prototype is itself an empty RegExp. This is
+         * guest-language state, not a native-backend option. Both execution
+         * paths must install the same prototype and standard-library code. */
+        this.regexpPrototype = this.makeRegExp("", "");
+        this.heapRecords.setObjectPrototype(this.regexpPrototype.heapAddress,
+            this.objectPrototype.heapAddress);
         this.strictArgumentsThrower = this.makeNativeFunction(
             "ThrowTypeError", function () {
                 throw new TypeError("restricted arguments property");

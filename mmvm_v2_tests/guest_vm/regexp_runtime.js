@@ -7,246 +7,28 @@
  */
 (function () {
     var objectToString = Object.prototype.toString;
+    var stringReceiver = __guestStringOperations.receiver;
+    var call = __guestStringOperations.call;
+    var apply = Function.prototype.apply;
+    var convertString = __guestStringOperations.toString;
+    var convertNumber = __guestStringOperations.toNumber;
+    var convertInteger = __guestStringOperations.toInteger;
+    var makeRegExp = __guestRegExpPrimitive;
+    var RegExpConstructor = RegExp;
+    var TypeErrorConstructor = TypeError;
+    function isRegExp(value) {
+        return value !== null && (typeof value === "object" || typeof value === "function") &&
+            call(objectToString, value) === "[object RegExp]";
+    }
     var setTypedArray = Function.prototype.call.bind(Int32Array.prototype.set);
     var subarrayTypedArray = Function.prototype.call.bind(Int32Array.prototype.subarray);
     function requireRegExp(value) {
-        if (objectToString.call(value) !== "[object RegExp]") {
+        if (!isRegExp(value)) {
             throw new TypeError("RegExp method receiver is not a RegExp");
         }
     }
-    function syntax(message) {
-        throw new SyntaxError(message);
-    }
-
-    function decimal(code) {
-        return code >= 48 && code <= 57;
-    }
-
-    function hex(code) {
-        if (code >= 48 && code <= 57) return code - 48;
-        if (code >= 65 && code <= 70) return code - 55;
-        if (code >= 97 && code <= 102) return code - 87;
-        return -1;
-    }
-
-    function Parser(source) {
-        this.source = source;
-        this.index = 0;
-        this.captureCount = 0;
-    }
-
-    Parser.prototype.peek = function () {
-        return this.index < this.source.length ?
-            this.source.charAt(this.index) : "";
-    };
-
-    Parser.prototype.take = function () {
-        return this.index < this.source.length ?
-            this.source.charAt(this.index++) : "";
-    };
-
-    Parser.prototype.number = function () {
-        var value = 0;
-        var digits = 0;
-        while (decimal(this.source.charCodeAt(this.index))) {
-            value = value * 10 + this.source.charCodeAt(this.index++) - 48;
-            digits++;
-        }
-        return digits ? value : -1;
-    };
-
-    Parser.prototype.escape = function (inClass) {
-        if (this.index >= this.source.length) syntax("trailing regular expression escape");
-        var character = this.take();
-        var code = character.charCodeAt(0);
-        if (!inClass && decimal(code) && code !== 48) {
-            var reference = code - 48;
-            while (decimal(this.source.charCodeAt(this.index))) {
-                reference = reference * 10 +
-                    this.source.charCodeAt(this.index++) - 48;
-            }
-            return {kind: "backref", capture: reference};
-        }
-        if (character === "d" || character === "D" ||
-            character === "w" || character === "W" ||
-            character === "s" || character === "S") {
-            return {kind: "classEscape", name: character};
-        }
-        if (!inClass && (character === "b" || character === "B")) {
-            return {kind: "boundary", invert: character === "B"};
-        }
-        if (inClass && character === "b") return {kind: "literal", code: 8};
-        if (character === "n") code = 10;
-        else if (character === "r") code = 13;
-        else if (character === "t") code = 9;
-        else if (character === "v") code = 11;
-        else if (character === "f") code = 12;
-        else if (character === "c") {
-            if (this.index >= this.source.length) syntax("invalid control escape");
-            code = this.take().charCodeAt(0);
-            if (code >= 97 && code <= 122) code -= 32;
-            code &= 31;
-        } else if (character === "x" || character === "u") {
-            var count = character === "x" ? 2 : 4;
-            var value = 0;
-            while (count-- > 0) {
-                if (this.index >= this.source.length) syntax("invalid hexadecimal escape");
-                var digit = hex(this.source.charCodeAt(this.index++));
-                if (digit < 0) syntax("invalid hexadecimal escape");
-                value = value * 16 + digit;
-            }
-            code = value;
-        }
-        return {kind: "literal", code: code};
-    };
-
-    Parser.prototype.classAtom = function () {
-        if (this.index >= this.source.length) syntax("unterminated character class");
-        if (this.peek() === "\\") {
-            this.index++;
-            return this.escape(true);
-        }
-        return {kind: "literal", code: this.take().charCodeAt(0)};
-    };
-
-    Parser.prototype.characterClass = function () {
-        var invert = false;
-        var terms = [];
-        if (this.peek() === "^") {
-            invert = true;
-            this.index++;
-        }
-        while (this.index < this.source.length) {
-            if (this.peek() === "]") {
-                this.index++;
-                return {kind: "class", invert: invert, terms: terms,
-                    constantResult: constantClassResult(terms, invert)};
-            }
-            var left = this.classAtom();
-            if (left.kind === "literal" && this.peek() === "-" &&
-                this.index + 1 < this.source.length &&
-                this.source.charAt(this.index + 1) !== "]") {
-                this.index++;
-                var right = this.classAtom();
-                if (right.kind !== "literal") syntax("invalid character class range");
-                if (right.code < left.code) syntax("out-of-order character class range");
-                terms.push({kind: "range", start: left.code, end: right.code});
-            } else terms.push(left);
-        }
-        syntax("unterminated character class");
-    };
-
-    Parser.prototype.atom = function () {
-        var character = this.take();
-        if (!character) syntax("missing regular expression atom");
-        if (character === "^") return {kind: "start"};
-        if (character === "$") return {kind: "end"};
-        if (character === ".") return {kind: "dot"};
-        if (character === "[") return this.characterClass();
-        if (character === "\\") return this.escape(false);
-        if (character === "(") {
-            var capture = 0;
-            var lookahead = 0;
-            if (this.peek() === "?") {
-                this.index++;
-                var modifier = this.take();
-                if (modifier === ":") capture = -1;
-                else if (modifier === "=") {
-                    capture = -1;
-                    lookahead = 1;
-                } else if (modifier === "!") {
-                    capture = -1;
-                    lookahead = -1;
-                } else syntax("unsupported regular expression group");
-            } else capture = ++this.captureCount;
-            var alternatives = this.alternatives(")");
-            if (this.take() !== ")") syntax("unterminated regular expression group");
-            return {kind: lookahead ? "lookahead" : "group",
-                    capture: capture, positive: lookahead > 0,
-                    alternatives: alternatives};
-        }
-        if (character === ")" || character === "|" ||
-            character === "*" || character === "+" || character === "?") {
-            syntax("unexpected regular expression character " + character);
-        }
-        return {kind: "literal", code: character.charCodeAt(0)};
-    };
-
-    Parser.prototype.piece = function () {
-        var atom = this.atom();
-        var minimum = 1;
-        var maximum = 1;
-        var quantified = false;
-        var character = this.peek();
-        if (character === "*") {
-            this.index++;
-            minimum = 0;
-            maximum = -1;
-            quantified = true;
-        } else if (character === "+") {
-            this.index++;
-            minimum = 1;
-            maximum = -1;
-            quantified = true;
-        } else if (character === "?") {
-            this.index++;
-            minimum = 0;
-            maximum = 1;
-            quantified = true;
-        } else if (character === "{") {
-            var saved = this.index++;
-            var parsedMinimum = this.number();
-            if (parsedMinimum < 0) this.index = saved;
-            else {
-                minimum = parsedMinimum;
-                maximum = minimum;
-                if (this.peek() === ",") {
-                    this.index++;
-                    var parsedMaximum = this.number();
-                    maximum = parsedMaximum < 0 ? -1 : parsedMaximum;
-                }
-                if (this.peek() !== "}") this.index = saved;
-                else {
-                    this.index++;
-                    quantified = true;
-                    if (maximum >= 0 && maximum < minimum) {
-                        syntax("invalid regular expression quantifier");
-                    }
-                }
-            }
-        }
-        var greedy = true;
-        if (quantified && this.peek() === "?") {
-            this.index++;
-            greedy = false;
-        }
-        return {atom: atom, minimum: minimum, maximum: maximum,
-                greedy: greedy};
-    };
-
-    Parser.prototype.sequence = function (stop) {
-        var pieces = [];
-        while (this.index < this.source.length && this.peek() !== "|" &&
-               (!stop || this.peek() !== stop)) {
-            pieces.push(this.piece());
-        }
-        return pieces;
-    };
-
-    Parser.prototype.alternatives = function (stop) {
-        var result = [this.sequence(stop)];
-        while (this.peek() === "|") {
-            this.index++;
-            result.push(this.sequence(stop));
-        }
-        return result;
-    };
-
-    Parser.prototype.parse = function () {
-        var alternatives = this.alternatives("");
-        if (this.index !== this.source.length) syntax("invalid regular expression");
-        return {alternatives: alternatives, captures: this.captureCount};
-    };
+    var Parser = GuestVMRegExpParser;
+    var decimal = Parser.decimal;
 
     function lowerAscii(code) {
         return code >= 65 && code <= 90 ? code + 32 : code;
@@ -301,7 +83,7 @@
 
     function compileClassPredicate(atom) {
         return {kind: "class", atom: atom,
-            constantResult: atom.constantResult, asciiCache: null};
+            constantResult: constantClassResult(atom.terms, atom.invert), asciiCache: null};
     }
 
     function classMatches(node, code, ignoreCase) {
@@ -360,6 +142,10 @@
     var RX_SIMPLE_REPEAT = 19;
     var RX_INSTRUCTION_WORDS = 8;
     var RX_REPEAT_MINIMUM_OPERAND = 2;
+    var RX_REPEAT_FIRST_CAPTURE_OPERAND = 2;
+    var RX_REPEAT_CAPTURE_LIMIT_OPERAND = 3;
+    var RX_CAPTURE_STATE_WORDS = 2;
+    var RX_CAPTURE_UNMATCHED = -1;
     var RX_SIMPLE_REPEAT_BACKTRACK_OPERAND = 4;
 
     function emit(code, instruction) {
@@ -427,6 +213,8 @@
         var simpleKind = piece.atom.kind;
         if (simpleKind === "literal" || simpleKind === "dot" ||
             simpleKind === "class" || simpleKind === "classEscape") {
+            var simplePredicate = simpleKind === "class" ?
+                compileClassPredicate(piece.atom) : piece.atom;
             var stopText = null;
             if (simpleKind === "class" && piece.atom.invert &&
                 piece.atom.terms.length === 1 &&
@@ -441,16 +229,16 @@
             var backtrack = true;
             if (piece.greedy && followingPiece && followingPiece.minimum > 0 &&
                 followingPiece.atom.kind === "literal") {
-                var predicate = simpleKind === "class" ?
-                    compileClassPredicate(piece.atom) : piece.atom;
+                var predicate = simplePredicate;
                 var followingCode = followingPiece.atom.code;
                 backtrack = firstCharacterMatches([predicate], followingCode, false) ||
                     firstCharacterMatches([predicate], followingCode, true);
             }
             emit(code, {opcode: RX_SIMPLE_REPEAT, node: piece.atom,
+                predicate: simplePredicate,
                 stopText: stopText,
                 backtrack: backtrack,
-                constantResult: simpleKind === "class" ? piece.atom.constantResult : null,
+                constantResult: simpleKind === "class" ? simplePredicate.constantResult : null,
                 minimum: piece.minimum, maximum: piece.maximum,
                 greedy: piece.greedy});
             return;
@@ -465,7 +253,13 @@
             body: 0, exit: 0});
         code[initialize].target = decide;
         code[decide].body = code.length;
-        emit(code, {opcode: RX_REPEAT_MARK, positionSlot: positionSlot});
+        var firstCapture = 0, captureLimit = 0;
+        if (simpleKind === "group" || simpleKind === "lookahead") {
+            firstCapture = piece.atom.firstCapture;
+            captureLimit = piece.atom.captureLimit;
+        }
+        emit(code, {opcode: RX_REPEAT_MARK, positionSlot: positionSlot,
+            firstCapture: firstCapture, captureLimit: captureLimit});
         compileAtom(piece.atom, code, compiler);
         emit(code, {opcode: RX_REPEAT_NEXT, countSlot: countSlot,
             positionSlot: positionSlot, decide: decide, exit: 0});
@@ -653,6 +447,8 @@
                 packed[base + 6] = instruction.exit;
             } else if (opcode === RX_REPEAT_MARK) {
                 packed[base + 1] = instruction.positionSlot;
+                packed[base + RX_REPEAT_FIRST_CAPTURE_OPERAND] = instruction.firstCapture;
+                packed[base + RX_REPEAT_CAPTURE_LIMIT_OPERAND] = instruction.captureLimit;
             } else if (opcode === RX_REPEAT_NEXT) {
                 packed[base + 1] = instruction.countSlot;
                 packed[base + 2] = instruction.positionSlot;
@@ -669,8 +465,7 @@
                 packed[base + 2] = instruction.maximum;
                 packed[base + 3] = instruction.greedy ? 1 : 0;
                 packed[base + RX_SIMPLE_REPEAT_BACKTRACK_OPERAND] = instruction.backtrack ? 1 : 0;
-                nodeData[index] = {atom: instruction.node.kind === "class" ?
-                    compileClassPredicate(instruction.node) : instruction.node,
+                nodeData[index] = {atom: instruction.predicate,
                     stopText: instruction.stopText,
                     constantResult: instruction.constantResult};
             } else if (opcode === RX_BACKREF) {
@@ -868,6 +663,16 @@
                 continue;
             } else if (opcode === RX_REPEAT_MARK) {
                 state[packedCode[instructionBase + 1]] = position;
+                /* ES5 RepeatMatcher clears all captures belonging to the
+                 * atom before each iteration. Existing choice snapshots
+                 * restore the previous iteration if this attempt fails. */
+                var clearCapture = packedCode[instructionBase +
+                    RX_REPEAT_FIRST_CAPTURE_OPERAND] * RX_CAPTURE_STATE_WORDS;
+                var captureLimit = packedCode[instructionBase +
+                    RX_REPEAT_CAPTURE_LIMIT_OPERAND] * RX_CAPTURE_STATE_WORDS;
+                while (clearCapture < captureLimit) {
+                    state[clearCapture++] = RX_CAPTURE_UNMATCHED;
+                }
                 pc++;
                 continue;
             } else if (opcode === RX_REPEAT_NEXT) {
@@ -1090,56 +895,88 @@
         }
     }
 
-    var PARSED_PATTERN_CACHE_LIMIT = 256;
-    var parsedPatternSources = [];
-    var parsedPatternTrees = [];
-    var parsedPatternNext = 0;
+    var PATTERN_CACHE_LIMIT = 256;
+    var patternSources = [];
+    var patternEntries = [];
+    var patternNext = 0;
     var mostRecentPatternSource = null;
-    var mostRecentPatternTree = null;
+    var mostRecentPatternEntry = null;
 
-    function parsedPattern(source) {
-        if (source === mostRecentPatternSource && mostRecentPatternTree) {
-            return mostRecentPatternTree;
+    function validatedPattern(source) {
+        if (source === mostRecentPatternSource && mostRecentPatternEntry) {
+            return mostRecentPatternEntry;
         }
         var index = 0;
-        while (index < parsedPatternSources.length) {
-            if (parsedPatternSources[index] === source) {
+        while (index < patternSources.length) {
+            if (patternSources[index] === source) {
                 mostRecentPatternSource = source;
-                mostRecentPatternTree = parsedPatternTrees[index];
-                return mostRecentPatternTree;
+                mostRecentPatternEntry = patternEntries[index];
+                return mostRecentPatternEntry;
             }
             index++;
         }
-        var parsed = compilePattern(new Parser(source).parse());
-        if (parsedPatternSources.length < PARSED_PATTERN_CACHE_LIMIT) {
-            parsedPatternSources.push(source);
-            parsedPatternTrees.push(parsed);
+        var entry = {syntax: new Parser(source).parse(), program: null};
+        if (patternSources.length < PATTERN_CACHE_LIMIT) {
+            patternSources.push(source);
+            patternEntries.push(entry);
         } else {
-            parsedPatternSources[parsedPatternNext] = source;
-            parsedPatternTrees[parsedPatternNext] = parsed;
-            parsedPatternNext++;
-            if (parsedPatternNext === PARSED_PATTERN_CACHE_LIMIT) {
-                parsedPatternNext = 0;
+            patternSources[patternNext] = source;
+            patternEntries[patternNext] = entry;
+            patternNext++;
+            if (patternNext === PATTERN_CACHE_LIMIT) {
+                patternNext = 0;
             }
         }
         mostRecentPatternSource = source;
-        mostRecentPatternTree = parsed;
-        return parsed;
+        mostRecentPatternEntry = entry;
+        return entry;
     }
+
+    function compiledPattern(source) {
+        var entry = validatedPattern(source);
+        if (entry.program === null) {
+            entry.program = compilePattern(entry.syntax);
+            /* The execution plan owns its required predicates. Do not keep
+             * a second complete syntax tree after successful lowering. */
+            entry.syntax = null;
+        }
+        return entry.program;
+    }
+
+    /* The private constructor entry receives `this === true` for Construct
+     * and false for Call. All conversions/validation execute as guest code;
+     * the captured factory only allocates an already validated pattern. */
+    this.__guestRegExpConstructor = function (pattern, flags) {
+        "use strict";
+        if (isRegExp(pattern)) {
+            if (flags !== undefined) throw new TypeErrorConstructor("flags supplied with a RegExp pattern");
+            if (this === false) return pattern;
+            flags = regexpFlags(pattern, false);
+            pattern = pattern.source;
+        } else {
+            pattern = pattern === undefined ? "" : convertString(pattern);
+            flags = flags === undefined ? "" : convertString(flags);
+        }
+        Parser.validateFlags(flags);
+        /* Validate at construction, but defer execution plans/workspaces
+         * until the pattern is actually used. Canonicalize empty source as
+         * the native factory does, so construction and execution share it. */
+        validatedPattern(pattern === "" ? "(?:)" : pattern);
+        return makeRegExp(pattern, flags);
+    };
 
     function execute(regexp, value) {
         "use strict";
         requireRegExp(regexp);
-        var input = String(value);
+        var input = convertString(value);
         /* ES5.1 converts lastIndex even for non-global expressions, after
          * converting the input and before deciding whether to use the index.
          * Both conversions may execute guest code or throw. */
-        var start = Number(regexp.lastIndex);
-        start = start !== start ? 0 : start < 0 ? Math.ceil(start) : Math.floor(start);
+        var start = convertInteger(regexp.lastIndex);
         /* RegExp source and flags are immutable in ES5.1. Parsed pattern trees
          * can therefore be shared by different RegExp instances with the same
          * source while lastIndex remains instance-local below. */
-        var parsed = parsedPattern(String(regexp.source));
+        var parsed = compiledPattern(regexp.source);
         var global = !!regexp.global;
         if (!global) start = 0;
         else if (start < 0 || start > input.length) {
@@ -1230,31 +1067,23 @@
     }
 
     function asRegExp(value, forceGlobal) {
-        if (value instanceof RegExp) {
-            if (!forceGlobal || value.global) return value;
-            return new RegExp(value.source, regexpFlags(value, true));
+        if (isRegExp(value)) {
+            if (!forceGlobal) return value;
+            return new RegExpConstructor(value.source, regexpFlags(value, true));
         }
-        return new RegExp(value === undefined ? "" : String(value),
+        return new RegExpConstructor(value,
                           forceGlobal ? "g" : "");
     }
 
     function advanceEmptyMatch(regexp, match, inputLength) {
         if (match[0] !== "") return false;
         if (regexp.lastIndex > inputLength) return true;
-        regexp.lastIndex = Number(regexp.lastIndex) + 1;
+        regexp.lastIndex = convertNumber(regexp.lastIndex) + 1;
         return false;
     }
 
-    function stringReceiver(value) {
-        /* Non-strict guest calls box a primitive receiver. Unbox the ordinary
-         * String wrapper before invoking the general String conversion, whose
-         * object-to-primitive continuation is not needed for this hot path. */
-        if (typeof value === "string") return value;
-        if (value instanceof String) return value.valueOf();
-        return String(value);
-    }
-
     var guestStringMatch = function (value) {
+        "use strict";
         var input = stringReceiver(this);
         var regexp = asRegExp(value, false);
         if (!regexp.global) return execute(regexp, input);
@@ -1270,7 +1099,7 @@
     };
 
     function replacementText(template, match, input) {
-        template = String(template);
+        template = convertString(template);
         var output = "";
         var index = 0;
         while (index < template.length) {
@@ -1294,7 +1123,7 @@
                 index++;
             } else {
                 var first = marker.charCodeAt(0) - 48;
-                if (first < 0 || first > 9 || first === 0) {
+                if (first < 0 || first > 9) {
                     output += "$";
                     continue;
                 }
@@ -1303,13 +1132,13 @@
                 if (index + 1 < template.length) {
                     var second = template.charCodeAt(index + 1) - 48;
                     var combined = capture * 10 + second;
-                    if (second >= 0 && second <= 9 &&
+                    if (second >= 0 && second <= 9 && combined > 0 &&
                         combined < match.length) {
                         capture = combined;
                         consumed = 2;
                     }
                 }
-                if (capture < match.length) {
+                if (capture > 0 && capture < match.length) {
                     if (match[capture] !== undefined) {
                         output += match[capture];
                     }
@@ -1327,15 +1156,16 @@
             while (index < match.length) argumentsList.push(match[index++]);
             argumentsList.push(match.index);
             argumentsList.push(input);
-            return String(replacement.apply(undefined, argumentsList));
+            return convertString(call(apply, replacement, undefined, argumentsList));
         }
         return replacementText(replacement, match, input);
     }
 
     var guestStringReplace = function (searchValue, replacement) {
+        "use strict";
         var input = stringReceiver(this);
-        if (!(searchValue instanceof RegExp)) {
-            var searchText = String(searchValue);
+        if (!isRegExp(searchValue)) {
+            var searchText = convertString(searchValue);
             var position = input.indexOf(searchText);
             if (position < 0) return input;
             var plainMatch = [searchText];
@@ -1364,16 +1194,17 @@
 
     function splitLimit(value) {
         if (value === undefined) return 4294967295;
-        var number = Number(value);
+        var number = convertNumber(value);
         if (!(number === number) || number === 0 ||
             number === Infinity || number === -Infinity) return 0;
-        number = number < 0 ? Math.ceil(number) : Math.floor(number);
+        number = convertInteger(number);
         number %= 4294967296;
         if (number < 0) number += 4294967296;
         return number;
     }
 
     var guestStringSplit = function (separator, limitValue) {
+        "use strict";
         var input = stringReceiver(this);
         var limit = splitLimit(limitValue);
         var result = [];
@@ -1382,8 +1213,8 @@
             result.push(input);
             return result;
         }
-        if (!(separator instanceof RegExp)) {
-            var separatorText = String(separator);
+        if (!isRegExp(separator)) {
+            var separatorText = convertString(separator);
             if (separatorText === "") {
                 var characterIndex = 0;
                 while (characterIndex < input.length && result.length < limit) {
@@ -1403,10 +1234,18 @@
         }
         var splitter = asRegExp(separator, true);
         splitter.lastIndex = 0;
+        /* SplitMatch is attempted only while its start is below the input
+         * length. Empty input has its own ES5 case; terminal empty matches
+         * must not manufacture another field or capture. */
+        if (input.length === 0) {
+            if (execute(splitter, input) === null) result.push("");
+            return result;
+        }
         var sourcePosition = 0;
         var match;
         while (result.length < limit &&
                (match = execute(splitter, input)) !== null) {
+            if (match.index === input.length && match[0] === "") break;
             var matchEnd = match.index + match[0].length;
             if (matchEnd === sourcePosition && match[0] === "") {
                 if (advanceEmptyMatch(splitter, match, input.length)) break;
@@ -1425,6 +1264,7 @@
     };
 
     var guestStringSearch = function (value) {
+        "use strict";
         var regexp = asRegExp(value, false);
         var previousLastIndex = regexp.lastIndex;
         regexp.lastIndex = 0;

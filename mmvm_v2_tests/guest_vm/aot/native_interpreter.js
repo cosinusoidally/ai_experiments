@@ -5634,6 +5634,29 @@
             receiver, FIVE_WORD_INSTRUCTION, 0, argumentsVector);
     }
 
+    /* Constructor algorithms share normal guest frames, but must know Call
+     * versus Construct without inheriting an arbitrary public receiver. */
+    function enterGuestConstructorKernel(heapBase, state, frame, callable, targetIndex,
+            context, stringSupport, arrayPrototype, bytecodeAddress,
+            registers, pc, operation, argumentsVector) {
+        var closure = functionClosure(heapBase, callable);
+        if (closure === 0) return 0;
+        var implementation = vectorCellAddress(heapBase, closure, GUEST_BUILTIN_IMPLEMENTATION);
+        var mode = engineScratchRightAddress(heapBase, state);
+        var advance = FIVE_WORD_INSTRUCTION;
+        setValueCellFalse(mode);
+        if (operation === CALL_OPERATION_CONSTRUCT) {
+            setValueCellTrue(mode);
+            advance = FOUR_WORD_INSTRUCTION;
+        }
+        /* The legacy frame-PC-address argument is unused by the shared
+         * call entry. Keep it empty, not another representation offset. */
+        return bytecodeCallKernel(heapBase, state, frame, implementation, 0,
+            CALL_OPERATION_CALL, targetIndex, context, stringSupport,
+            arrayPrototype, bytecodeAddress, registers, pc, 0,
+            mode, advance, 0, argumentsVector);
+    }
+
     /* Named [[Put]] owns rejection, setter entry and data publication.
      * Both key forms arrive as cells; descriptor addresses stay transient
      * and are never retained over a callback or allocation retry. */
@@ -6766,6 +6789,13 @@
             }
         }
         if (intrinsicId === NativeIntrinsics.REGEXP_CONSTRUCTOR) {
+            if (functionClosure(heapBase, intrinsicFunction) !== 0) {
+                if (enterGuestConstructorKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callOperation,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
             intrinsicHandled = regexpConstructorKernel(
                 heapBase, state, intrinsicTarget, registerAddress,
                 intrinsicArgumentsVector, intrinsicArgumentCount,
@@ -7260,6 +7290,10 @@
                 stringSupport, arrayPrototype, bytecodeAddress, pc,
                 intrinsicId, platformServices, callReceiverIndex);
             if (intrinsicHandled === 0) {
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
@@ -11617,14 +11651,12 @@
                     patternCell = suppliedPatternCell;
                 } else if (suppliedPatternType === RecordLayout.HEAP_TYPE_REGEXP) {
                     if (argumentCount > 1) return 0;
-                    if (callOperation === 1) {
+                    if (callOperation === CALL_OPERATION_CALL) {
                         setValueCellReference(targetCell, suppliedPattern);
                         return 1;
                     }
-                    /* Construction needs two temporary tagged cells for the
-                     * copied pattern and flags. The semantic path handles
-                     * this uncommon case until kernel scratch cells are
-                     * reserved for it. */
+                    /* The complete guest constructor normalizes copies
+                     * before invoking this allocation-only bootstrap path. */
                     return 0;
                 } else return 0;
             } else if (valueCellTag(0, suppliedPatternCell) !==
@@ -18391,6 +18423,7 @@
             bytecodePreparationExitKernel: bytecodePreparationExitKernel,
             intrinsicCallKernel: intrinsicCallKernel,
             enterGuestBuiltinKernel: enterGuestBuiltinKernel,
+            enterGuestConstructorKernel: enterGuestConstructorKernel,
             enterPropertyGetterKernel: enterPropertyGetterKernel,
             isESWhiteSpaceKernel: isESWhiteSpaceKernel,
             instanceofKernel: instanceofKernel,
