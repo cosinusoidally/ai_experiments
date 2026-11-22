@@ -2,6 +2,25 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Final property/string comparison audit, 2026-11-22
+
+- Default optimized Linux executable `e4d5098` / contract 117: **997 passed /
+  332 failed (39 timeouts included) / 4 configured skips / 0 not run**;
+  all 1333 selected files have final statuses, 1329 executed.
+- Exact filename comparison with contract 116: **1333 identical statuses /
+  zero lost passes / zero gained passes / zero missing or extra files**.
+  The established watchdog-boundary middle-redefinition file still times out;
+  the difference from contract 111 remains only that documented unstable file.
+  No corpus, harness, limits or skip-policy changes.
+- Per-tree pass/fail: ecma **473/147**, ecma_2 **149/23**, ecma_3 **177/48**,
+  ecma_5 **198/114**; timeouts **11/0/1/27**.
+- Harness **609323.428 ms**, process **609.64 s**, peak RSS **463792 KiB**;
+  exit 1 reports the known failures. Contract 116: 603.69 s / 463860 KiB;
+  contract 111: 604.57 s / 463968 KiB. These individual observations show
+  similar overall runtime, not a demonstrated ECMA speedup.
+- Tests ran serially with the source snapshot moved aside. Receipts: ignored
+  `artifacts/property-comparison-ecma.log` and `.time`.
+
 ### ES5.1 property-reference cutover audit, 2026-11-22
 
 - Default optimized Linux executable `d656ede` / contract 116: **997 passed /

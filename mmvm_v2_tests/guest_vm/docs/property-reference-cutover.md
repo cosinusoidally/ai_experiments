@@ -1,7 +1,8 @@
 # Property references and guest key conversion
 
-Follow-up to the shared-property checkpoint `d89d99d`. Work is staged; this
-document distinguishes the intended cutover from completed acceptance.
+Follow-up to the shared-property checkpoint `d89d99d`. The four-stage cutover
+is complete. This document records its design, dated acceptance results and
+the final shared-comparison performance follow-up.
 
 ## Required semantics
 
@@ -34,9 +35,9 @@ Receipt: ignored `artifacts/property-build-hash-profile.log`.
 
 ## Contract 116 implementation checkpoint
 
-All four follow-up implementation stages are now present. The implementation
-checkpoint is `d656ede`. The combined acceptance results below distinguish
-completed gates from measurements still in progress.
+All four follow-up implementation stages are present in `d656ede`. The
+combined acceptance results below distinguish that implementation checkpoint
+from the final contract-117 performance follow-up.
 
 - `CHECK_PROPERTY_BASE` and `PREPARE_PROPERTY_KEY` have explicit register
   schemas, verifier rules and portable/native implementations. The compiler
@@ -108,12 +109,47 @@ completed gates from measurements still in progress.
   1332 statuses match the preceding full run, and the sole changed result
   is the previously documented watchdog-boundary descriptor test. See
   `ECMA_TESTS_STATUS.md`; this is not an additional semantic pass claim.
-- Octane acceptance is in progress; do not substitute the earlier Box2D
-  spot check for a full fresh benchmark run.
+- Octane: fourteen stock suites pass with scores; RegExp passes separate
+  quick correctness (no new stock RegExp score). The immediate-baseline
+  comparison exposed a reproducible RayTrace slowdown, leading to the
+  contract-117 follow-up below rather than declaring performance preserved.
 
 Receipts are ignored files prefixed `artifacts/property-accepted-`, including
 the `-jsmin`, `-self`, `-programs`, `-apps`, `-gc-final`, `-test262` and `-ecma`
 logs and timings. Source snapshots remain moved aside during executable gates.
+
+## Comparison/probe follow-up: contract 117 (`e4d5098`)
+
+The Get probe carries an already-known own-entry miss into the shared
+operation. Profiling then identified string-key equality as a larger cost:
+the simple identity/length rejection entered the full view/rope traversal
+function. A small shared wrapper now rejects those cases before calling
+`equalLengthStringKeysEqualKernel`. The existing structural inliner handles
+it; no benchmark-specific behavior or second hash implementation is added.
+
+- Final paired observations: RayTrace **264**, versus repeated contract-115
+  control **258**; Box2D **392**, versus **365**; quick zlib **35.28 s**, versus
+  **35.88 s**. Quick timing is not a stock score. The contract-116 stock
+  scores and all baseline comparisons remain in the
+  [validation report](../../PROPERTY_CUTOVER_VALIDATION_2026-11-22.md).
+- Node and i386 js_min core suites pass again. All seven standalone programs
+  and all eleven demo/server application gates pass with the source snapshot
+  absent. The strengthened GC workload retains its complete structural totals.
+- Node/js_min/genuine self-build snapshots match SHA-256
+  `08cf3518169eee1e41354546c255654b52ce98e55c35c2090a3b365af8b5b841`.
+  js_min **92.06 s / 315256 KiB**; self-build **82.97 s / 481636 KiB**.
+  Snapshot **7658432 bytes**, native code **681492 bytes**. Compared with
+  contract 115, native code is 11266 bytes smaller; total snapshot is 28936
+  bytes larger. No build-time regression is apparent in these observations.
+- Final Test262: **3292/3292 passed**, no failures/timeouts/unrun;
+  **341.87 s / 512372 KiB**. This individual observation is 6.4% shorter than
+  contract 116 and 4.3% shorter than contract 115, not a controlled estimate.
+- Final full ECMA: **997 passed / 332 failed (39 timeouts included) / four
+  configured skips / zero unrun**, **609.64 s / 463792 KiB**. Every one of
+  the 1333 filename statuses matches contract 116: no lost/gained passes,
+  missing or extra files. Runtime is similar to the preceding 603.69 s
+  observation, not an ECMA speedup. The older contract-111 difference remains
+  only the documented watchdog-boundary case.
 
 ## Execution design
 

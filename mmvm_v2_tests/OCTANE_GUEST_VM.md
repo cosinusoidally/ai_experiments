@@ -1,5 +1,14 @@
 # Octane guest-VM bring-up and performance approach
 
+Property-reference cleanup audit, 2026-11-22: **14 stock suites pass with
+scores; RegExp passes quick correctness separately** (no new stock RegExp
+score). Mandreel remains working. Scores/time/RSS, immediate-baseline pairs
+and the subsequent shared string-comparison improvement are recorded in
+[the property-cutover validation](PROPERTY_CUTOVER_VALIDATION_2026-11-22.md).
+The full scored sweep is contract 116; the final contract-117 follow-up has
+targeted stock RayTrace/Box2D and quick zlib measurements, not another full
+scored sweep. Do not read the older summaries below as current failures.
+
 Mandreel follow-up, 2026-11-15: **fixed in `6b89c2a`**. Its loading failure was
 compiler source-location storage requiring a large contiguous guest vector.
 Paged statement boundaries preserve diagnostics without changing the 512 MiB

@@ -1,5 +1,18 @@
 # Test262 status
 
+2026-11-22, property-probe/string-comparison follow-up (`e4d5098`, contract 117):
+
+- Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
+  0 timed out / 0 not run**, unchanged corpus, harness and default limits.
+- Harness **341178.131 ms**, summed tests **325138.282 ms**; process **341.87 s**,
+  peak RSS **512372 KiB**, exit 0. Contract 116 took 365.42 s and contract 115
+  took 357.06 s: this observation is respectively 6.4% and 4.3% shorter, not
+  a controlled throughput estimate. Source snapshot moved aside, serial run.
+- Node/js_min core, cross-host/self-build identity, seven standalone program
+  gates and eleven demo/server gates also pass on the final image. The
+  strengthened GC workload retains its full structural-audit totals.
+- Receipts: ignored `artifacts/property-comparison-test262.log` and `.time`.
+
 2026-11-22, ES5.1 reference/operation cutover (`d656ede`, contract 116):
 
 - Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /
