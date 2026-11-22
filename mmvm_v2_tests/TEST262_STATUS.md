@@ -1,5 +1,18 @@
 # Test262 status
 
+2026-11-22, standard enumeration checkpoint (`a80c661`, contract 118):
+
+- Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
+  3292 passed / zero failures / zero timeouts / zero unrun**, unchanged corpus,
+  harness and default limits. Source snapshot moved aside during execution.
+- Harness **329569.933 ms**, summed tests **311236.669 ms**; process **330.24 s /
+  512456 KiB**, exit zero. Preceding observation 341.87 s / 512372 KiB;
+  this is 3.4% shorter in individual observations, not a controlled estimate.
+- Full ECMA gains three specific Node-passing files without lost passes.
+  Core suites pass on Node and i386 js_min; cross-host/self-build identity,
+  bounded structural GC and all program/demo/server gates also pass.
+- Receipts: ignored `artifacts/ecma-parity-final-test262.log` and `.time`.
+
 2026-11-22, property-probe/string-comparison follow-up (`e4d5098`, contract 117):
 
 - Fresh optimized Linux executable: **3292 executed / 3292 passed / 0 failed /

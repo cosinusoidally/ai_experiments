@@ -2,6 +2,39 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Standard enumeration and Node filename-parity checkpoint, 2026-11-22
+
+- Guest `a80c661` / contract 118, full serial `TZ=UTC` run: **1000 passed /
+  329 failed (39 timeouts included) / four configured skips / zero not run**;
+  1333 selected / 1329 executed. **Three gained passes / zero lost passes /
+  zero missing or extra files** versus the contract-117-equivalent retained
+  filename matrix. Gains: `ecma/Statements/12.6.3-1.js`,
+  `ecma_2/Statements/forin-001.js`, and
+  `ecma_5/Array/splice-suppresses-unvisited-indexes.js`.
+- Fresh direct Node UTC control: **1218 passed / 111 failed / four skips /
+  zero timeouts / zero unrun**, 132.43 s / 162664 KiB. Default Node timeout
+  remains uncapped; all corpus and skip policies are unchanged.
+- All three guest gains pass Node. Exact parity: **970 common passes /
+  248 Node-only passes / 30 guest-only passes**. Date-directory gap remains
+  **81**; non-Date gap decreases **170 -> 167**, matching **877/1044**
+  specific non-Date Node passes. Guest-only passes do not offset Node gaps.
+- Updated [the per-file matrix](ECMA_TEST_RESULTS.tsv) with both fresh Node
+  and guest columns, preserving all historical columns. Implementation targets
+  are Node-passing standard behavior, not SpiderMonkey-specific extensions.
+- Per-tree guest pass/fail: ecma **474/146**, ecma_2 **150/22**,
+  ecma_3 **177/48**, ecma_5 **199/113**; timeouts **11/0/1/27**.
+  Harness **608536.996 ms**, process **608.84 s / 463944 KiB**. Preceding
+  observation 609.64 s / 463792 KiB; overall ECMA runtime is similar.
+- Full Test262 remains **3292/3292 passed**; Node/js_min core, cross-host and
+  genuine self-build identity, structural GC, seven program gates and eleven
+  demo/server gates pass. Paired stock Box2D **380 -> 411**, CodeLoad
+  **90.2 -> 92.6**; no full new Octane sweep is claimed.
+- See [design and validation](guest_vm/docs/ecma-node-parity-cleanup.md),
+  including slower js_min build observations (97.79 s and 101.22 s, versus
+  preceding 92.06 s). This build-time concern is not claimed resolved; the
+  self-hosted build and selected throughput measurements improve.
+  Ignored receipts: `artifacts/ecma-parity-*`, `artifacts/ecma-node-parity-utc.*`.
+
 ### Final property/string comparison audit, 2026-11-22
 
 - Default optimized Linux executable `e4d5098` / contract 117: **997 passed /

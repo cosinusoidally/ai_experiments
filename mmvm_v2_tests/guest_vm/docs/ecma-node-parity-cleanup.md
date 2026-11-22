@@ -108,5 +108,44 @@ No new language micro-test files or external corpus edits are introduced.
 Two selected Node-passing external files pass in the standalone candidate:
 `ecma/Statements/12.6.3-1.js` and
 `ecma_5/Array/splice-suppresses-unvisited-indexes.js`.
-Broad final acceptance and exact pass-set deltas remain pending, not inferred
-from these targeted results. Receipts use `artifacts/ecma-parity-*`.
+## Combined acceptance, `a80c661` (2026-11-22)
+
+- Full guest ECMA (`TZ=UTC`): **1000 passed / 329 failed (39 timeouts
+  included) / four skips / zero unrun**, 1333 selected / 1329 executed.
+  **Three gains / zero lost passes / zero missing or extra files** against
+  the retained contract-117-equivalent filename matrix. Gains are
+  `ecma/Statements/12.6.3-1.js`, `ecma_2/Statements/forin-001.js`, and
+  `ecma_5/Array/splice-suppresses-unvisited-indexes.js`; all three pass Node.
+  Process **608.84 s / 463944 KiB**, versus preceding 609.64 s / 463792 KiB.
+- Specific Node parity: **970/1218 common passes / 248 Node-only passes /
+  30 guest-only passes**. Date-directory gap remains 81; non-Date gap falls
+  from **170 to 167**, with **877/1044** non-Date Node passes matched.
+  Proprietary or edition-specific Node failures do not become implementation
+  targets; directory names alone do not classify a requirement as proprietary.
+- Full Test262: **3292/3292 passed**, zero failures, timeouts or unrun;
+  **330.24 s / 512456 KiB**, preceding observation 341.87 s / 512372 KiB.
+- Node and i386 js_min core suites pass: 15 programs / 321 intrinsic assertions,
+  plus integration fixture checks on portable/kernel/predecoded configurations.
+- All seven standalone program gates and eleven demo/server application gates
+  pass with the source snapshot moved aside. GC: 24 rounds / 30 structural
+  audits / 141980 edges / 254 property-index audits / 84 embedding collections /
+  one runtime bound function, 8 MiB heap cap, maximum bump 432824 bytes.
+- Node, js_min and genuine self-build snapshots are byte-identical, SHA-256
+  `ca44a61cf7340053b5019eb26d5ea2b8cc6120390b71367375f7ce91088b1fcb`.
+  Snapshot 7673496 bytes; native code 687018 bytes. Self-build **80.75 s /
+  483220 KiB**, preceding observation 82.97 s / 481636 KiB. The initial
+  pre-hoist candidate took 88.16 s; redundant loop-length lookup was not kept.
+- js_min build **97.79 s / 314272 KiB**, preceding observation 92.06 s /
+  315256 KiB. This observation is slower; do not claim universal build-time
+  parity or dismiss it as measured noise. A serial repeat is **101.22 s /
+  314548 KiB**, producing the identical snapshot hash. The slower hosted
+  build observation remains an open performance concern; the repeat does
+  not establish whether all of the difference is attributable to this change.
+- Paired stock Octane checks, fresh serial processes: Box2D **380 -> 411**,
+  CodeLoad **90.2 -> 92.6**, correctness enabled and exit zero. These selected
+  pairs are not a new all-suite score claim; no full stock Octane sweep or
+  fresh Windows/debugger audit is claimed for this checkpoint.
+
+Receipts use `artifacts/ecma-parity-*`. The broad acceptance run followed
+the final loop-length hoist; earlier targeted results do not substitute for
+these final gates. Raw logs are ignored build artifacts, not corpus changes.
