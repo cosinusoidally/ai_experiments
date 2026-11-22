@@ -6,6 +6,36 @@
         if (!condition) throw new Error(message);
     }
     check(String() === "" && String(undefined) === "undefined", "String conversion distinguishes a missing argument");
+    var enumerationSource = {first: 1, removed: 2, last: 3};
+    var originalEnumerationSource = enumerationSource, enumerationSeen = [];
+    for (var enumerationName in enumerationSource) {
+        enumerationSeen.push(enumerationName);
+        if (enumerationName === "first") {
+            delete originalEnumerationSource.removed;
+            enumerationSource = {};
+        }
+    }
+    check(enumerationSeen.join(",") === "first,last",
+          "enumeration retains its source and suppresses deleted pending keys");
+    var enumerationTargetCalls = 0, enumerationTarget = {};
+    function enumerationLeft() { enumerationTargetCalls++; return enumerationTarget; }
+    for (enumerationLeft().name in {a: 1, b: 2}) {}
+    check(enumerationTargetCalls === 2 && enumerationTarget.name === "b",
+          "enumeration evaluates its assignment target for each visit");
+    var enumerationInitialOrder = [];
+    for (var initializedEnumeration = enumerationInitialOrder.push("initial") in
+            (enumerationInitialOrder.push("source"), {only: 1})) {}
+    check(enumerationInitialOrder.join(",") === "initial,source" &&
+          initializedEnumeration === "only", "for-in initializes its var before evaluating the source");
+    Number.prototype.enumerationNumber = 1;
+    Boolean.prototype.enumerationBoolean = 1;
+    var primitiveNames = [];
+    for (var numericName in 7) primitiveNames.push(numericName);
+    for (var booleanName in false) primitiveNames.push(booleanName);
+    delete Number.prototype.enumerationNumber;
+    delete Boolean.prototype.enumerationBoolean;
+    check(primitiveNames.join(",") === "enumerationNumber,enumerationBoolean",
+          "primitive enumeration includes inherited enumerable properties");
     var plain = {label: "object"};
     check("prefix:" + plain === "prefix:[object Object]" &&
           plain + 7 === "[object Object]7" &&

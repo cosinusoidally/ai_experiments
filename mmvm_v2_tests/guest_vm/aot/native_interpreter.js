@@ -3943,6 +3943,19 @@
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
+            } else if (opcode === Bytecode.HAS_ENUMERATION_KEY) {
+                if (hasEnumerationKeyKernel(heapBase, state,
+                        frameRegisterCellAddress(heapBase, frame,
+                            bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND)),
+                        frameRegisterCellAddress(heapBase, frame,
+                            bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND)),
+                        frameRegisterCellAddress(heapBase, frame,
+                            bytecodePayloadWord(0, bytecodeAddress, pc + THIRD_OPERAND)),
+                        arrayLengthKey, stringSupport) === 0) {
+                    return unsupportedExitKernel(heapBase, state, frame, pc,
+                        opcode, initialBudget - budget);
+                }
+                pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.GET_KEYS) {
                 var keysTargetIndex = load32(
                     bytecodeAddress +
@@ -11663,9 +11676,10 @@
         var object = 0;
         var type = 0;
         var property = 0;
-        /* Null/undefined skip enumeration; number/boolean primitives have
-         * no own enumerable properties. Produce an empty key vector rather
-         * than exiting to the host merely because the value is primitive. */
+        /* Null/undefined skip enumeration. Number/boolean primitives have
+         * no own keys, but for-in must still enumerate their prototypes:
+         * ToObject does not mean discarding inherited enumerable names.
+         * Borrowing the prototype avoids allocating an unobservable wrapper. */
         if (valueCellTag(0, sourceCell) === RecordLayout.VALUE_TAG_REFERENCE) {
             object = valueCellReference(0, sourceCell);
             type = recordType(heapBase, object);
@@ -11673,6 +11687,19 @@
             if (type === RecordLayout.HEAP_TYPE_ARRAY) {
                 property = lastOwnPropertyEntryKernel(heapBase, object);
             } else property = lastOwnPropertyEntryKernel(heapBase, object);
+        } else if (mode === EnumerationMode.INHERITED_ENUMERABLE) {
+            var sourceTag = valueCellTag(0, sourceCell);
+            var primitivePrototypeIndex = -1;
+            if (sourceTag === VALUE_TAG_INT32 || sourceTag === VALUE_TAG_DOUBLE) {
+                primitivePrototypeIndex = RuntimeSupportLayout.NUMBER_PROTOTYPE;
+            } else if (sourceTag === VALUE_TAG_TRUE || sourceTag === VALUE_TAG_FALSE) {
+                primitivePrototypeIndex = RuntimeSupportLayout.BOOLEAN_PROTOTYPE;
+            }
+            if (primitivePrototypeIndex >= 0) {
+                object = valueCellReference(0, vectorCellAddress(heapBase,
+                    stringSupport, primitivePrototypeIndex));
+                type = recordType(heapBase, object);
+            }
         }
         var sourceElements = 0;
         var sourceLength = 0;
@@ -14149,17 +14176,13 @@
                 return 1;
             }
         }
-        var property = lastOwnPropertyEntryKernel(heapBase, object);
-        var existingProperty = 0;
-        while (property !== 0) {
-            if (stringKeysEqualKernel(
-                    heapBase, ownPropertyEntryKeyKernel(heapBase, object, property), key) === 1) {
-                existingProperty = property;
-                property = 0;
-            } else {
-                property = previousOwnPropertyEntryKernel(heapBase, object, property);
-            }
-        }
+        /* Use the same guarded lookup as Get/Put and descriptor reads. A
+         * definition must not rescan an ordinary object's insertion list;
+         * packed storage and linked exotic storage are selected by the
+         * shared operation. Descriptor normalization has already completed,
+         * so no callback can invalidate the resulting entry in this phase. */
+        var existingProperty = findOwnPropertyEntryKernel(heapBase, state, object, key);
+        var property = existingProperty;
         var attributes = 0;
         if (existingProperty !== 0) attributes = ownPropertyEntryAttributesKernel(heapBase, object, existingProperty);
         var exists = existingProperty;

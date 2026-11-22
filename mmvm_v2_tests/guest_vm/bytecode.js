@@ -66,7 +66,8 @@
         PUSH_CATCH_SCOPE: 64,
         DEFINE_DATA_PROPERTY: 65,
         CHECK_PROPERTY_BASE: 66,
-        PREPARE_PROPERTY_KEY: 67
+        PREPARE_PROPERTY_KEY: 67,
+        HAS_ENUMERATION_KEY: 68
     };
 
     op.NAMES = [];
@@ -105,7 +106,7 @@
         op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL, op.BIT_AND,
         op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
         op.SHIFT_UNSIGNED_RIGHT, op.MAKE_REGEXP, op.DELETE_PROPERTY, op.CONSTRUCT,
-        op.ADD_INT32, op.SUBTRACT_INT32, op.PREPARE_PROPERTY_KEY]);
+        op.ADD_INT32, op.SUBTRACT_INT32, op.PREPARE_PROPERTY_KEY, op.HAS_ENUMERATION_KEY]);
     layout(5, 1, [op.CALL]);
 
     /* Explicit register reads. Constant indices, lexical slots, jump targets
@@ -132,7 +133,7 @@
         op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL,
         op.BIT_AND, op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
         op.SHIFT_UNSIGNED_RIGHT, op.IN, op.INSTANCEOF, op.ADD_INT32,
-        op.SUBTRACT_INT32, op.CALL, op.PREPARE_PROPERTY_KEY]);
+        op.SUBTRACT_INT32, op.CALL, op.PREPARE_PROPERTY_KEY, op.HAS_ENUMERATION_KEY]);
     inputs([1, 2, 3], [op.SET_PROPERTY, op.DEFINE_GETTER, op.DEFINE_SETTER,
         op.DEFINE_DATA_PROPERTY]);
     inputs([1, 3], [op.SET_PROPERTY_CONST]);

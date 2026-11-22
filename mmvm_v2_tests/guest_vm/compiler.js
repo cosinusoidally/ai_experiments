@@ -611,23 +611,35 @@
                 }
                 forInReference = this.referenceForName(
                     statement.left.declarations[0].name);
-            } else {
-                forInReference = this.compileReference(statement.left);
+                this.compileStatement(statement.left);
             }
-            var forInObject = this.compileExpression(statement.right);
+            /* Capture the source identity even if its binding is reassigned
+             * by the body. A member-expression target is evaluated per visit,
+             * after selecting a still-present key, not before the source. */
+            var forInSource = this.compileExpression(statement.right);
+            var forInObject = this.allocate();
+            this.emit(op.MOVE, forInObject, forInSource);
             var forInKeys = this.allocate();
             this.emit(op.GET_KEYS, forInKeys, forInObject);
             var forInIndex = this.allocate();
             this.emit(op.MOVE, forInIndex, this.emitConstant(0));
-            var forInStart = this.code.length;
             var lengthKey = this.emitConstant("length");
             var forInLength = this.allocate();
+            /* Candidate names are a private immutable snapshot. Its length
+             * is loop-invariant even when the source object is mutated. */
             this.emit(op.GET_PROPERTY, forInLength, forInKeys, lengthKey);
+            var forInStart = this.code.length;
             var forInCondition = this.allocate();
             this.emit(op.LESS, forInCondition, forInIndex, forInLength);
             var forInEnd = this.emit(op.JUMP_IF_FALSE, forInCondition, 0);
             var forInKey = this.allocate();
             this.emit(op.GET_PROPERTY, forInKey, forInKeys, forInIndex);
+            var forInPresent = this.allocate();
+            this.emit(op.HAS_ENUMERATION_KEY, forInPresent, forInKey, forInObject);
+            var forInDeleted = this.emit(op.JUMP_IF_FALSE, forInPresent, 0);
+            if (statement.left.type !== "VariableStatement") {
+                forInReference = this.compileReference(statement.left);
+            }
             this.storeReference(forInReference, forInKey);
             var forInBreaks = this.makeJumpTarget(-1);
             var forInContinues = this.makeJumpTarget(-1);
@@ -638,8 +650,11 @@
             this.continueTargets.pop();
             this.breakTargets.pop();
             patchBreaks(this, forInContinues, this.code.length);
+            this.patch(forInDeleted + 2, this.code.length);
             var oneForIn = this.emitConstant(1);
-            this.emit(op.ADD, forInIndex, forInIndex, oneForIn);
+            /* This unexposed counter is bounded by the guest vector limit,
+             * below signed-int32 overflow; no guest coercion is possible. */
+            this.emit(op.ADD_INT32, forInIndex, forInIndex, oneForIn);
             this.emit(op.JUMP, forInStart);
             this.patch(forInEnd + 2, this.code.length);
             patchBreaks(this, forInBreaks, this.code.length);

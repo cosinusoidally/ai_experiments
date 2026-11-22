@@ -659,6 +659,38 @@
     /* Membership includes inherited names and virtual indexed/length
      * properties. One publishes a boolean, zero declines a conversion or
      * exception case. This leaf never invokes a getter. */
+    /* Enumeration snapshots candidate names, not their continued existence.
+     * Recheck without reading a value or invoking an accessor. Unlike the
+     * public `in` operator, for-in admits primitive sources via ToObject;
+     * their virtual indices/prototype can be checked without allocating a
+     * wrapper. The candidate key is already a string from GET_KEYS. */
+    function hasEnumerationKeyKernel(heapBase, state, target, key, source,
+            lengthKey, stringSupport) {
+        var tag = valueCellTag(0, source);
+        var prototypeIndex = RuntimeSupportLayout.NUMBER_PROTOTYPE;
+        if (tag === VALUE_TAG_NULL || tag === VALUE_TAG_UNDEFINED) {
+            setValueCellFalse(target);
+            return 1;
+        }
+        if (tag === VALUE_TAG_REFERENCE) {
+            var object = valueCellReference(0, source);
+            if (recordType(heapBase, object) !== HEAP_TYPE_STRING) {
+                return hasPropertyKernel(heapBase, state, target, key, source,
+                    lengthKey, stringSupport);
+            }
+            if (stringOwnPropertyKeyKernel(heapBase, object, key, lengthKey) === 1) {
+                setValueCellTrue(target);
+                return 1;
+            }
+            prototypeIndex = RuntimeSupportLayout.STRING_PROTOTYPE;
+        } else if (tag === VALUE_TAG_TRUE || tag === VALUE_TAG_FALSE) {
+            prototypeIndex = RuntimeSupportLayout.BOOLEAN_PROTOTYPE;
+        }
+        var prototypeCell = vectorCellAddress(heapBase, stringSupport, prototypeIndex);
+        return hasPropertyKernel(heapBase, state, target, key, prototypeCell,
+            lengthKey, stringSupport);
+    }
+
     function hasPropertyKernel(heapBase, state, targetCell, keyCell, objectCell,
                                arrayLengthKey, stringSupport) {
         var objectTag = valueCellTag(0, objectCell);
@@ -760,10 +792,13 @@
                 } else return 0;
             } else return 0;
 
-            if (numericKey === 0) {
+            if (numericKey === 0 || key !== 0) {
                 /* Named membership uses the same guarded packed/linked
                  * lookup as reads and descriptors. Do not bypass optional
-                 * indexes by maintaining a second prototype-list scan. */
+                 * indexes by maintaining a second prototype-list scan.
+                 * A canonical numeric spelling already held as a string
+                 * also has an exact lookup key; only raw numeric operands
+                 * need the allocation-free decimal-index comparison below. */
                 if (findOwnPropertyEntryKernel(heapBase, state, current, key) !== 0) {
                     setValueCellTrue(targetCell);
                     return 1;
@@ -801,6 +836,7 @@
         propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
         propertyKeyIndexKernel: propertyKeyIndexKernel,
         hasPropertyKernel: hasPropertyKernel,
+        hasEnumerationKeyKernel: hasEnumerationKeyKernel,
         arrayHasOwnElementKernel: arrayHasOwnElementKernel,
         descriptorRequestedAttributesCellsKernel: descriptorRequestedAttributesCellsKernel,
         enumerationOwnEntryIncludedKernel: enumerationOwnEntryIncludedKernel,

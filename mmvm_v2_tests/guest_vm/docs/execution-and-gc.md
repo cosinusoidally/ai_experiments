@@ -35,6 +35,25 @@ native execution. This is what the code's “semantic exit” means: not an
 unimplemented CALL opcode in general, but a particular operation/value case
 not completed by that kernel path.
 
+### Enumeration candidates and live membership (contract 118)
+
+For-in captures its source once and takes an internal candidate-key snapshot.
+The snapshot's length is immutable and is loaded outside the loop. Before
+assigning a candidate to the loop target, `HAS_ENUMERATION_KEY` checks that
+the property still exists. Deleted candidates skip both target evaluation
+and the body. The instruction has a boolean destination and two canonical
+register sources (key, captured source); it allocates nothing or calls guest
+code in the shared compiled engine. It differs from public `in` by accepting
+primitive sources through their ToObject-equivalent indices/prototypes.
+It never invokes a getter merely to test presence.
+
+The captured source and candidate keys are normal traced frame values, not
+host iterator objects or unrooted native pointers. Member-expression targets
+are evaluated per actual visit. Allowed var initializers run once before
+source evaluation. Number/boolean source enumeration includes inherited
+enumerable prototype names. See
+[the parity cleanup design](ecma-node-parity-cleanup.md) for scope and gates.
+
 ### Property references and continuations (contract 116)
 
 `CHECK_PROPERTY_BASE` reads one receiver register and throws the guest

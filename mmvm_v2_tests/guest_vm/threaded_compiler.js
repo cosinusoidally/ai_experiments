@@ -193,7 +193,8 @@
             /* Structured source must not silently reintroduce the host's
              * newer property-reference timing. Use the common interpreter
              * until this optional backend lowers explicit reference ops. */
-            if (opcode === op.PREPARE_PROPERTY_KEY || opcode === op.CHECK_PROPERTY_BASE) return false;
+            if (opcode === op.PREPARE_PROPERTY_KEY || opcode === op.CHECK_PROPERTY_BASE ||
+                    opcode === op.HAS_ENUMERATION_KEY) return false;
             if (opcode === op.PUSH_CATCH || opcode === op.PUSH_CATCH_SCOPE || opcode === op.POP_CATCH) return false;
             if (opcode === op.MAKE_FUNCTION && !program.astBody) return false;
             pc += width(opcode);

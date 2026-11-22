@@ -161,7 +161,8 @@
             this.reloadNativeOperand(frame, code[pc + 1]);
         } else if (opcode === op.MOVE) {
             this.reloadNativeOperand(frame, code[pc + 2]);
-        } else if (opcode === op.GET_PROPERTY || opcode === op.PREPARE_PROPERTY_KEY) {
+        } else if (opcode === op.GET_PROPERTY || opcode === op.PREPARE_PROPERTY_KEY ||
+                   opcode === op.HAS_ENUMERATION_KEY) {
             this.reloadNativeOperand(frame, code[pc + 2]);
             this.reloadNativeOperand(frame, code[pc + 3]);
         } else if (opcode === op.CHECK_PROPERTY_BASE) {
@@ -840,6 +841,12 @@
                 } else if (opcode === op.GET_KEYS) {
                     registers[code[pc + 1]] = this.runtime.enumerableKeys(registers[code[pc + 2]]);
                     frame.pc = pc + 3;
+                } else if (opcode === op.HAS_ENUMERATION_KEY) {
+                    var enumerationSource = registers[code[pc + 3]];
+                    registers[code[pc + 1]] = enumerationSource !== null &&
+                        enumerationSource !== undefined && this.runtime.hasProperty(
+                            this.runtime.toObject(enumerationSource), registers[code[pc + 2]]);
+                    frame.pc = pc + 4;
                 } else if (opcode === op.JUMP) {
                     if (code[pc + 1] <= pc &&
                         !this.runtime.nativeInterpreter) {
