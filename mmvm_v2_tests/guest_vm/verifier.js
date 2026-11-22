@@ -46,7 +46,7 @@
                     throw new Error("invalid name constant at bytecode " + pc);
                 }
                 requireRegister(program, code[pc + 2], pc);
-            } else if (opcode === op.ENTER_WITH) {
+            } else if (opcode === op.ENTER_WITH || opcode === op.CHECK_PROPERTY_BASE) {
                 requireRegister(program, code[pc + 1], pc);
             } else if (opcode === op.MOVE || opcode === op.NOT ||
                        opcode === op.TO_INT32 ||
@@ -58,6 +58,7 @@
                 if (opcode === op.MAKE_FUNCTION) verify(pagedConstants ?
                     constants.get(code[pc + 2]) : constants[code[pc + 2]]);
             } else if (opcode === op.GET_PROPERTY || opcode === op.SET_PROPERTY ||
+                       opcode === op.PREPARE_PROPERTY_KEY ||
                        opcode === op.ADD_INT32 || opcode === op.SUBTRACT_INT32 ||
                        (opcode >= op.ADD && opcode <= op.GREATER_EQUAL) ||
                        (opcode >= op.BIT_AND && opcode <= op.SHIFT_UNSIGNED_RIGHT) ||
@@ -90,6 +91,12 @@
                     if (code[pc + 3] < 0 || code[pc + 3] >= program.constants.length) {
                         throw new Error("invalid property constant at bytecode " + pc);
                     }
+                }
+                /* Property-name constants are strings, not arbitrary values.
+                 * Consumers may rely on this after bytecode verification. */
+                var nameIndex = code[pc + (opcode === op.SET_PROPERTY_CONST ? 2 : 3)];
+                if (typeof (pagedConstants ? constants.get(nameIndex) : constants[nameIndex]) !== "string") {
+                    throw new Error("property-name constant is not a string at bytecode " + pc);
                 }
             } else if (opcode === op.JUMP) {
                 jumps.push(code[pc + 1]);

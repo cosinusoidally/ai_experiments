@@ -32,6 +32,50 @@ hash implementation; do not add an unmeasured host-text fast path. These
 inclusive instrumented times locate costs, not establish throughput parity.
 Receipt: ignored `artifacts/property-build-hash-profile.log`.
 
+## Contract 116 implementation checkpoint
+
+All four follow-up implementation stages are now present. Combined broad
+acceptance is still pending at this checkpoint; do not confuse the functional
+checks below with a fresh full-suite claim.
+
+- `CHECK_PROPERTY_BASE` and `PREPARE_PROPERTY_KEY` have explicit register
+  schemas, verifier rules and portable/native implementations. The compiler
+  prepares assignment/update references before RHS evaluation, retaining the
+  converted key separately. Primitive syntax and effect-free RHS proofs avoid
+  unnecessary preparation/checks. Constant property names are verified strings.
+- Native object-key Get/Put/Delete/Has and prepared-key conversion enter the
+  same private traced guest operations as descriptor/portable conversion.
+  Argument vectors are temporary guest records, not host arrays; frame entry
+  preserves the caller PC/result and callback progress through GC/budgets.
+- `executeNamedPropertyGetKernel` serves constant and computed reads, replacing
+  duplicate prototype/descriptor walks. `executeNamedPropertySetKernel` owns
+  named writes, setter entry, creation and rejection; it uses shared entry
+  lookup rather than manual representation-offset selection. Operation results
+  explicitly distinguish completion and entered frames from engine exits.
+  Small guarded own-data read/write probes remain ordinary inlining candidates;
+  the read probe is 67 IR nodes. Getters use canonical result-cell addressing
+  in both operand views. Canonical numeric strings reuse indexed storage.
+- Standard unlabelled loop `break` is supported in the kernel compiler, CFG
+  and both backends, rather than replacing prototype loops with control flags.
+  `for` break skips the update; labelled break/continue remain rejected.
+- The common converter captures a distinct String primitive callable. Capturing
+  the mutable public callable caused portable recursion after fallback install;
+  the full standard-library fixture exposed and now covers this. String() with
+  no argument is distinguished from String(undefined).
+- The existing property integration fixture now covers early/one-time key
+  conversion, callback allocation/throwing, strict deletion, membership order,
+  converted array indices/length and UTF-16 string access. It runs in the core
+  suite with the guest standard library on portable, kernel and predecoded
+  configurations. Node and i386 js_min core suites pass: 15 guest programs /
+  321 assertion-intrinsic calls, plus the fixture's own throwing checks.
+- Fresh standalone property integration passes. One Box2D observation after
+  extraction initially fell to 361; this was not accepted. Separating guarded
+  inlinable own-data probes restores 413, versus a paired pre-change 404. This
+  is single-run regression evidence, not a controlled speedup claim.
+- The optional legacy structured-source compiler declines new reference-op
+  programs instead of using modern host reference timing. Shared kernel JS
+  execution is fully supported. No demo or external corpus files are changed.
+
 ## Execution design
 
 - Property register access is schema-checked, including shared instruction

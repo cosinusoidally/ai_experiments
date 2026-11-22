@@ -24,18 +24,21 @@
         "    return value;",
         "  }",
         "  function key(value) { return string(primitive(value, true)); }",
-        "  function get(object, value) { return object[key(value)]; }",
-        "  function set(object, value, data) { object[key(value)] = data; }",
-        "  function setStrict(object, value, data) { 'use strict'; object[key(value)] = data; }",
-        "  function remove(object, value) { return delete object[key(value)]; }",
-        "  function removeStrict(object, value) { 'use strict'; return delete object[key(value)]; }",
+        "  function base(object) {",
+        "    if (object === null || object === void 0) throw new typeError('cannot access property of null or undefined');",
+        "  }",
+        "  function get(object, value) { base(object); return object[key(value)]; }",
+        "  function set(object, value, data) { base(object); object[key(value)] = data; return data; }",
+        "  function setStrict(object, value, data) { 'use strict'; base(object); object[key(value)] = data; return data; }",
+        "  function remove(object, value) { base(object); return delete object[key(value)]; }",
+        "  function removeStrict(object, value) { 'use strict'; base(object); return delete object[key(value)]; }",
         "  function has(value, object) {",
         "    if (object === null || (typeof object !== 'object' && typeof object !== 'function'))",
         "      throw new typeError('right operand of in must be an object');",
         "    return key(value) in object;",
         "  }",
         "  return {PRIMITIVE:primitive, KEY:key, GET:get, SET:set, SET_STRICT:setStrict, DELETE:remove, DELETE_STRICT:removeStrict, HAS:has};",
-        "})(String, Function.prototype.call.bind(Function.prototype.call), TypeError);"
+        "})(__guestPropertyString, Function.prototype.call.bind(Function.prototype.call), TypeError);"
     ].join("\n");
     var exports = {source: source, methods: methods, slots: slots};
     root.GuestVMPropertyOperationsRuntime = exports;

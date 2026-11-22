@@ -64,7 +64,9 @@
         SUBTRACT_INT32: 62,
         TO_INT32: 63,
         PUSH_CATCH_SCOPE: 64,
-        DEFINE_DATA_PROPERTY: 65
+        DEFINE_DATA_PROPERTY: 65,
+        CHECK_PROPERTY_BASE: 66,
+        PREPARE_PROPERTY_KEY: 67
     };
 
     op.NAMES = [];
@@ -87,7 +89,7 @@
         }
     }
     layout(1, 0, [op.POP_CATCH, op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
-    layout(2, 0, [op.JUMP, op.RETURN, op.THROW, op.ENTER_WITH]);
+    layout(2, 0, [op.JUMP, op.RETURN, op.THROW, op.ENTER_WITH, op.CHECK_PROPERTY_BASE]);
     layout(2, 1, [op.MAKE_OBJECT, op.GET_THIS]);
     layout(3, 0, [op.SET_GLOBAL, op.SET_NAME, op.JUMP_IF_FALSE, op.PUSH_CATCH,
         op.PUSH_CATCH_SCOPE]);
@@ -103,7 +105,7 @@
         op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL, op.BIT_AND,
         op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
         op.SHIFT_UNSIGNED_RIGHT, op.MAKE_REGEXP, op.DELETE_PROPERTY, op.CONSTRUCT,
-        op.ADD_INT32, op.SUBTRACT_INT32]);
+        op.ADD_INT32, op.SUBTRACT_INT32, op.PREPARE_PROPERTY_KEY]);
     layout(5, 1, [op.CALL]);
 
     /* Explicit register reads. Constant indices, lexical slots, jump targets
@@ -121,7 +123,7 @@
         op.TYPEOF_GLOBAL, op.GET_NAME, op.TYPEOF_NAME, op.DELETE_NAME,
         op.JUMP, op.PUSH_CATCH, op.PUSH_CATCH_SCOPE, op.POP_CATCH,
         op.LEAVE_WITH, op.INVALID_ASSIGNMENT]);
-    inputs([1], [op.RETURN, op.THROW, op.ENTER_WITH, op.JUMP_IF_FALSE]);
+    inputs([1], [op.RETURN, op.THROW, op.ENTER_WITH, op.JUMP_IF_FALSE, op.CHECK_PROPERTY_BASE]);
     inputs([2], [op.MOVE, op.NOT, op.NEGATE, op.POSITIVE, op.BIT_NOT,
         op.TYPEOF, op.GET_KEYS, op.TO_INT32, op.GET_PROPERTY_CONST,
         op.DELETE_PROPERTY_CONST, op.SET_GLOBAL, op.SET_NAME, op.CONSTRUCT]);
@@ -130,7 +132,7 @@
         op.LESS, op.LESS_EQUAL, op.GREATER, op.GREATER_EQUAL,
         op.BIT_AND, op.BIT_OR, op.BIT_XOR, op.SHIFT_LEFT, op.SHIFT_RIGHT,
         op.SHIFT_UNSIGNED_RIGHT, op.IN, op.INSTANCEOF, op.ADD_INT32,
-        op.SUBTRACT_INT32, op.CALL]);
+        op.SUBTRACT_INT32, op.CALL, op.PREPARE_PROPERTY_KEY]);
     inputs([1, 2, 3], [op.SET_PROPERTY, op.DEFINE_GETTER, op.DEFINE_SETTER,
         op.DEFINE_DATA_PROPERTY]);
     inputs([1, 3], [op.SET_PROPERTY_CONST]);

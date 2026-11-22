@@ -89,6 +89,13 @@
         var runtime = this.runtime, records = runtime.heapRecords;
         var context = this.createContext();
         try {
+            /* Public String later gains a guest fallback. Capture a distinct
+             * primitive callable, not that mutable callable object; otherwise
+             * the portable fallback would recurse KEY -> String -> KEY. */
+            var stringConstructor = runtime.getGlobal(context, "String");
+            runtime.defineBuiltinProperty(context.globalObject, "__guestPropertyString",
+                runtime.makeNativeFunction("String", stringConstructor.callback,
+                    "intrinsic", NativeIntrinsics.STRING_CONSTRUCTOR));
             /* The temporary global roots the factory result across vector
              * allocation. Publish the vector before any subsequent operation
              * can collect; the ordinary root-owner walk covers both backends. */
@@ -104,6 +111,7 @@
                 records.setVectorLength(vector, index + 1);
             }
             runtime.deleteProperty(context.globalObject, "__guestPrivatePropertyOperations", false);
+            runtime.deleteProperty(context.globalObject, "__guestPropertyString", false);
         } finally { context.destroy(); }
     };
 

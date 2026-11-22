@@ -131,6 +131,7 @@
                    emitNested(node.consequent, parameters, locals) + "}else{" +
                    emitNested(node.alternate, parameters, locals) + "}";
         }
+        if (node.op === "break") return "break;";
         if (node.op === "while") {
             return "while(" + emitControlExpression(node.test, parameters, locals) + "){" +
                    emitNested(node.body, parameters, locals) + "}";

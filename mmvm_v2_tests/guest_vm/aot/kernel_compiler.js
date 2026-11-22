@@ -1732,13 +1732,21 @@
                         lowerStatement(statement.alternate, symbols) :
                         {op: "block", body: []}};
         }
+        if (statement.type === "BreakStatement") {
+            if (statement.label || !symbols.loopScope) {
+                throw new SyntaxError("kernel break requires an enclosing unlabelled loop");
+            }
+            symbols.loopScope.hasBreak = true;
+            return {op: "break"};
+        }
         if (statement.type === "WhileStatement") {
+            var loweredWhile = lowerLoopBody(statement.body, symbols);
             return {op: "while", test: lowerKernelExpression(statement.test, symbols),
-                    body: lowerStatement(statement.body, symbols)};
+                    body: loweredWhile.body, breakable: loweredWhile.hasBreak};
         }
         if (statement.type === "ForStatement") {
             /* Desugar to existing control-flow IR, shared by both backends.
-             * break/continue are still rejected: a future continue lowering
+             * continue is still rejected: a future continue lowering
              * must target the update, not simply the loop condition. */
             var loopStatements = [];
             if (statement.initial !== null) {
@@ -1748,12 +1756,14 @@
                         {type: "ExpressionStatement",
                          expression: statement.initial}, symbols));
             }
-            var iteration = [lowerStatement(statement.body, symbols)];
+            var loweredFor = lowerLoopBody(statement.body, symbols);
+            var iteration = [loweredFor.body];
             if (statement.update !== null) {
                 iteration.push(lowerStatement({type: "ExpressionStatement",
                     expression: statement.update}, symbols));
             }
             loopStatements.push({op: "while",
+                breakable: loweredFor.hasBreak,
                 test: statement.test === null ?
                     {op: "const_i32", value: 1, type: "i32"} :
                     lowerKernelExpression(statement.test, symbols),
@@ -1767,6 +1777,14 @@
         }
         throw new SyntaxError("unsupported control-flow kernel statement " +
                               statement.type);
+    }
+
+    function lowerLoopBody(statement, symbols) {
+        var previous = symbols.loopScope;
+        var scope = {hasBreak: false};
+        symbols.loopScope = scope;
+        try { return {body: lowerStatement(statement, symbols), hasBreak: scope.hasBreak}; }
+        finally { symbols.loopScope = previous; }
     }
 
     function requireLocal(symbols, name) {
@@ -2523,7 +2541,7 @@
      * a complete copy of the interpreter for every opcode. JS emission can
      * retain its structured source representation. */
     KernelCompiler.buildControlFlow = function (body, selectTest) {
-        var blocks = [], nextId = 0;
+        var blocks = [], nextId = 0, loopExits = [];
         function block() {
             return {id: nextId++, statements: [], terminator: null};
         }
@@ -2543,6 +2561,11 @@
             if (node.op === "opcode_dispatch") return sequence(node.body, current);
             if (node.op === "return") {
                 current.terminator = {kind: "return", statement: node};
+                return null;
+            }
+            if (node.op === "break") {
+                if (!loopExits.length) throw new Error("kernel break outside loop");
+                jump(current, loopExits[loopExits.length - 1]);
                 return null;
             }
             if (node.op === "if") {
@@ -2571,7 +2594,9 @@
                 header.terminator = {kind: "branch", test: node.test,
                     consequent: loopBody, alternate: exit};
                 blocks.push(loopBody);
+                loopExits.push(exit);
                 jump(sequence(node.body, loopBody), header);
+                loopExits.pop();
                 blocks.push(exit);
                 return exit;
             }

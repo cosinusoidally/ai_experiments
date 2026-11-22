@@ -1,9 +1,11 @@
-/* End-to-end property operations, runnable unchanged on stock Node or as a
- * guest (including a standalone image). No host-language semantic helpers. */
+/* End-to-end ES5.1 property operations, run via guest_runner on either host
+ * or a standalone image. Modern Node differs on reference-conversion timing.
+ * No host-language semantic helpers. */
 (function () {
     function check(condition, message) {
         if (!condition) throw new Error(message);
     }
+    check(String() === "" && String(undefined) === "undefined", "String conversion distinguishes a missing argument");
     var plain = {label: "object"};
     check("prefix:" + plain === "prefix:[object Object]" &&
           plain + 7 === "[object Object]7" &&
@@ -20,6 +22,68 @@
           namedArray[-1.5] === "fraction", "negative numeric array keys are named properties");
     namedArray[-0] = 7;
     check(namedArray.length === 1 && namedArray[0] === 7, "negative zero remains index zero");
+    /* Form the reference before its RHS, retain its normalized key through
+     * read/modify/write, and keep callback progress in guest activations. */
+    var keyOrder = [], keyTarget = {slot: 10}, keyConversions = 0;
+    var callbackKey = {toString: function () {
+        keyConversions++;
+        keyOrder.push("key");
+        var garbage = [], n;
+        for (n = 0; n < 48; n++) garbage.push({index: n});
+        return keyConversions === 1 ? "slot" : "wrong";
+    }};
+    function keyRHS() { keyOrder.push("rhs"); return 7; }
+    keyTarget[callbackKey] = keyRHS();
+    check(keyOrder.join(",") === "key,rhs" && keyTarget.slot === 7,
+          "assignment key converts before RHS");
+    keyConversions = 0; keyOrder = [];
+    keyTarget[callbackKey] += keyRHS();
+    check(keyConversions === 1 && keyTarget.slot === 14 &&
+          keyOrder.join(",") === "key,rhs", "compound reference converts once");
+    keyConversions = 0;
+    check(keyTarget[callbackKey]++ === 14 && keyTarget.slot === 15 && keyConversions === 1,
+          "update reuses its captured key");
+    keyConversions = 0;
+    check(keyTarget[callbackKey] === 15 && typeof callbackKey.toString === "function",
+          "read conversion does not overwrite source binding");
+    keyConversions = 0;
+    check(callbackKey in keyTarget, "membership converts callback key");
+    check(keyConversions === 1, "membership conversion count");
+    var keySentinel = {}, keyCaught, rhsCalls = 0;
+    var throwingKey = {toString: function () { throw keySentinel; }};
+    try { keyTarget[throwingKey] = ++rhsCalls; } catch (keyError) { keyCaught = keyError; }
+    check(keyCaught === keySentinel && rhsCalls === 0, "key exception precedes RHS");
+    var nullCaught = false;
+    try { null.slot = ++rhsCalls; } catch (nullError) { nullCaught = nullError instanceof TypeError; }
+    check(nullCaught && rhsCalls === 0, "null base checked before RHS");
+    keyConversions = 0;
+    var membershipCaught = false;
+    try { callbackKey in 0; } catch (membershipError) { membershipCaught = membershipError instanceof TypeError; }
+    check(membershipCaught && keyConversions === 0, "membership validates receiver before conversion");
+    keyConversions = 0;
+    check(delete keyTarget[callbackKey] && !("slot" in keyTarget), "delete converts callback key");
+    Object.defineProperty(keyTarget, "slot", {value: 23, configurable: false});
+    keyConversions = 0;
+    check(delete keyTarget[callbackKey] === false, "sloppy callback-key delete");
+    keyConversions = 0;
+    var deleteCaught = false;
+    try { (function () { "use strict"; delete keyTarget[callbackKey]; }()); }
+    catch (deleteError) { deleteCaught = deleteError instanceof TypeError; }
+    check(deleteCaught && keyConversions === 1, "strict callback-key delete");
+    var indexed = [], indexCalls = 0;
+    var indexKey = {toString: function () { indexCalls++; return "3"; }};
+    indexed[indexKey] = 29;
+    check(indexCalls === 1 && indexed.length === 4 && indexed[3] === 29,
+          "converted index writes retain array length semantics");
+    indexCalls = 0;
+    check(indexed[indexKey] === 29 && indexKey in indexed && indexCalls === 2,
+          "converted indices read and probe dense array properties");
+    var characterKey = {toString: function () { return "1"; }};
+    check("a\u6f22c"[characterKey] === "\u6f22", "converted index reads a UTF-16 string character");
+    var invalidPrimitiveKey = {toString: function () { return {}; }, valueOf: function () { return {}; }};
+    var invalidPrimitiveCaught = false;
+    try { keyTarget[invalidPrimitiveKey]; } catch (primitiveError) { invalidPrimitiveCaught = primitiveError instanceof TypeError; }
+    check(invalidPrimitiveCaught, "failed key conversion throws the guest TypeError");
     var negativeSetter = 0;
     Object.defineProperty(namedArray, "-2", {
         get: function () { return negativeSetter; },

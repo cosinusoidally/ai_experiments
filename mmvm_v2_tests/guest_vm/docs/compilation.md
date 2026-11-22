@@ -196,6 +196,15 @@ not local-variable initializers given hidden compile-time semantics.
 
 ### Compilation transaction and function scopes
 
+The control-flow kernel dialect supports unlabelled `break` in `while` and
+`for` loops. Lowering records the lexical loop target; CFG construction adds
+an edge to that loop's exit, the JS backend emits ordinary `break`, and i386
+uses the corresponding macro-assembler label. A `for` break skips its update.
+Nested loops keep distinct targets. Labelled break, break outside a loop and
+`continue` remain rejected. Replicated opcode dispatch is retained for loops
+without an exiting break; it is not applied to a breakable dispatch loop.
+This is standard JS control flow, not new source-level annotation semantics.
+
 External scalar/namespace descriptors belong to one compilation transaction.
 `compileGraph` validates input configuration, discovers reachable helpers and
 their local declarations, then constructs one explicit external binding

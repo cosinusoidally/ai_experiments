@@ -35,6 +35,51 @@ native execution. This is what the code's “semantic exit” means: not an
 unimplemented CALL opcode in general, but a particular operation/value case
 not completed by that kernel path.
 
+### Property references and continuations (contract 116)
+
+`CHECK_PROPERTY_BASE` reads one receiver register and throws the guest
+TypeError for null/undefined. `PREPARE_PROPERTY_KEY` reads receiver and key,
+checks the receiver, and writes a separate compiler-owned key register.
+Assignment forms execute this preparation before the RHS; compound writes
+and updates reuse that register for their read and write. Primitive keys can
+retain their internal numeric/string representation because their canonical
+name conversion has no observable callbacks. The compiler omits redundant
+preparation for primitive syntax and a separate early receiver check when
+the RHS is an effect-free literal/lexical read (or a preceding Get checks it).
+Constant property-name operands are verified strings.
+
+An object key enters a private runtime-owned guest callable. Its converter
+uses captured pristine invocation/error primitives and a distinct primitive
+String callable: public String's later guest fallback must not mutate that
+captured callable or cause `KEY -> String -> KEY` recursion. The public String
+fallback separately preserves the zero-argument String() result. Native and
+portable operations use this same guest converter.
+
+`enterPropertyOperationKernel` copies up to three operand values into temporary
+guest vectors and enters an ordinary bytecode frame. Reservation cannot collect
+inline. Failure before entry retries the untouched opcode; success copies the
+arguments into the callee and advances the caller PC before any safepoint.
+The callee's frames retain callback progress across collections, exceptions
+and budgets; no marker or host array makes the original key convert twice.
+The private callable vector is a traced JSRuntime root and a native support
+edge, not a user-replaceable global.
+
+Constant/computed named Get use `executeNamedPropertyGetKernel`; named Put
+uses `executeNamedPropertySetKernel`. Prototype/entry traversal uses the shared
+record kernels. Small own-data probes remain eligible for ordinary structural
+inlining; writes require a writable data descriptor. Accessors, creation,
+virtual/exotic properties and rejections use the full operation. A completed
+operation publishes its result cell; frame entry uses the internal native
+resume transition. Exception, diagnostic and allocation outcomes retain the
+engine protocol. Getters preserve the original receiver and normalize the
+result cell to a canonical frame register in both operand views. Canonical
+numeric-string indices reuse indexed-storage paths, including array length,
+holes and UTF-16 character access.
+
+The optional legacy structured-source compiler declines programs containing
+these new reference opcodes instead of silently using modern host assignment
+timing. This restriction does not apply to the shared kernel JS backend.
+
 `frame.nativeHeapCurrent` records which representation is authoritative.
 After a native run, an incompletely reloaded host register array must not be
 spilled over live native registers. After portable fallback, changed values

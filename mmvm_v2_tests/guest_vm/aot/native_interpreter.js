@@ -16,6 +16,7 @@
     var StringKeyKernels = root.GuestVMStringKeyKernel;
     var NumberFormatKernels = root.GuestVMNumberFormatKernel;
     var ObjectOperationKernels = root.GuestVMObjectOperationsKernel;
+    var PropertyOperations = root.GuestVMPropertyOperationsRuntime;
     var MemoryTransferKernels = root.GuestVMMemoryTransferKernel;
     var LexicalEnvironmentKernels = root.GuestVMLexicalEnvironmentKernel;
     if (typeof module !== "undefined" && module.exports) {
@@ -34,6 +35,7 @@
         StringKeyKernels = require("../string_key_kernel.js");
         NumberFormatKernels = require("../number_format_kernel.js");
         ObjectOperationKernels = require("../object_operations_kernel.js");
+        PropertyOperations = require("../property_operations_runtime.js");
         MemoryTransferKernels = require("../memory_transfer_kernel.js");
         LexicalEnvironmentKernels = require("../lexical_environment_kernel.js");
     }
@@ -155,6 +157,7 @@
     /* Internal transition, consumed by executeInterpreterTransitionsKernel;
      * unlike observable exits this never returns to the embedder. */
     var NATIVE_INTERNAL_RESUME = 4;
+    var PropertyInstructionResult = {COMPLETED: 1, FRAME_ENTERED: 2};
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
@@ -204,6 +207,7 @@
     var INTRINSIC_TRY_COPY_INT32_ARRAY = NativeIntrinsics.TRY_COPY_INT32_ARRAY;
     var FRAME_FLAG_FUNCTION_COMPILE = 4;
     var CALL_OPERATION_CALL = 1;
+    var CALL_DISCARD_RESULT = -1;
     var CALL_OPERATION_CONSTRUCT = 2;
     var INTRINSIC_FIRST_ERROR_CONSTRUCTOR = NativeIntrinsics.FIRST_ERROR_CONSTRUCTOR;
     var INTRINSIC_LAST_ERROR_CONSTRUCTOR = NativeIntrinsics.LAST_ERROR_CONSTRUCTOR;
@@ -567,6 +571,7 @@
             RuntimeSupportLayout.ASCII_STRING_BASE;
         bindings.FRAME_FLAG_FUNCTION_COMPILE = FRAME_FLAG_FUNCTION_COMPILE;
         bindings.CALL_OPERATION_CALL = CALL_OPERATION_CALL;
+        bindings.CALL_DISCARD_RESULT = CALL_DISCARD_RESULT;
         bindings.CALL_OPERATION_CONSTRUCT = CALL_OPERATION_CONSTRUCT;
         return bindings;
     }
@@ -738,7 +743,43 @@
             /* Unsupported opcodes take the dispatch body's default exit;
              * they do not need a second range filter on every iteration. */
             beginOpcodeDispatch(opcode, Bytecode.CONST, OP_LAST);
-            if (opcode === Bytecode.TO_INT32) {
+            if (opcode === Bytecode.CHECK_PROPERTY_BASE) {
+                var checkedBase = instructionRegisterCellAddress(0, registerAddress,
+                    Bytecode.CHECK_PROPERTY_BASE, FIRST_OPERAND,
+                    bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
+                var checkedTag = valueCellTag(0, checkedBase);
+                if (checkedTag === VALUE_TAG_UNDEFINED || checkedTag === VALUE_TAG_NULL) {
+                    return propertyAccessTypeErrorKernel(heapBase, state, frame, pc,
+                        opcode, initialBudget - budget, stringSupport);
+                }
+                pc = pc + TWO_WORD_INSTRUCTION;
+            } else if (opcode === Bytecode.PREPARE_PROPERTY_KEY) {
+                var preparedTargetIndex = bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND);
+                var preparedBase = instructionRegisterCellAddress(0, registerAddress,
+                    Bytecode.PREPARE_PROPERTY_KEY, SECOND_OPERAND,
+                    bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND));
+                var preparedKey = instructionRegisterCellAddress(0, registerAddress,
+                    Bytecode.PREPARE_PROPERTY_KEY, THIRD_OPERAND,
+                    bytecodePayloadWord(0, bytecodeAddress, pc + THIRD_OPERAND));
+                var preparedBaseTag = valueCellTag(0, preparedBase);
+                if (preparedBaseTag === VALUE_TAG_UNDEFINED || preparedBaseTag === VALUE_TAG_NULL) {
+                    return propertyAccessTypeErrorKernel(heapBase, state, frame, pc,
+                        opcode, initialBudget - budget, stringSupport);
+                }
+                if (propertyKeyNeedsConversionKernel(heapBase, preparedKey) !== 0) {
+                    if (enterPropertyOperationKernel(heapBase, state, frame, pc,
+                            PropertyOperation.KEY,
+                            instructionRegisterCellAddress(0, registerAddress, Bytecode.PREPARE_PROPERTY_KEY,
+                                FIRST_OPERAND, preparedTargetIndex), preparedKey, 0, 0,
+                            stringSupport, arrayPrototype) === 0) {
+                        return unsupportedExitKernel(heapBase, state, frame, pc, opcode, initialBudget - budget);
+                    }
+                    return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
+                }
+                copyValueCell(instructionRegisterCellAddress(0, registerAddress,
+                    Bytecode.PREPARE_PROPERTY_KEY, FIRST_OPERAND, preparedTargetIndex), preparedKey);
+                pc = pc + FOUR_WORD_INSTRUCTION;
+            } else if (opcode === Bytecode.TO_INT32) {
                 var conversionTarget = bytecodeRegisterCellAddress(0, registerAddress,
                     bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
                 var conversionSource = bytecodeRegisterCellAddress(0, registerAddress,
@@ -942,6 +983,15 @@
                     0, registerAddress, Bytecode.GET_PROPERTY, SECOND_OPERAND, arrayGetObjectOperand);
                 var arrayGetKeyCell = instructionRegisterCellAddress(
                     0, registerAddress, Bytecode.GET_PROPERTY, THIRD_OPERAND, arrayGetKeyOperand);
+                if (propertyKeyNeedsConversionKernel(heapBase, arrayGetKeyCell) !== 0) {
+                    if (enterPropertyOperationKernel(heapBase, state, frame, pc, PropertyOperation.GET,
+                            instructionRegisterCellAddress(0, registerAddress, Bytecode.GET_PROPERTY,
+                                FIRST_OPERAND, arrayGetTargetOperand),
+                            arrayGetObjectCell, arrayGetKeyCell, 0, stringSupport, arrayPrototype) === 0) {
+                        return unsupportedExitKernel(heapBase, state, frame, pc, opcode, initialBudget - budget);
+                    }
+                    return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
+                }
                 var arrayGetSupported = 1;
                 var arrayGetObjectTag = load32(arrayGetObjectCell);
                 if (arrayGetObjectTag !== RecordLayout.VALUE_TAG_REFERENCE) {
@@ -982,7 +1032,10 @@
                 } else if (arrayGetKeyTag === RecordLayout.VALUE_TAG_REFERENCE) {
                     /* A string key selects named lookup only after the
                      * receiver has passed ToObject's null/undefined guard. */
-                    if (arrayGetSupported === 1) arrayGetSupported = 3;
+                    if (recordType(heapBase, valueCellReference(0, arrayGetKeyCell)) === RecordLayout.HEAP_TYPE_STRING) {
+                        arrayGetIndex = propertyKeyIndexKernel(heapBase, valueCellReference(0, arrayGetKeyCell));
+                        if (arrayGetSupported === 1 && arrayGetIndex < 0) arrayGetSupported = 3;
+                    } else if (arrayGetSupported === 1) arrayGetSupported = 3;
                 } else {
                     if (arrayGetSupported === 1) arrayGetSupported = 3;
                 }
@@ -1127,7 +1180,7 @@
                             } else {
                                 indexedGetterEntered = enterPropertyGetterKernel(
                                     heapBase, state, frame, indexedDescriptorCell,
-                                    arrayGetTargetOperand, currentContext, stringSupport,
+                                    arrayGetTarget, currentContext, stringSupport,
                                     arrayPrototype, bytecodeAddress, registerAddress, pc,
                                     arrayGetObjectCell);
                                 if (indexedGetterEntered !== 1) {
@@ -1161,221 +1214,16 @@
                     else arrayGetSupported = 0;
                 }
                 if (arrayGetSupported === 3) {
-                    var namedStringKind = stringVirtualPropertyKindKernel(heapBase, arrayGetObject, namedGetKey, stringSupport);
-                    if (namedStringKind !== 0) {
-                        if (stringVirtualPropertyValueKernel(heapBase, state, arrayGetTarget,
-                                arrayGetObject, namedGetKey, stringSupport, namedStringKind) === 0) return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, initialBudget - budget);
-                        arrayGetSupported = 4;
+                    var normalizedGetKey = engineScratchLeftAddress(heapBase, state);
+                    setValueCellReference(normalizedGetKey, namedGetKey);
+                    var namedGetResult = executeNamedPropertyGetKernel(heapBase, state, frame, pc, opcode,
+                        initialBudget - budget, arrayGetObjectCell, normalizedGetKey, arrayGetTarget,
+                        stringSupport, arrayLengthKey, arrayPrototype);
+                    if (namedGetResult === PropertyInstructionResult.FRAME_ENTERED) {
+                        return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
                     }
-                }
-                if (arrayGetSupported === 3) {
-                    var namedGetObject = arrayGetObject;
-                    var namedGetProperty = 0;
-                    var namedGetOwner = 0;
-                    if (recordType(heapBase, namedGetObject) === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                        if (typedArrayMetadataGetKernel(heapBase, arrayGetTarget,
-                                namedGetObject, namedGetKey, stringSupport) === 1) {
-                            namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                            namedGetObject = 0;
-                        }
-                    }
-                    if (stringKeysEqualKernel(
-                            heapBase, namedGetKey, arrayLengthKey) === 1) {
-                        var namedGetObjectType = recordType(
-                            heapBase, namedGetObject);
-                        if (namedGetObjectType === RecordLayout.HEAP_TYPE_ARRAY) {
-                            if (arrayReserved(
-                                    heapBase, namedGetObject) === 0) {
-                                var namedGetVector = arrayElements(
-                                    heapBase, namedGetObject);
-                                setValueCellInt32(arrayGetTarget, vectorLength(heapBase, namedGetVector));
-                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                                namedGetObject = 0;
-                            }
-                        } else if (namedGetObjectType ===
-                                   RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                            setValueCellInt32(arrayGetTarget, bufferViewLength(heapBase, namedGetObject));
-                            namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                            namedGetObject = 0;
-                        }
-                    }
-                    if (namedGetObject !== 0) {
-                        if (recordType(heapBase, namedGetObject) ===
-                                RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                            var bufferPointerKeyCell = heapBase +
-                                stringSupport + RecordLayout.VECTOR_CELLS +
-                                RuntimeSupportLayout.BUFFER_POINTER_KEY *
-                                RecordLayout.VALUE_CELL_BYTES;
-                            var bufferPointerKey = load32(
-                                bufferPointerKeyCell + RecordLayout.VALUE_CELL_LOW);
-                            if (stringKeysEqualKernel(
-                                    heapBase, namedGetKey,
-                                    bufferPointerKey) === 1) {
-                                var namedBufferBacking = bufferViewBacking(
-                                    heapBase, namedGetObject);
-                                var namedBufferPointer = bufferBackingPointer(
-                                    heapBase, namedBufferBacking);
-                                var namedBufferOffset = bufferViewOffset(
-                                    heapBase, namedGetObject);
-                                namedBufferPointer = namedBufferPointer +
-                                                     namedBufferOffset;
-                                setValueCellInt32(arrayGetTarget, namedBufferPointer);
-                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                                namedGetObject = 0;
-                            }
-                        }
-                    }
-                    if (namedGetObject !== 0) {
-                        if (recordType(heapBase, namedGetObject) ===
-                                RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                            var typedArrayBufferKeyCell = vectorCellAddress(
-                                heapBase, stringSupport,
-                                RuntimeSupportLayout.BUFFER_KEY);
-                            var typedArrayBufferKey = valueCellReference(
-                                0, typedArrayBufferKeyCell);
-                            if (stringKeysEqualKernel(
-                                    heapBase, namedGetKey,
-                                    typedArrayBufferKey) === 1) {
-                                var typedArrayBufferKind = bufferViewKind(
-                                    heapBase, namedGetObject);
-                                if (typedArrayBufferKind !==
-                                        BUFFER_KIND_NATIVE) {
-                                if (typedArrayBufferKind !==
-                                        BUFFER_KIND_ARRAY_BUFFER) {
-                                    var typedArrayBacking = bufferViewBacking(
-                                        heapBase, namedGetObject);
-                                    var typedArrayBuffer =
-                                        bufferBackingMetadata(
-                                            heapBase, typedArrayBacking);
-                                    if (typedArrayBuffer !== 0) {
-                                        setValueCellReference(
-                                            arrayGetTarget,
-                                            typedArrayBuffer);
-                                        namedGetProperty =
-                                            PROPERTY_FOUND_SENTINEL;
-                                        namedGetObject = 0;
-                                    }
-                                }
-                                }
-                            }
-                        }
-                    }
-                    if (namedGetObject !== 0) {
-                        if (recordType(heapBase, namedGetObject) ===
-                            RecordLayout.HEAP_TYPE_STRING) {
-                            if (stringKeysEqualKernel(heapBase,
-                                    namedGetKey, arrayLengthKey) === 1) {
-                                setValueCellInt32(arrayGetTarget, stringLength(heapBase, namedGetObject));
-                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                                namedGetObject = 0;
-                            } else {
-                                var dynamicStringPrototypeCell = heapBase +
-                                    stringSupport + RecordLayout.VECTOR_CELLS +
-                                    RuntimeSupportLayout.STRING_PROTOTYPE *
-                                    RecordLayout.VALUE_CELL_BYTES;
-                                namedGetObject = load32(
-                                    dynamicStringPrototypeCell + RecordLayout.VALUE_CELL_LOW);
-                            }
-                        }
-                    }
-                    while (namedGetObject !== 0) {
-                        var namedGetType = recordType(
-                            heapBase, namedGetObject);
-                        var namedGetHead = 0;
-                        var namedGetPrototype = 0;
-                        if (namedGetType >= RecordLayout.HEAP_TYPE_OBJECT) {
-                            if (namedGetType <= RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
-                                namedGetHead = lastOwnPropertyEntryKernel(heapBase, namedGetObject);
-                                namedGetPrototype = objectPrototype(
-                                    heapBase, namedGetObject);
-                            }
-                        }
-                        if (namedGetType === RecordLayout.HEAP_TYPE_REGEXP) {
-                            namedGetHead = lastOwnPropertyEntryKernel(heapBase, namedGetObject);
-                            namedGetPrototype = regexpPrototype(
-                                heapBase, namedGetObject);
-                        } else if (namedGetType === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                            namedGetHead = lastOwnPropertyEntryKernel(heapBase, namedGetObject);
-                            namedGetPrototype = bufferViewPrototype(
-                                heapBase, namedGetObject);
-                        }
-                        if (!((namedGetType >= RecordLayout.HEAP_TYPE_OBJECT &&
-                               namedGetType <= RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) ||
-                              namedGetType === RecordLayout.HEAP_TYPE_REGEXP ||
-                              namedGetType === RecordLayout.HEAP_TYPE_BUFFER_VIEW)) {
-                            return unsupportedExitKernel(heapBase, state, frame,
-                                pc, opcode, initialBudget - budget);
-                        }
-                        if (namedGetType === RecordLayout.HEAP_TYPE_OBJECT) {
-                            namedGetProperty = findCachedOwnObjectPropertyKernel(
-                                heapBase, state, namedGetObject, namedGetKey);
-                            namedGetHead = 0;
-                            if (namedGetProperty !== 0) {
-                                namedGetOwner = namedGetObject;
-                                namedGetObject = 0;
-                            }
-                        }
-                        while (namedGetHead !== 0) {
-                            var namedGetStoredKey = ownPropertyEntryKeyKernel(heapBase, namedGetObject, namedGetHead);
-                            var namedGetKeyMatches = stringKeysEqualKernel(
-                                heapBase, namedGetStoredKey, namedGetKey);
-                            if (namedGetKeyMatches === 1) {
-                                namedGetProperty = namedGetHead;
-                                namedGetOwner = namedGetObject;
-                                namedGetHead = 0;
-                                namedGetObject = 0;
-                            } else {
-                                namedGetHead = previousOwnPropertyEntryKernel(heapBase, namedGetObject, namedGetHead);
-                            }
-                        }
-                        /* for-in produces string keys. Dense array cells
-                         * are own properties too, even though they are not
-                         * linked property records. Check explicit descriptors
-                         * first, then a present indexed cell, then the parent.
-                         * Holes must still allow inherited properties. */
-                        if (namedGetObject !== 0 && namedGetType === RecordLayout.HEAP_TYPE_ARRAY) {
-                            var namedGetIndexedCell = namedArrayIndexCellKernel(
-                                heapBase, namedGetObject, namedGetKey);
-                            if (namedGetIndexedCell !== 0) {
-                                copyValueCell(arrayGetTarget, namedGetIndexedCell);
-                                namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                                namedGetObject = 0;
-                            }
-                        }
-                        if (namedGetObject !== 0) namedGetObject = namedGetPrototype;
-                    }
-                    if (namedGetProperty === 0) {
-                        /* Like constant-key [[Get]], exhausting a supported
-                         * chain means undefined for every object kind,
-                         * including functions, not just Objects and Arrays. */
-                        if (arrayGetSupported !== 0) {
-                            setValueCellUndefined(arrayGetTarget);
-                            namedGetProperty = PROPERTY_FOUND_SENTINEL;
-                        }
-                    } else if (namedGetProperty !== PROPERTY_FOUND_SENTINEL) {
-                        var namedGetDescriptor = ownPropertyEntryDescriptorKernel(
-                            heapBase, namedGetOwner, namedGetProperty);
-                        if ((propertyDescriptorAttributes(0, namedGetDescriptor) &
-                             RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            var namedGetter = propertyDescriptorValueCell(0, namedGetDescriptor);
-                            if (valueCellTag(0, namedGetter) === VALUE_TAG_UNDEFINED) {
-                                setValueCellUndefined(arrayGetTarget);
-                            } else {
-                                indexedGetterEntered = enterPropertyGetterKernel(
-                                    heapBase, state, frame, namedGetter,
-                                    arrayGetTargetOperand, currentContext, stringSupport,
-                                    arrayPrototype, bytecodeAddress, registerAddress, pc,
-                                    arrayGetObjectCell);
-                                if (indexedGetterEntered !== 1) return unsupportedDiagnosticExitKernel(
-                                    heapBase, state, frame, pc, opcode, initialBudget - budget);
-                            }
-                        } else {
-                            var namedGetSource = propertyDescriptorValueCell(0, namedGetDescriptor);
-                            copyValueCell(arrayGetTarget, namedGetSource);
-                        }
-                    }
-                    if (arrayGetSupported === 3) arrayGetSupported = 4;
+                    if (namedGetResult !== PropertyInstructionResult.COMPLETED) return namedGetResult;
+                    arrayGetSupported = 4;
                 }
                 if (arrayGetSupported === 0) {
                     var rejectedReceiverKind = arrayGetObjectTag;
@@ -1561,9 +1409,12 @@
                     pc = 0;
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.SET_PROPERTY &&
-                    nonnegativeNumericPropertyKeyKernel(instructionRegisterCellAddress(0, registerAddress,
+                    (nonnegativeNumericPropertyKeyKernel(instructionRegisterCellAddress(0, registerAddress,
                         Bytecode.SET_PROPERTY, SECOND_OPERAND,
-                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) === 1) {
+                        load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES))) === 1 ||
+                     nonnegativeStringIndexPropertyKeyKernel(heapBase,
+                        instructionRegisterCellAddress(0, registerAddress, Bytecode.SET_PROPERTY, SECOND_OPERAND,
+                            bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND))) !== 0)) {
                 /* Numeric indexing stays on the dense/typed-array path.
                  * All other keys share the named-write dispatch below.
                  * SET_PROPERTY operands remain canonical register indices
@@ -1589,6 +1440,8 @@
                 var arraySetIndex = 0;
                 if (arraySetKeyTag === VALUE_TAG_INT32) {
                     arraySetIndex = load32(arraySetKeyCell + RecordLayout.VALUE_CELL_LOW);
+                } else if (arraySetKeyTag === RecordLayout.VALUE_TAG_REFERENCE) {
+                    arraySetIndex = propertyKeyIndexKernel(heapBase, valueCellReference(0, arraySetKeyCell));
                 } else if (arraySetKeyTag === VALUE_TAG_DOUBLE) {
                     arraySetIndex = toInt32F64(loadNumberF64(
                         arraySetKeyCell + RecordLayout.VALUE_CELL_LOW, arraySetKeyTag));
@@ -1858,189 +1711,20 @@
                         0, registerAddress, Bytecode.SET_PROPERTY,
                         SECOND_OPERAND, setPropertyKeyIndex);
                 }
-                var setPropertyOperandsValid = 1;
-                if (load32(setPropertyObjectCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
-                    setPropertyOperandsValid = 0;
-                }
-                if (setPropertyOperandsValid === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                }
-                var setPropertyNamedKey = propertyNameReferenceKernel(
-                    heapBase, state, setPropertyKeyCell, stringSupport, platformServices);
-                if (setPropertyNamedKey === 0) {
-                    return unsupportedExitKernel(heapBase, state, frame, pc,
-                        opcode, initialBudget - budget);
-                }
-                var setPropertyObject = load32(
-                    setPropertyObjectCell + RecordLayout.VALUE_CELL_LOW);
-                var setPropertyObjectType = load32(
-                    heapBase + setPropertyObject);
-                var setPropertyHead = 0;
-                var setPropertyHeadOffset = 0;
-                if (setPropertyObjectType >= RecordLayout.HEAP_TYPE_OBJECT) {
-                    if (setPropertyObjectType <= RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
-                        setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
-                        setPropertyHeadOffset = RecordLayout.OBJECT_PROPERTY_HEAD;
-                    }
-                }
-                if (setPropertyObjectType === RecordLayout.HEAP_TYPE_REGEXP) {
-                    setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
-                    setPropertyHeadOffset = RecordLayout.REGEXP_PROPERTY_HEAD;
-                } else if (setPropertyObjectType === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                    setPropertyHead = lastOwnPropertyEntryKernel(heapBase, setPropertyObject);
-                    setPropertyHeadOffset = RecordLayout.BUFFER_VIEW_PROPERTY_HEAD;
-                }
-                var setPropertyIgnored = 0;
-                if (stringVirtualPropertyKindKernel(heapBase, setPropertyObject,
-                        setPropertyNamedKey, stringSupport) !== 0) return rejectedPropertyWriteKernel(
-                    heapBase, state, frame, pc, opcode, initialBudget - budget, stringSupport,
-                    FOUR_WORD_INSTRUCTION, PropertyWriteAction.NON_WRITABLE);
-                /* Arguments objects share array storage but their length is
-                 * an ordinary property, not the virtual true-array length. */
-                if (setPropertyObjectType === RecordLayout.HEAP_TYPE_ARRAY &&
-                        arrayReserved(heapBase, setPropertyObject) === 0 &&
-                        stringKeysEqualKernel(heapBase, setPropertyNamedKey,
-                            arrayLengthKey) === 1) {
-                    if (setArrayLengthKernel(heapBase, state, setPropertyObject,
-                            instructionRegisterCellAddress(
-                                0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
-                                THIRD_OPERAND, setPropertySourceIndex), arrayLengthKey) === 0) {
-                        return unsupportedExitKernel(heapBase, state, frame,
-                            pc, opcode, initialBudget - budget);
-                    }
+                var setPropertySourceCell = instructionRegisterCellAddress(0, registerAddress,
+                    [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST], THIRD_OPERAND, setPropertySourceIndex);
+                if (opcode === Bytecode.SET_PROPERTY_CONST && tryOwnDataPropertySetKernel(
+                        heapBase, state, setPropertyObjectCell, setPropertyKeyCell, setPropertySourceCell) !== 0) {
                     pc = pc + FOUR_WORD_INSTRUCTION;
-                    setPropertyIgnored = 1;
-                }
-                /* A string primitive's length is a non-writable own
-                 * property. Sloppy PutValue ignores the write; strict code
-                 * takes the exception path rather than mutating the string. */
-                if (setPropertyObjectType === RecordLayout.HEAP_TYPE_STRING) {
-                    var stringLengthKeyCell = vectorCellAddress(heapBase,
-                        stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY);
-                    if (stringKeysEqualKernel(heapBase, setPropertyNamedKey,
-                            valueCellReference(0, stringLengthKeyCell)) === 1) {
-                        if ((programFlags(heapBase, currentProgram) & PROGRAM_FLAG_STRICT) === 0) {
-                            pc = pc + FOUR_WORD_INSTRUCTION;
-                            setPropertyIgnored = 1;
-                        }
-                    }
-                }
-                if (setPropertyIgnored === 0) {
-                var setPropertyRecord = 0;
-                var setPropertyOwner = setPropertyObject;
-                var setPropertyAccessorEntered = 0;
-                var setPropertyFirst = setPropertyHead;
-                if (setPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
-                    setPropertyRecord = findCachedOwnObjectPropertyKernel(
-                        heapBase, state, setPropertyObject, setPropertyNamedKey);
-                    setPropertyHead = 0;
-                }
-                while (setPropertyHead !== 0) {
-                    var setPropertyStoredKey = ownPropertyEntryKeyKernel(heapBase, setPropertyObject, setPropertyHead);
-                    var setPropertyKeysMatch = 1;
-                    if (setPropertyStoredKey !== setPropertyNamedKey) {
-                        setPropertyKeysMatch = stringKeysEqualKernel(
-                            heapBase, setPropertyStoredKey,
-                            setPropertyNamedKey);
-                    }
-                    if (setPropertyKeysMatch === 1) {
-                        setPropertyRecord = setPropertyHead;
-                        setPropertyHead = 0;
-                    } else {
-                        setPropertyHead = previousOwnPropertyEntryKernel(heapBase, setPropertyObject, setPropertyHead);
-                    }
-                }
-                if (setPropertyRecord === 0) {
-                    var inheritedSetObject = namedPropertyOwnerKernel(heapBase, state,
-                        objectPrototypeReferenceKernel(heapBase, setPropertyObject), setPropertyNamedKey);
-                    if (inheritedSetObject !== 0) {
-                        var inheritedSetEntry = findOwnPropertyEntryKernel(heapBase, state,
-                            inheritedSetObject, setPropertyNamedKey);
-                        var inheritedSetAttributes = ownPropertyEntryAttributesKernel(
-                            heapBase, inheritedSetObject, inheritedSetEntry);
-                        if ((inheritedSetAttributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0 ||
-                                (inheritedSetAttributes & PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
-                            setPropertyRecord = inheritedSetEntry;
-                            setPropertyOwner = inheritedSetObject;
-                        }
-                    }
-                }
-                if (setPropertyRecord === 0) {
-                    if (setPropertyHeadOffset === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                    /* Rejection follows the guest strict/sloppy rule without
-                     * asking the embedding interpreter to perform the write. */
-                    if (objectIsExtensibleKernel(heapBase, setPropertyObject) === 0) {
-                            return rejectedPropertyWriteKernel(
-                                heapBase, state, frame, pc, opcode,
-                                initialBudget - budget, stringSupport,
-                                FOUR_WORD_INSTRUCTION, PropertyWriteAction.NOT_EXTENSIBLE);
-                    }
-                    setPropertyRecord = appendOwnPropertyEntryKernel(
-                        heapBase, state, setPropertyObject, setPropertyNamedKey,
-                        DEFAULT_PROPERTY_ATTRIBUTES);
-                    setPropertyOwner = setPropertyObject;
-                    if (setPropertyRecord === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                }
-                var setPropertyDescriptor = ownPropertyEntryDescriptorKernel(
-                    heapBase, setPropertyOwner, setPropertyRecord);
-                var setPropertyAttributes = propertyDescriptorAttributes(0, setPropertyDescriptor);
-                var setter = 0;
-                if ((setPropertyAttributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                    setter = propertyDescriptorSetter(0, setPropertyDescriptor);
-                }
-                var setPropertyAction = ordinaryWriteActionKernel(setPropertyAttributes, setter);
-                if (setPropertyAction === PropertyWriteAction.CALL_SETTER) {
-                    var setterCell = engineScratchLeftAddress(heapBase, state);
-                    setValueCellReference(setterCell, setter);
-                    var setterArgumentCell = instructionRegisterCellAddress(
-                        0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
-                        THIRD_OPERAND, setPropertySourceIndex);
-                    setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
-                    setPropertyAccessorEntered = bytecodeCallKernel(
-                        heapBase, state, frame, setterCell, 0, 1, -1,
-                        currentContext, stringSupport, arrayPrototype,
-                        bytecodeAddress, registerAddress, pc, framePC,
-                        setPropertyObjectCell, FOUR_WORD_INSTRUCTION,
-                        setterArgumentCell, 0);
-                    if (setPropertyAccessorEntered !== 1) {
-                        return unsupportedDiagnosticExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                } else if (setPropertyAction !== PropertyWriteAction.WRITE_DATA) {
-                    return rejectedPropertyWriteKernel(
-                        heapBase, state, frame, pc, opcode, initialBudget - budget,
-                        stringSupport, FOUR_WORD_INSTRUCTION, setPropertyAction);
-                }
-                if (setPropertyAccessorEntered === 1) {
-                    frame = engineCurrentFrame(heapBase, state);
-                    currentContext = frameContext(heapBase, frame);
-                    currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = executionBytecodeAddressKernel(
-                        heapBase, state, currentProgram, stringSupport);
-                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
-                        heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = executionProgramConstantsKernel(
-                        heapBase, state, currentProgram) + RecordLayout.VECTOR_CELLS;
-                    globalObject = contextGlobal(heapBase, currentContext);
-                    framePC = frame + FRAME_PC;
-                    registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
-                    environment = frameEnvironment(heapBase, frame);
-                    pc = 0;
                 } else {
-                    var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
-                    var setPropertySource = instructionRegisterCellAddress(
-                        0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
-                        THIRD_OPERAND, setPropertySourceIndex);
-                    copyValueCell(setPropertyDestination, setPropertySource);
-                    pc = pc + FOUR_WORD_INSTRUCTION;
+                var namedSetResult = executeNamedPropertySetKernel(heapBase, state, frame, pc, opcode,
+                    initialBudget - budget, setPropertyObjectCell, setPropertyKeyCell,
+                    setPropertySourceCell, stringSupport, arrayLengthKey, arrayPrototype);
+                if (namedSetResult === PropertyInstructionResult.FRAME_ENTERED) {
+                    return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
                 }
+                if (namedSetResult !== PropertyInstructionResult.COMPLETED) return namedSetResult;
+                pc = pc + FOUR_WORD_INSTRUCTION;
                 }
             } else if (opcode === Bytecode.REMAINDER) {
                 var remainderTargetOperand = load32(
@@ -4154,7 +3838,7 @@
                         deleteNameTarget, deleteNameTarget,
                         deleteNameKeyCell,
                         programFlags(heapBase, currentProgram) &
-                            PROGRAM_FLAG_STRICT, arrayLengthKey);
+                            PROGRAM_FLAG_STRICT, arrayLengthKey, arrayPrototype);
                 if (deleteNameResult !== PropertyDeleteResult.HANDLED) return deleteNameResult;
                 pc = pc + THREE_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.DELETE_PROPERTY) {
@@ -4179,7 +3863,7 @@
                             0, registerAddress, Bytecode.DELETE_PROPERTY,
                             THIRD_OPERAND, deleteKeyIndex),
                         programFlags(heapBase, currentProgram) &
-                            PROGRAM_FLAG_STRICT, arrayLengthKey);
+                            PROGRAM_FLAG_STRICT, arrayLengthKey, arrayPrototype);
                 if (deleteResult !== PropertyDeleteResult.HANDLED) return deleteResult;
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.DELETE_PROPERTY_CONST) {
@@ -4203,7 +3887,7 @@
                         heapBase + constantCells +
                             deleteConstantKeyIndex * RecordLayout.VALUE_CELL_BYTES,
                         programFlags(heapBase, currentProgram) &
-                            PROGRAM_FLAG_STRICT, arrayLengthKey);
+                            PROGRAM_FLAG_STRICT, arrayLengthKey, arrayPrototype);
                 if (deleteConstantResult !== PropertyDeleteResult.HANDLED) return deleteConstantResult;
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.IN) {
@@ -4216,10 +3900,21 @@
                 var inObjectIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
+                var inTarget = instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, FIRST_OPERAND, inTargetIndex);
+                var inKey = instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, SECOND_OPERAND, inKeyIndex);
+                var inObject = instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, THIRD_OPERAND, inObjectIndex);
+                var inNeedsGuest = propertyKeyNeedsConversionKernel(heapBase, inKey);
+                if (valueCellTag(0, inObject) !== RecordLayout.VALUE_TAG_REFERENCE) inNeedsGuest = 1;
+                else if (objectReferenceIsObjectKernel(heapBase, valueCellReference(0, inObject)) === 0) inNeedsGuest = 1;
+                if (inNeedsGuest !== 0) {
+                    if (enterPropertyOperationKernel(heapBase, state, frame, pc, PropertyOperation.HAS,
+                            inTarget, inKey, inObject, 0, stringSupport, arrayPrototype) === 0) {
+                        return unsupportedExitKernel(heapBase, state, frame, pc, opcode, initialBudget - budget);
+                    }
+                    return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
+                }
                 if (hasPropertyKernel(heapBase, state,
-                        instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, FIRST_OPERAND, inTargetIndex),
-                        instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, SECOND_OPERAND, inKeyIndex),
-                        instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, THIRD_OPERAND, inObjectIndex),
+                        inTarget, inKey, inObject,
                         arrayLengthKey, stringSupport) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
@@ -4299,311 +3994,24 @@
                 copyValueCell(setLocalBinding, setLocalSource);
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.GET_PROPERTY_CONST) {
-                var propertyTargetIndex = load32(
-                    bytecodeAddress +
-                    (pc + FIRST_OPERAND) * WORD_BYTES);
-                var propertyObjectIndex = load32(
-                    bytecodeAddress +
-                    (pc + SECOND_OPERAND) * WORD_BYTES);
-                var propertyKeyIndex = load32(
-                    bytecodeAddress +
-                    (pc + THIRD_OPERAND) * WORD_BYTES);
-                var propertyObjectCell = instructionRegisterCellAddress(
-                    0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                    SECOND_OPERAND, propertyObjectIndex);
-                var propertyKeyCell = heapBase + constantCells +
-                    propertyKeyIndex * RecordLayout.VALUE_CELL_BYTES;
-                var propertyOperandsValid = 1;
-                var propertyObjectTag = load32(propertyObjectCell);
-                if (propertyObjectTag !== RecordLayout.VALUE_TAG_REFERENCE) {
-                    if (propertyObjectTag === VALUE_TAG_UNDEFINED ||
-                            propertyObjectTag === VALUE_TAG_NULL) {
-                        return propertyAccessTypeErrorKernel(heapBase, state, frame,
-                            pc, opcode, initialBudget - budget, stringSupport);
-                    }
-                    if (propertyObjectTag !== VALUE_TAG_INT32) {
-                        if (propertyObjectTag !== VALUE_TAG_DOUBLE) {
-                            if (propertyObjectTag !== VALUE_TAG_TRUE) {
-                                if (propertyObjectTag !== VALUE_TAG_FALSE) {
-                                    propertyOperandsValid = 0;
-                                }
-                            }
-                        }
-                    }
+                var constantGetObject = instructionRegisterCellAddress(0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                    SECOND_OPERAND, bytecodePayloadWord(0, bytecodeAddress, pc + SECOND_OPERAND));
+                var constantGetKey = heapBase + constantCells +
+                    bytecodePayloadWord(0, bytecodeAddress, pc + THIRD_OPERAND) * RecordLayout.VALUE_CELL_BYTES;
+                var constantGetTarget = instructionRegisterCellAddress(0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                    FIRST_OPERAND, bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
+                if (tryOwnDataPropertyGetKernel(heapBase, state, constantGetObject, constantGetKey, constantGetTarget) !== 0) {
+                    pc = pc + FOUR_WORD_INSTRUCTION;
+                } else {
+                var constantGetResult = executeNamedPropertyGetKernel(heapBase, state, frame, pc, opcode,
+                    initialBudget - budget, constantGetObject, constantGetKey, constantGetTarget,
+                    stringSupport, arrayLengthKey, arrayPrototype);
+                if (constantGetResult === PropertyInstructionResult.FRAME_ENTERED) {
+                    return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
                 }
-                if (load32(propertyKeyCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
-                    propertyOperandsValid = 0;
+                if (constantGetResult !== PropertyInstructionResult.COMPLETED) return constantGetResult;
+                pc = pc + FOUR_WORD_INSTRUCTION;
                 }
-                if (propertyOperandsValid === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                }
-                var propertyObject = load32(
-                    propertyObjectCell + RecordLayout.VALUE_CELL_LOW);
-                if (propertyObjectTag !== RecordLayout.VALUE_TAG_REFERENCE) {
-                    var constantPrimitivePrototypeIndex =
-                        RuntimeSupportLayout.NUMBER_PROTOTYPE;
-                    if (propertyObjectTag === VALUE_TAG_TRUE) {
-                        constantPrimitivePrototypeIndex =
-                            RuntimeSupportLayout.BOOLEAN_PROTOTYPE;
-                    } else if (propertyObjectTag === VALUE_TAG_FALSE) {
-                        constantPrimitivePrototypeIndex =
-                            RuntimeSupportLayout.BOOLEAN_PROTOTYPE;
-                    }
-                    propertyObject = valueCellReference(0,
-                        vectorCellAddress(heapBase, stringSupport,
-                            constantPrimitivePrototypeIndex));
-                }
-                var propertyConstantKey = load32(
-                    propertyKeyCell + RecordLayout.VALUE_CELL_LOW);
-                var propertyRecord = 0;
-                var propertyAccessorEntered = 0;
-                var virtualPropertyObjectType = recordType(
-                    heapBase, propertyObject);
-                var propertyReceiver = propertyObject;
-                /* Keep the descriptor owner separately from the receiver.
-                 * Accessors use receiver as `this`; entry resolution uses
-                 * owner even after the prototype walk advances/finishes. */
-                var propertyOwner = propertyReceiver;
-                var propertyReceiverStorage = 0;
-                var propertyCacheIndex = 0;
-                if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
-                    propertyCacheIndex =
-                        stringKeyHashKernel(heapBase, propertyConstantKey) &
-                        (RecordLayout.PROPERTY_CACHE_ENTRY_COUNT - 1);
-                    propertyReceiverStorage = objectPropertyHead(heapBase, propertyReceiver);
-                    propertyRecord = hintedOwnPropertyEntryKernel(heapBase, state,
-                        propertyCacheIndex, propertyReceiverStorage, propertyConstantKey);
-                    if (propertyRecord !== 0) {
-                        propertyObject = 0;
-                    }
-                }
-                if (propertyObject !== 0 && virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT &&
-                        (recordFlags(heapBase, propertyObject) & ObjectClassFlags.PRIMITIVE_WRAPPER) !== 0) {
-                    var constantStringKind = stringVirtualPropertyKindKernel(heapBase, propertyObject,
-                        propertyConstantKey, stringSupport);
-                    if (constantStringKind !== 0) {
-                        if (stringVirtualPropertyValueKernel(heapBase, state,
-                                instructionRegisterCellAddress(
-                                    0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                                    FIRST_OPERAND, propertyTargetIndex),
-                                propertyObject, propertyConstantKey, stringSupport, constantStringKind) === 0) return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, initialBudget - budget);
-                        propertyRecord = PROPERTY_FOUND_SENTINEL;
-                        propertyObject = 0;
-                    }
-                }
-                if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_ARRAY) {
-                    if (stringKeysEqualKernel(heapBase,
-                            propertyConstantKey, arrayLengthKey) === 1) {
-                        if (arrayReserved(heapBase, propertyObject) === 0) {
-                            var propertyArrayVector = arrayElements(
-                                heapBase, propertyObject);
-                            var propertyLengthTarget = instructionRegisterCellAddress(
-                                0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                                FIRST_OPERAND, propertyTargetIndex);
-                            setValueCellInt32(propertyLengthTarget, vectorLength(heapBase, propertyArrayVector));
-                            propertyRecord = PROPERTY_FOUND_SENTINEL;
-                            propertyObject = 0;
-                        }
-                    }
-                } else if (virtualPropertyObjectType ===
-                           RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                    if (typedArrayMetadataGetKernel(heapBase,
-                            instructionRegisterCellAddress(
-                                0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                                FIRST_OPERAND, propertyTargetIndex),
-                            propertyObject, propertyConstantKey, stringSupport) === 1) {
-                        propertyRecord = PROPERTY_FOUND_SENTINEL;
-                        propertyObject = 0;
-                    } else if (stringKeysEqualKernel(heapBase,
-                            propertyConstantKey, arrayLengthKey) === 1) {
-                        var bufferLengthTarget = instructionRegisterCellAddress(
-                            0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                            FIRST_OPERAND, propertyTargetIndex);
-                        setValueCellInt32(bufferLengthTarget, bufferViewLength(heapBase, propertyObject));
-                        propertyRecord = PROPERTY_FOUND_SENTINEL;
-                        propertyObject = 0;
-                    } else {
-                        var constantBufferKeyCell = vectorCellAddress(
-                            heapBase, stringSupport,
-                            RuntimeSupportLayout.BUFFER_KEY);
-                        var constantBufferKey = valueCellReference(
-                            0, constantBufferKeyCell);
-                        if (stringKeysEqualKernel(heapBase,
-                                propertyConstantKey,
-                                constantBufferKey) === 1) {
-                            var constantBufferKind = bufferViewKind(
-                                heapBase, propertyObject);
-                            if (constantBufferKind !== BUFFER_KIND_NATIVE) {
-                            if (constantBufferKind !==
-                                    BUFFER_KIND_ARRAY_BUFFER) {
-                                var constantBufferBacking =
-                                    bufferViewBacking(
-                                        heapBase, propertyObject);
-                                var constantArrayBuffer =
-                                    bufferBackingMetadata(
-                                        heapBase, constantBufferBacking);
-                                if (constantArrayBuffer !== 0) {
-                                    var constantBufferTarget =
-                                        instructionRegisterCellAddress(
-                                            0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                                            FIRST_OPERAND, propertyTargetIndex);
-                                    setValueCellReference(
-                                        constantBufferTarget,
-                                        constantArrayBuffer);
-                                    propertyRecord =
-                                        PROPERTY_FOUND_SENTINEL;
-                                    propertyObject = 0;
-                                }
-                            }
-                            }
-                        }
-                    }
-                } else if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_STRING) {
-                    if (stringKeysEqualKernel(heapBase,
-                            propertyConstantKey, arrayLengthKey) === 1) {
-                        var stringLengthTarget = instructionRegisterCellAddress(
-                            0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                            FIRST_OPERAND, propertyTargetIndex);
-                        setValueCellInt32(stringLengthTarget, stringLength(heapBase, propertyObject));
-                        propertyRecord = PROPERTY_FOUND_SENTINEL;
-                        propertyObject = 0;
-                    } else {
-                        var constantStringPrototypeCell = heapBase +
-                            stringSupport + RecordLayout.VECTOR_CELLS +
-                            RuntimeSupportLayout.STRING_PROTOTYPE *
-                            RecordLayout.VALUE_CELL_BYTES;
-                        propertyObject = load32(
-                            constantStringPrototypeCell + RecordLayout.VALUE_CELL_LOW);
-                    }
-                }
-                while (propertyObject !== 0) {
-                    var propertyObjectType = recordType(
-                        heapBase, propertyObject);
-                    var propertyHead = 0;
-                    var propertyPrototypeOffset = 0;
-                    if (propertyObjectType >= RecordLayout.HEAP_TYPE_OBJECT) {
-                        if (propertyObjectType <= RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) {
-                            propertyHead = lastOwnPropertyEntryKernel(heapBase, propertyObject);
-                            propertyPrototypeOffset = RecordLayout.OBJECT_PROTOTYPE;
-                        }
-                    }
-                    if (propertyObjectType === RecordLayout.HEAP_TYPE_REGEXP) {
-                        propertyHead = lastOwnPropertyEntryKernel(heapBase, propertyObject);
-                        propertyPrototypeOffset = RecordLayout.REGEXP_PROTOTYPE;
-                    } else if (propertyObjectType === RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
-                        propertyHead = lastOwnPropertyEntryKernel(heapBase, propertyObject);
-                        propertyPrototypeOffset = RecordLayout.BUFFER_VIEW_PROTOTYPE;
-                    }
-                    if (propertyPrototypeOffset === 0) {
-                        return unsupportedExitKernel(
-                            heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                    }
-                    /* Cache the prototype's own lookup, not an unguarded
-                     * receiver-to-inherited-property shortcut. Every get
-                     * still walks the current chain and checks shadowing. */
-                    if (propertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
-                        propertyRecord = findCachedOwnObjectPropertyKernel(
-                            heapBase, state, propertyObject, propertyConstantKey);
-                        propertyHead = 0;
-                    }
-                    while (propertyHead !== 0) {
-                        var propertyStoredKey = ownPropertyEntryKeyKernel(heapBase, propertyObject, propertyHead);
-                        var propertyKeysMatch = 1;
-                        if (propertyStoredKey !== propertyConstantKey) {
-                            propertyKeysMatch = stringKeysEqualKernel(
-                                heapBase, propertyStoredKey,
-                                propertyConstantKey);
-                        }
-                        if (propertyKeysMatch === 1) {
-                            propertyRecord = propertyHead;
-                            propertyHead = 0;
-                        } else {
-                            propertyHead = previousOwnPropertyEntryKernel(heapBase, propertyObject, propertyHead);
-                        }
-                    }
-                    if (propertyRecord !== 0) {
-                        propertyOwner = propertyObject;
-                        propertyObject = 0;
-                    } else {
-                        propertyObject = load32(
-                            heapBase + propertyObject +
-                            propertyPrototypeOffset);
-                    }
-                }
-                if (propertyRecord === 0) {
-                    /* Reaching the end of a supported prototype chain is a
-                     * successful [[Get]] whose value is undefined.  This is
-                     * independent of the receiver's concrete guest record
-                     * kind (Object, Array, function, RegExp, Buffer, or
-                     * boxed String); only an unrecognised record kind above
-                     * warrants a semantic exit. */
-                    var missingPropertyTarget = instructionRegisterCellAddress(
-                        0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                        FIRST_OPERAND, propertyTargetIndex);
-                    setValueCellUndefined(missingPropertyTarget);
-                    propertyRecord = PROPERTY_FOUND_SENTINEL;
-                }
-                if (propertyRecord !== 0) {
-                    if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
-                        var resolvedPropertyDescriptor = ownPropertyEntryDescriptorKernel(
-                            heapBase, propertyOwner, propertyRecord);
-                        if ((propertyDescriptorAttributes(0, resolvedPropertyDescriptor) &
-                             RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
-                            var getterCell = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
-                            if (valueCellTag(0, getterCell) ===
-                                    VALUE_TAG_UNDEFINED) {
-                                setValueCellUndefined(
-                                    instructionRegisterCellAddress(
-                                        0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                                        FIRST_OPERAND, propertyTargetIndex));
-                                propertyRecord = PROPERTY_FOUND_SENTINEL;
-                            } else {
-                                propertyAccessorEntered = enterPropertyGetterKernel(
-                                    heapBase, state, frame, getterCell,
-                                    propertyTargetIndex, currentContext,
-                                    stringSupport, arrayPrototype,
-                                    bytecodeAddress, registerAddress, pc,
-                                    propertyObjectCell);
-                                if (propertyAccessorEntered !== 1) {
-                                    return unsupportedDiagnosticExitKernel(
-                                        heapBase, state, frame, pc, opcode,
-                                        (initialBudget - budget));
-                                } else {
-                                    propertyRecord = PROPERTY_FOUND_SENTINEL;
-                                }
-                            }
-                        }
-                    }
-                }
-                if (propertyRecord === 0) {
-                    return unsupportedExitKernel(
-                        heapBase, state, frame, pc, opcode, (initialBudget - budget));
-                }
-                if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
-                    var propertySource = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
-                    var propertyTarget = instructionRegisterCellAddress(
-                        0, registerAddress, Bytecode.GET_PROPERTY_CONST,
-                        FIRST_OPERAND, propertyTargetIndex);
-                    copyValueCell(propertyTarget, propertySource);
-                }
-                if (propertyAccessorEntered === 1) {
-                    frame = engineCurrentFrame(heapBase, state);
-                    currentContext = frameContext(heapBase, frame);
-                    currentProgram = frameProgram(heapBase, frame);
-                    bytecodeAddress = executionBytecodeAddressKernel(
-                        heapBase, state, currentProgram, stringSupport);
-                    if (bytecodeAddress === 0) return bytecodePreparationExitKernel(
-                        heapBase, state, frame, initialBudget - budget + 1);
-                    constantCells = executionProgramConstantsKernel(
-                        heapBase, state, currentProgram) + RecordLayout.VECTOR_CELLS;
-                    globalObject = contextGlobal(heapBase, currentContext);
-                    framePC = frame + FRAME_PC;
-                    registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
-                    environment = frameEnvironment(heapBase, frame);
-                    pc = 0;
-                } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.DEFINE_DATA_PROPERTY) {
                 if (defineLiteralDataKernel(heapBase, state,
                     instructionRegisterCellAddress(0, registerAddress,
@@ -6210,13 +5618,479 @@
             receiver, FIVE_WORD_INSTRUCTION, 0, argumentsVector);
     }
 
+    /* Named [[Put]] owns rejection, setter entry and data publication.
+     * Both key forms arrive as cells; descriptor addresses stay transient
+     * and are never retained over a callback or allocation retry. */
+    function executeNamedPropertySetKernel(heapBase, state, frame, pc, opcode,
+            instructions, setPropertyObjectCell, setPropertyKeyCell, setPropertySourceCell,
+            stringSupport, arrayLengthKey, arrayPrototype) {
+        var currentProgram = frameProgram(heapBase, frame);
+        var currentContext = frameContext(heapBase, frame);
+        var registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
+        var framePC = frame + FRAME_PC;
+        var bytecodeAddress = 0;
+        var platformServices = enginePlatformServices(heapBase, state);
+        var setPropertyOperandsValid = 1;
+        if (propertyKeyNeedsConversionKernel(heapBase, setPropertyKeyCell) !== 0) {
+            var setOperation = PropertyOperation.SET;
+            if ((programFlags(heapBase, currentProgram) & PROGRAM_FLAG_STRICT) !== 0) setOperation = PropertyOperation.SET_STRICT;
+            var setSource = setPropertySourceCell;
+            if (enterPropertyOperationKernel(heapBase, state, frame, pc, setOperation,
+                    setSource, setPropertyObjectCell, setPropertyKeyCell, setSource,
+                    stringSupport, arrayPrototype) === 0) {
+                return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
+            return resumeEnteredPropertyFrameKernel(heapBase, state, instructions);
+        }
+        if (load32(setPropertyObjectCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
+            setPropertyOperandsValid = 0;
+        }
+        if (setPropertyOperandsValid === 0) {
+            return unsupportedExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        var setPropertyNamedKey = propertyNameReferenceKernel(
+            heapBase, state, setPropertyKeyCell, stringSupport, platformServices);
+        if (setPropertyNamedKey === 0) {
+            return unsupportedExitKernel(heapBase, state, frame, pc,
+                opcode, instructions);
+        }
+        var setPropertyObject = valueCellReference(0, setPropertyObjectCell);
+        var setPropertyObjectType = recordType(heapBase, setPropertyObject);
+        if (stringVirtualPropertyKindKernel(heapBase, setPropertyObject,
+                setPropertyNamedKey, stringSupport) !== 0) return rejectedPropertyWriteKernel(
+            heapBase, state, frame, pc, opcode, instructions, stringSupport,
+            FOUR_WORD_INSTRUCTION, PropertyWriteAction.NON_WRITABLE);
+        /* Arguments objects share array storage but their length is
+         * an ordinary property, not the virtual true-array length. */
+        if (setPropertyObjectType === RecordLayout.HEAP_TYPE_ARRAY &&
+                arrayReserved(heapBase, setPropertyObject) === 0 &&
+                stringKeysEqualKernel(heapBase, setPropertyNamedKey,
+                    arrayLengthKey) === 1) {
+            if (setArrayLengthKernel(heapBase, state, setPropertyObject,
+                    setPropertySourceCell, arrayLengthKey) === 0) {
+                return unsupportedExitKernel(heapBase, state, frame,
+                    pc, opcode, instructions);
+            }
+            return PropertyInstructionResult.COMPLETED;
+        }
+        /* A string primitive's length is a non-writable own
+         * property. Sloppy PutValue ignores the write; strict code
+         * takes the exception path rather than mutating the string. */
+        if (setPropertyObjectType === RecordLayout.HEAP_TYPE_STRING) {
+            var stringLengthKeyCell = vectorCellAddress(heapBase,
+                stringSupport, RuntimeSupportLayout.ARGUMENTS_LENGTH_KEY);
+            if (stringKeysEqualKernel(heapBase, setPropertyNamedKey,
+                    valueCellReference(0, stringLengthKeyCell)) === 1) {
+                if ((programFlags(heapBase, currentProgram) & PROGRAM_FLAG_STRICT) === 0) {
+                    return PropertyInstructionResult.COMPLETED;
+                }
+            }
+        }
+        if (objectReferenceIsObjectKernel(heapBase, setPropertyObject) === 0) {
+            return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
+        }
+        var setPropertyOwner = setPropertyObject;
+        var setPropertyAccessorEntered = 0;
+        var setPropertyRecord = 0;
+        if (setPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
+            setPropertyRecord = findCachedOwnObjectPropertyKernel(heapBase, state, setPropertyObject, setPropertyNamedKey);
+        } else setPropertyRecord = findOwnPropertyEntryKernel(heapBase, state, setPropertyObject, setPropertyNamedKey);
+        if (setPropertyRecord === 0) {
+            var inheritedSetObject = namedPropertyOwnerKernel(heapBase, state,
+                objectPrototypeReferenceKernel(heapBase, setPropertyObject), setPropertyNamedKey);
+            if (inheritedSetObject !== 0) {
+                var inheritedSetEntry = findOwnPropertyEntryKernel(heapBase, state,
+                    inheritedSetObject, setPropertyNamedKey);
+                var inheritedSetAttributes = ownPropertyEntryAttributesKernel(
+                    heapBase, inheritedSetObject, inheritedSetEntry);
+                if ((inheritedSetAttributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0 ||
+                        (inheritedSetAttributes & PROPERTY_ATTRIBUTE_WRITABLE) === 0) {
+                    setPropertyRecord = inheritedSetEntry;
+                    setPropertyOwner = inheritedSetObject;
+                }
+            }
+        }
+        if (setPropertyRecord === 0) {
+            /* Rejection follows the guest strict/sloppy rule without
+             * asking the embedding interpreter to perform the write. */
+            if (objectIsExtensibleKernel(heapBase, setPropertyObject) === 0) {
+                    return rejectedPropertyWriteKernel(
+                        heapBase, state, frame, pc, opcode,
+                        instructions, stringSupport,
+                        FOUR_WORD_INSTRUCTION, PropertyWriteAction.NOT_EXTENSIBLE);
+            }
+            setPropertyRecord = appendOwnPropertyEntryKernel(
+                heapBase, state, setPropertyObject, setPropertyNamedKey,
+                DEFAULT_PROPERTY_ATTRIBUTES);
+            setPropertyOwner = setPropertyObject;
+            if (setPropertyRecord === 0) {
+                return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        var setPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+            heapBase, setPropertyOwner, setPropertyRecord);
+        var setPropertyAttributes = propertyDescriptorAttributes(0, setPropertyDescriptor);
+        var setter = 0;
+        if ((setPropertyAttributes & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+            setter = propertyDescriptorSetter(0, setPropertyDescriptor);
+        }
+        var setPropertyAction = ordinaryWriteActionKernel(setPropertyAttributes, setter);
+        if (setPropertyAction === PropertyWriteAction.CALL_SETTER) {
+            var setterCell = engineScratchLeftAddress(heapBase, state);
+            setValueCellReference(setterCell, setter);
+            var setterArgumentCell = setPropertySourceCell;
+            setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
+            setPropertyAccessorEntered = bytecodeCallKernel(
+                heapBase, state, frame, setterCell, 0, CALL_OPERATION_CALL, CALL_DISCARD_RESULT,
+                currentContext, stringSupport, arrayPrototype,
+                bytecodeAddress, registerAddress, pc, framePC,
+                setPropertyObjectCell, FOUR_WORD_INSTRUCTION,
+                setterArgumentCell, 0);
+            if (setPropertyAccessorEntered !== 1) {
+                return unsupportedDiagnosticExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+            }
+        } else if (setPropertyAction !== PropertyWriteAction.WRITE_DATA) {
+            return rejectedPropertyWriteKernel(
+                heapBase, state, frame, pc, opcode, instructions,
+                stringSupport, FOUR_WORD_INSTRUCTION, setPropertyAction);
+        }
+        if (setPropertyAccessorEntered === 1) return PropertyInstructionResult.FRAME_ENTERED;
+            var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
+            var setPropertySource = setPropertySourceCell;
+            copyValueCell(setPropertyDestination, setPropertySource);
+        return PropertyInstructionResult.COMPLETED;
+    }
+
+    /* A small, allocation-free own-data probe. The structural kernel inliner
+     * can keep this common path in dispatch while prototypes, exotics and
+     * accessors share the full operation below. The key is a verified name
+     * constant. Actual own data entries are authoritative, including immutable
+     * wrapper data; virtual properties without entries miss to the full path.
+     * It never invokes user code. */
+    function tryOwnDataPropertyGetKernel(heapBase, state, receiver, keyCell, target) {
+        if (valueCellTag(0, receiver) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, receiver);
+        if (recordType(heapBase, object) !== RecordLayout.HEAP_TYPE_OBJECT) return 0;
+        var key = valueCellReference(0, keyCell);
+        var entry = findCachedOwnObjectPropertyKernel(heapBase, state, object, key);
+        if (entry === 0) return 0;
+        if ((ownPropertyEntryAttributesKernel(heapBase, object, entry) & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return 0;
+        copyValueCell(target, ownPropertyEntryValueCellKernel(heapBase, object, entry));
+        return 1;
+    }
+
+    /* The write counterpart only accepts an existing writable own data
+     * descriptor. Creation, inherited setters, rejection and exotic storage
+     * always use the full [[Put]] path; verified constant keys are strings. */
+    function tryOwnDataPropertySetKernel(heapBase, state, receiver, keyCell, source) {
+        if (valueCellTag(0, receiver) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
+        var object = valueCellReference(0, receiver);
+        if (recordType(heapBase, object) !== RecordLayout.HEAP_TYPE_OBJECT) return 0;
+        var entry = findCachedOwnObjectPropertyKernel(heapBase, state, object, valueCellReference(0, keyCell));
+        if (entry === 0) return 0;
+        var attributes = ownPropertyEntryAttributesKernel(heapBase, object, entry);
+        if ((attributes & (RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR | PROPERTY_ATTRIBUTE_WRITABLE)) !==
+                PROPERTY_ATTRIBUTE_WRITABLE) return 0;
+        copyValueCell(ownPropertyEntryValueCellKernel(heapBase, object, entry), source);
+        return 1;
+    }
+
+    /* Named [[Get]] shared by constant and computed keys. Completed values
+     * stay in the caller result cell; entered getters own normal traced frames.
+     * Other returns retain the native exception/allocation/diagnostic protocol. */
+    function executeNamedPropertyGetKernel(heapBase, state, frame, pc, opcode,
+            instructions, propertyObjectCell, propertyKeyCell, propertyTargetCell,
+            stringSupport, arrayLengthKey, arrayPrototype) {
+        var currentContext = frameContext(heapBase, frame);
+        var registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
+        var bytecodeAddress = 0;
+        var propertyOperandsValid = 1;
+        var propertyObjectTag = load32(propertyObjectCell);
+        if (propertyObjectTag !== RecordLayout.VALUE_TAG_REFERENCE) {
+            if (propertyObjectTag === VALUE_TAG_UNDEFINED ||
+                    propertyObjectTag === VALUE_TAG_NULL) {
+                return propertyAccessTypeErrorKernel(heapBase, state, frame,
+                    pc, opcode, instructions, stringSupport);
+            }
+            if (propertyObjectTag !== VALUE_TAG_INT32) {
+                if (propertyObjectTag !== VALUE_TAG_DOUBLE) {
+                    if (propertyObjectTag !== VALUE_TAG_TRUE) {
+                        if (propertyObjectTag !== VALUE_TAG_FALSE) {
+                            propertyOperandsValid = 0;
+                        }
+                    }
+                }
+            }
+        }
+        if (load32(propertyKeyCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
+            propertyOperandsValid = 0;
+        }
+        if (propertyOperandsValid === 0) {
+            return unsupportedExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        var propertyObject = load32(
+            propertyObjectCell + RecordLayout.VALUE_CELL_LOW);
+        if (propertyObjectTag !== RecordLayout.VALUE_TAG_REFERENCE) {
+            var constantPrimitivePrototypeIndex =
+                RuntimeSupportLayout.NUMBER_PROTOTYPE;
+            if (propertyObjectTag === VALUE_TAG_TRUE) {
+                constantPrimitivePrototypeIndex =
+                    RuntimeSupportLayout.BOOLEAN_PROTOTYPE;
+            } else if (propertyObjectTag === VALUE_TAG_FALSE) {
+                constantPrimitivePrototypeIndex =
+                    RuntimeSupportLayout.BOOLEAN_PROTOTYPE;
+            }
+            propertyObject = valueCellReference(0,
+                vectorCellAddress(heapBase, stringSupport,
+                    constantPrimitivePrototypeIndex));
+        }
+        var propertyConstantKey = load32(
+            propertyKeyCell + RecordLayout.VALUE_CELL_LOW);
+        var propertyRecord = 0;
+        var propertyAccessorEntered = 0;
+        var virtualPropertyObjectType = recordType(
+            heapBase, propertyObject);
+        var propertyReceiver = propertyObject;
+        /* Keep the descriptor owner separately from the receiver.
+         * Accessors use receiver as `this`; entry resolution uses
+         * owner even after the prototype walk advances/finishes. */
+        var propertyOwner = propertyReceiver;
+        var propertyReceiverStorage = 0;
+        var propertyCacheIndex = 0;
+        if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
+            propertyCacheIndex =
+                stringKeyHashKernel(heapBase, propertyConstantKey) &
+                (RecordLayout.PROPERTY_CACHE_ENTRY_COUNT - 1);
+            propertyReceiverStorage = objectPropertyHead(heapBase, propertyReceiver);
+            propertyRecord = hintedOwnPropertyEntryKernel(heapBase, state,
+                propertyCacheIndex, propertyReceiverStorage, propertyConstantKey);
+            if (propertyRecord !== 0) {
+                propertyObject = 0;
+            }
+        }
+        if (propertyObject !== 0 && virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT &&
+                (recordFlags(heapBase, propertyObject) & ObjectClassFlags.PRIMITIVE_WRAPPER) !== 0) {
+            var constantStringKind = stringVirtualPropertyKindKernel(heapBase, propertyObject,
+                propertyConstantKey, stringSupport);
+            if (constantStringKind !== 0) {
+                if (stringVirtualPropertyValueKernel(heapBase, state,
+                        propertyTargetCell,
+                        propertyObject, propertyConstantKey, stringSupport, constantStringKind) === 0) return unsupportedExitKernel(
+                    heapBase, state, frame, pc, opcode, instructions);
+                propertyRecord = PROPERTY_FOUND_SENTINEL;
+                propertyObject = 0;
+            }
+        }
+        if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_ARRAY) {
+            if (stringKeysEqualKernel(heapBase,
+                    propertyConstantKey, arrayLengthKey) === 1) {
+                if (arrayReserved(heapBase, propertyObject) === 0) {
+                    var propertyArrayVector = arrayElements(
+                        heapBase, propertyObject);
+                    var propertyLengthTarget = propertyTargetCell;
+                    setValueCellInt32(propertyLengthTarget, vectorLength(heapBase, propertyArrayVector));
+                    propertyRecord = PROPERTY_FOUND_SENTINEL;
+                    propertyObject = 0;
+                }
+            }
+        } else if (virtualPropertyObjectType ===
+                   RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
+            if (typedArrayMetadataGetKernel(heapBase,
+                    propertyTargetCell,
+                    propertyObject, propertyConstantKey, stringSupport) === 1) {
+                propertyRecord = PROPERTY_FOUND_SENTINEL;
+                propertyObject = 0;
+            } else if (stringKeysEqualKernel(heapBase,
+                    propertyConstantKey, arrayLengthKey) === 1) {
+                var bufferLengthTarget = propertyTargetCell;
+                setValueCellInt32(bufferLengthTarget, bufferViewLength(heapBase, propertyObject));
+                propertyRecord = PROPERTY_FOUND_SENTINEL;
+                propertyObject = 0;
+            } else {
+                var constantBufferKeyCell = vectorCellAddress(
+                    heapBase, stringSupport,
+                    RuntimeSupportLayout.BUFFER_KEY);
+                var constantBufferKey = valueCellReference(
+                    0, constantBufferKeyCell);
+                if (stringKeysEqualKernel(heapBase,
+                        propertyConstantKey,
+                        constantBufferKey) === 1) {
+                    var constantBufferKind = bufferViewKind(
+                        heapBase, propertyObject);
+                    if (constantBufferKind !== BUFFER_KIND_NATIVE) {
+                    if (constantBufferKind !==
+                            BUFFER_KIND_ARRAY_BUFFER) {
+                        var constantBufferBacking =
+                            bufferViewBacking(
+                                heapBase, propertyObject);
+                        var constantArrayBuffer =
+                            bufferBackingMetadata(
+                                heapBase, constantBufferBacking);
+                        if (constantArrayBuffer !== 0) {
+                            var constantBufferTarget =
+                                propertyTargetCell;
+                            setValueCellReference(
+                                constantBufferTarget,
+                                constantArrayBuffer);
+                            propertyRecord =
+                                PROPERTY_FOUND_SENTINEL;
+                            propertyObject = 0;
+                        }
+                    }
+                    }
+                }
+            }
+        } else if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_STRING) {
+            if (stringKeysEqualKernel(heapBase,
+                    propertyConstantKey, arrayLengthKey) === 1) {
+                var stringLengthTarget = propertyTargetCell;
+                setValueCellInt32(stringLengthTarget, stringLength(heapBase, propertyObject));
+                propertyRecord = PROPERTY_FOUND_SENTINEL;
+                propertyObject = 0;
+            } else {
+                var constantStringPrototypeCell = heapBase +
+                    stringSupport + RecordLayout.VECTOR_CELLS +
+                    RuntimeSupportLayout.STRING_PROTOTYPE *
+                    RecordLayout.VALUE_CELL_BYTES;
+                propertyObject = load32(
+                    constantStringPrototypeCell + RecordLayout.VALUE_CELL_LOW);
+            }
+        }
+        while (propertyObject !== 0) {
+            if (objectReferenceIsObjectKernel(heapBase, propertyObject) === 0) {
+                return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
+            propertyRecord = findOwnPropertyEntryKernel(heapBase, state, propertyObject, propertyConstantKey);
+            if (propertyRecord !== 0) { propertyOwner = propertyObject; break; }
+            if (recordType(heapBase, propertyObject) === RecordLayout.HEAP_TYPE_ARRAY) {
+                var indexedValue = namedArrayIndexCellKernel(heapBase, propertyObject, propertyConstantKey);
+                if (indexedValue !== 0) {
+                    copyValueCell(propertyTargetCell, indexedValue);
+                    propertyRecord = PROPERTY_FOUND_SENTINEL;
+                    break;
+                }
+            }
+            propertyObject = objectPrototypeReferenceKernel(heapBase, propertyObject);
+        }
+        if (propertyRecord === 0) {
+            /* Reaching the end of a supported prototype chain is a
+             * successful [[Get]] whose value is undefined.  This is
+             * independent of the receiver's concrete guest record
+             * kind (Object, Array, function, RegExp, Buffer, or
+             * boxed String); only an unrecognised record kind above
+             * warrants a semantic exit. */
+            var missingPropertyTarget = propertyTargetCell;
+            setValueCellUndefined(missingPropertyTarget);
+            propertyRecord = PROPERTY_FOUND_SENTINEL;
+        }
+        if (propertyRecord !== 0) {
+            if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
+                var resolvedPropertyDescriptor = ownPropertyEntryDescriptorKernel(
+                    heapBase, propertyOwner, propertyRecord);
+                if ((propertyDescriptorAttributes(0, resolvedPropertyDescriptor) &
+                     RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) {
+                    var getterCell = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
+                    if (valueCellTag(0, getterCell) ===
+                            VALUE_TAG_UNDEFINED) {
+                        setValueCellUndefined(
+                            propertyTargetCell);
+                        propertyRecord = PROPERTY_FOUND_SENTINEL;
+                    } else {
+                        propertyAccessorEntered = enterPropertyGetterKernel(
+                            heapBase, state, frame, getterCell,
+                            propertyTargetCell, currentContext,
+                            stringSupport, arrayPrototype,
+                            bytecodeAddress, registerAddress, pc,
+                            propertyObjectCell);
+                        if (propertyAccessorEntered !== 1) {
+                            return unsupportedDiagnosticExitKernel(
+                                heapBase, state, frame, pc, opcode,
+                                instructions);
+                        } else {
+                            propertyRecord = PROPERTY_FOUND_SENTINEL;
+                        }
+                    }
+                }
+            }
+        }
+        if (propertyRecord === 0) {
+            return unsupportedExitKernel(
+                heapBase, state, frame, pc, opcode, instructions);
+        }
+        if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
+            var propertySource = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
+            var propertyTarget = propertyTargetCell;
+            copyValueCell(propertyTarget, propertySource);
+        }
+        if (propertyAccessorEntered === 1) return PropertyInstructionResult.FRAME_ENTERED;
+        return PropertyInstructionResult.COMPLETED;
+    }
+
+    function propertyKeyNeedsConversionKernel(heapBase, key) {
+        if (valueCellTag(0, key) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
+        if (recordType(heapBase, valueCellReference(0, key)) === RecordLayout.HEAP_TYPE_STRING) return 0;
+        return 1;
+    }
+
+    /* Cold property continuations use normal traced guest activations. Their
+     * caller owns the operand cells until entry completes. Reservation never
+     * collects inline: failure retries the untouched opcode after collection.
+     * Temporary value/descriptor vectors are copied into the callee before
+     * execution can suspend; no untraced host array or retry marker is used. */
+    function enterPropertyOperationKernel(heapBase, state, frame, pc, operation,
+            targetCell, first, second, third, stringSupport, arrayPrototype) {
+        var support = stringSupport;
+        var operationsCell = vectorCellAddress(heapBase, support, RuntimeSupportLayout.PROPERTY_OPERATIONS);
+        if (valueCellTag(0, operationsCell) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
+        var callable = vectorCellAddress(heapBase, valueCellReference(0, operationsCell), operation);
+        var count = 1;
+        if (second !== 0) count = count + 1;
+        if (third !== 0) count = count + 1;
+        var bytes = VECTOR_FIXED_BYTES + count * RecordLayout.VALUE_CELL_BYTES;
+        if (reserveNativeAllocationKernel(heapBase, state, bytes * 2) === 0) return 0;
+        var values = engineHeapBump(heapBase, state);
+        var descriptors = values + bytes;
+        initializeProgramVectorKernel(heapBase, values, count, 0);
+        initializeProgramVectorKernel(heapBase, descriptors, count, 0);
+        copyValueCell(vectorCellAddress(heapBase, values, 0), first);
+        if (second !== 0) copyValueCell(vectorCellAddress(heapBase, values, 1), second);
+        if (third !== 0) copyValueCell(vectorCellAddress(heapBase, values, 2), third);
+        var index = 0;
+        while (index < count) {
+            setValueCellInt32(vectorCellAddress(heapBase, descriptors, index), index);
+            index = index + 1;
+        }
+        setEngineHeapBump(heapBase, state, descriptors + bytes);
+        var receiver = engineScratchRightAddress(heapBase, state);
+        setValueCellUndefined(receiver);
+        var context = frameContext(heapBase, frame);
+        var targetIndex = divideI32(targetCell - frameRegisterCellAddress(heapBase, frame, 0),
+            RecordLayout.VALUE_CELL_BYTES);
+        return bytecodeCallKernel(heapBase, state, frame, callable, 0,
+            CALL_OPERATION_CALL, targetIndex, context, stringSupport, arrayPrototype,
+            0, vectorCellAddress(heapBase, values, 0), pc, frame + FRAME_PC,
+            receiver, FOUR_WORD_INSTRUCTION, 0, descriptors);
+    }
+
+    function resumeEnteredPropertyFrameKernel(heapBase, state, instructions) {
+        setEngineInstructions(heapBase, state, instructions + 1);
+        setEngineExitReason(heapBase, state, NATIVE_INTERNAL_RESUME);
+        return NATIVE_INTERNAL_RESUME;
+    }
+
     /* All property forms preserve the original receiver and resume the
      * caller after its four-word Get. Callers handle an absent getter before
      * entry; a present getter creates a normal traced activation. */
-    function enterPropertyGetterKernel(heapBase, state, frame, getter, targetIndex,
+    function enterPropertyGetterKernel(heapBase, state, frame, getter, targetCell,
             currentContext, stringSupport, arrayPrototype, bytecodeAddress,
             registers, pc, receiver) {
         setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
+        var targetIndex = divideI32(targetCell - frameRegisterCellAddress(heapBase, frame, 0),
+            RecordLayout.VALUE_CELL_BYTES);
         return bytecodeCallKernel(heapBase, state, frame, getter, 0, CALL_OPERATION_CALL,
             targetIndex, currentContext, stringSupport, arrayPrototype, bytecodeAddress,
             registers, pc, frame + FRAME_PC, receiver, FOUR_WORD_INSTRUCTION, 0, 0);
@@ -15295,7 +15169,16 @@
     }
 
     function deletePropertyInstructionKernel(heapBase, state, frame, pc, opcode,
-            instructions, stringSupport, target, receiver, key, strictMode, lengthKey) {
+            instructions, stringSupport, target, receiver, key, strictMode, lengthKey, arrayPrototype) {
+        if (propertyKeyNeedsConversionKernel(heapBase, key) !== 0) {
+            var operation = PropertyOperation.DELETE;
+            if (strictMode !== 0) operation = PropertyOperation.DELETE_STRICT;
+            if (enterPropertyOperationKernel(heapBase, state, frame, pc, operation,
+                    target, receiver, key, 0, stringSupport, arrayPrototype) === 0) {
+                return unsupportedExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
+            return resumeEnteredPropertyFrameKernel(heapBase, state, instructions);
+        }
         var result = deletePropertyKernel(heapBase, state, target, receiver,
             key, strictMode, lengthKey, stringSupport);
         if (result === PropertyDeleteResult.REJECTED) return typeErrorAtInstructionKernel(
@@ -18385,6 +18268,13 @@
             allocateReferenceErrorKernel: allocateReferenceErrorKernel,
             allocateTypeErrorKernel: allocateTypeErrorKernel,
             propertyAccessTypeErrorKernel: propertyAccessTypeErrorKernel,
+            propertyKeyNeedsConversionKernel: propertyKeyNeedsConversionKernel,
+            enterPropertyOperationKernel: enterPropertyOperationKernel,
+            executeNamedPropertyGetKernel: executeNamedPropertyGetKernel,
+            tryOwnDataPropertyGetKernel: tryOwnDataPropertyGetKernel,
+            tryOwnDataPropertySetKernel: tryOwnDataPropertySetKernel,
+            executeNamedPropertySetKernel: executeNamedPropertySetKernel,
+            resumeEnteredPropertyFrameKernel: resumeEnteredPropertyFrameKernel,
             executeInterpreterTransitionsKernel: executeInterpreterTransitionsKernel,
             allocateRegexpKernel: allocateRegexpKernel,
             allocateTypedArrayViewKernel: allocateTypedArrayViewKernel,
@@ -18715,6 +18605,8 @@
                 preparedSource: preparedKernelSource,
                 constantBindings: kernelConstants,
                 constantNamespaces: {
+                    PropertyOperation: PropertyOperations.slots,
+                    PropertyInstructionResult: PropertyInstructionResult,
                     HeapSizePolicy: HeapSizePolicy,
                     DescriptorFields: PropertySemantics.namespaces.DescriptorFields,
                     PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,

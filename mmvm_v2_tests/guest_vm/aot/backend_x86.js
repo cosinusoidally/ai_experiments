@@ -1735,8 +1735,13 @@
             assembler.label(endLabel);
             return;
         }
+        if (node.op === "break") {
+            if (!state.loopExits || !state.loopExits.length) throw new Error("kernel break outside loop");
+            assembler.jump(state.loopExits[state.loopExits.length - 1]);
+            return;
+        }
         if (node.op === "while") {
-            if (state.dispatchStrategy === "replicated" &&
+            if (!node.breakable && state.dispatchStrategy === "replicated" &&
                 emitReplicatedDispatchLoop(assembler, node, state)) return;
             var loopLabel = "kernel_loop_" + state.nextLabel;
             var exitLabel = "kernel_loop_exit_" + state.nextLabel++;
@@ -1746,7 +1751,10 @@
                 assembler.testEaxEax();
                 assembler.jumpEqual(exitLabel);
             }
+            if (!state.loopExits) state.loopExits = [];
+            state.loopExits.push(exitLabel);
             emitStatement(assembler, node.body, state);
+            state.loopExits.pop();
             assembler.jump(loopLabel);
             assembler.label(exitLabel);
             return;

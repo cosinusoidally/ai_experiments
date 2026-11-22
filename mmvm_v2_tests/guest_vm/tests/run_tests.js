@@ -80,6 +80,8 @@
         };
     }
 
+    function readLibrarySource(path) { return readSource("../../" + path); }
+
     var guestTests = [
         {path: "language/arithmetic.js"},
         {path: "language/for_loop.js"},
@@ -92,7 +94,11 @@
         {path: "language/unicode_identifiers.js"},
         {path: "language/compiled_stability.js"},
         {path: "language/typed_arrays.js"},
-        {path: "buffer/buffer_guest.js"}
+        {path: "buffer/buffer_guest.js"},
+        {path: "object_operations_integration.js", standardLibrary: true},
+        {path: "object_operations_integration.js", standardLibrary: true, options: {nativeInterpreter: true}},
+        {path: "object_operations_integration.js", standardLibrary: true, options: {nativeInterpreter: true,
+            nativeOperandPredecode: true}}
     ];
     var totalAssertions = 0;
     var testIndex = 0;
@@ -100,6 +106,7 @@
         var test = guestTests[testIndex];
         var testPath = test.path;
         var vm = new VM(test.options || {});
+        if (test.standardLibrary) vm.installStandardLibrary(readLibrarySource);
         vm.run(readSource(testPath), testPath);
         totalAssertions += vm.runtime.assertions;
         var result = testPath + ": passed " + vm.runtime.assertions +

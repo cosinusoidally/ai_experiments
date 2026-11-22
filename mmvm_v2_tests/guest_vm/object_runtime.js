@@ -21,7 +21,9 @@
         }
         return value;
     }
-    this.__guestStringConvert = propertyKey;
+    this.__guestStringConvert = function (value) {
+        return arguments.length ? propertyKey(value) : "";
+    };
     var substring = String.prototype.substring;
     var floor = Math.floor, ceil = Math.ceil;
     function relativeStringIndex(value, length) {

@@ -161,9 +161,11 @@
             this.reloadNativeOperand(frame, code[pc + 1]);
         } else if (opcode === op.MOVE) {
             this.reloadNativeOperand(frame, code[pc + 2]);
-        } else if (opcode === op.GET_PROPERTY) {
+        } else if (opcode === op.GET_PROPERTY || opcode === op.PREPARE_PROPERTY_KEY) {
             this.reloadNativeOperand(frame, code[pc + 2]);
             this.reloadNativeOperand(frame, code[pc + 3]);
+        } else if (opcode === op.CHECK_PROPERTY_BASE) {
+            this.reloadNativeOperand(frame, code[pc + 1]);
         } else if (opcode === op.SET_PROPERTY) {
             this.reloadNativeOperand(frame, code[pc + 1]);
             this.reloadNativeOperand(frame, code[pc + 2]);
@@ -700,6 +702,19 @@
                         }
                     }
                     frame.pc = pc;
+                } else if (opcode === op.CHECK_PROPERTY_BASE) {
+                    var propertyBase = registers[code[pc + 1]];
+                    if (propertyBase === null || propertyBase === undefined) {
+                        throw new TypeError("cannot access property of null or undefined");
+                    }
+                    frame.pc = pc + 2;
+                } else if (opcode === op.PREPARE_PROPERTY_KEY) {
+                    propertyBase = registers[code[pc + 2]];
+                    if (propertyBase === null || propertyBase === undefined) {
+                        throw new TypeError("cannot access property of null or undefined");
+                    }
+                    registers[code[pc + 1]] = this.runtime.propertyKey(registers[code[pc + 3]]);
+                    frame.pc = pc + 4;
                 } else if (opcode === op.GET_PROPERTY) {
                     registers[code[pc + 1]] = this.runtime.getProperty(
                         registers[code[pc + 2]], registers[code[pc + 3]]);

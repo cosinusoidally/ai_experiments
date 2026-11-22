@@ -590,6 +590,13 @@
         return 1;
     }
 
+    function nonnegativeStringIndexPropertyKeyKernel(heapBase, cell) {
+        if (valueCellTag(0, cell) !== VALUE_TAG_REFERENCE) return 0;
+        var key = valueCellReference(0, cell);
+        if (recordType(heapBase, key) !== HEAP_TYPE_STRING) return 0;
+        return propertyKeyIndexKernel(heapBase, key) >= 0;
+    }
+
     function negativeNumericPropertyKeyKernel(cell) {
         var tag = valueCellTag(0, cell);
         if (tag === VALUE_TAG_INT32) return valueCellInt32(0, cell) < 0;
@@ -678,6 +685,8 @@
             key = keyPayload;
             var keyType = recordType(heapBase, key);
             if (keyType !== RecordLayout.HEAP_TYPE_STRING) return 0;
+            keyIndex = propertyKeyIndexKernel(heapBase, key);
+            if (keyIndex >= 0) numericKey = 1;
         } else {
             key = propertyNameReferenceKernel(heapBase, state, keyCell,
                 stringSupport, enginePlatformServices(heapBase, state));
@@ -786,6 +795,7 @@
                   DESCRIPTOR_KIND_FIELDS: DESCRIPTOR_KIND_FIELDS,
                   DESCRIPTOR_RESULT_FIELDS: DESCRIPTOR_RESULT_FIELDS}, functions: {
         nonnegativeNumericPropertyKeyKernel: nonnegativeNumericPropertyKeyKernel,
+        nonnegativeStringIndexPropertyKeyKernel: nonnegativeStringIndexPropertyKeyKernel,
         negativeNumericPropertyKeyKernel: negativeNumericPropertyKeyKernel,
         propertyNameReferenceKernel: propertyNameReferenceKernel,
         propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,

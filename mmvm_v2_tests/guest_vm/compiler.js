@@ -881,6 +881,36 @@
         throw new SyntaxError("invalid assignment target");
     };
 
+    /* ES5.1 11.2.1 forms the property name before evaluating an assignment's
+     * RHS. Retain the converted name in a compiler temporary, never overwrite
+     * a source binding. Primitive syntax needs no callback conversion. */
+    Compiler.prototype.preparePropertyReference = function (reference, member, rhs) {
+        if (reference.kind !== "property" && reference.kind !== "constantProperty") return reference;
+        if (reference.kind === "property" && !primitivePropertyExpression(member.property)) {
+            var key = this.allocate();
+            this.emit(op.PREPARE_PROPERTY_KEY, key, reference.object, reference.key);
+            reference.key = key;
+        } else if (rhs && !this.propertyRHSEffectFree(rhs)) {
+            this.emit(op.CHECK_PROPERTY_BASE, reference.object);
+        }
+        return reference;
+    };
+
+    function primitivePropertyExpression(expression) {
+        return isLiteralExpression(expression) || expression.type === "UnaryExpression" ||
+            expression.type === "UpdateExpression" ||
+            (expression.type === "BinaryExpression" && expression.operator !== "&&" && expression.operator !== "||");
+    }
+
+    Compiler.prototype.propertyRHSEffectFree = function (expression) {
+        if (isLiteralExpression(expression) || expression.type === "ThisExpression") return true;
+        if (expression.type === "Identifier") {
+            var binding = this.referenceForName(expression.name);
+            return binding.kind === "register" || binding.kind === "local";
+        }
+        return false;
+    };
+
     Compiler.prototype.referenceForName = function (name) {
         var binding = this.resolveBinding(name);
         if (binding) {
@@ -1222,6 +1252,8 @@
                 return invalidAssigned;
             }
             var reference = this.compileReference(expression.left, expression.right);
+            this.preparePropertyReference(reference, expression.left,
+                expression.operator === "=" ? expression.right : null);
             var assigned;
             if (expression.operator === "=") {
                 if (reference.kind === "register" &&
@@ -1248,6 +1280,7 @@
         }
         if (expression.type === "UpdateExpression") {
             reference = this.compileReference(expression.argument, null);
+            this.preparePropertyReference(reference, expression.argument, null);
             current = this.loadReference(reference);
             var numericCurrent = this.allocate();
             this.emit(op.POSITIVE, numericCurrent, current);
