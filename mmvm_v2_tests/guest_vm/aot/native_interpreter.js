@@ -321,6 +321,7 @@
     RuntimeSupportLayout.WRITE_NOT_EXTENSIBLE_MESSAGE = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.DELETE_NON_CONFIGURABLE_MESSAGE = RuntimeSupportLayout.COUNT++;
     RuntimeSupportLayout.UINT8_CLAMPED_ARRAY_PROTOTYPE = RuntimeSupportLayout.COUNT++;
+    RuntimeSupportLayout.PROPERTY_OPERATIONS = RuntimeSupportLayout.COUNT++;
     var RUNTIME_SUPPORT_DESCRIPTOR_KEYS_BASE = RuntimeSupportLayout.DESCRIPTOR_KEYS_BASE;
     var INTRINSIC_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR;
     var INTRINSIC_GUEST_BUILTIN = NativeIntrinsics.GUEST_BUILTIN;
@@ -5983,7 +5984,7 @@
         if (entered === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
         if (recordType(heapBase, valueCellReference(0, functionCell)) === RecordLayout.HEAP_TYPE_BYTECODE_FUNCTION) return 0;
         var resultCell = explicitTarget;
-        if (resultCell === 0) resultCell = bytecodeRegisterCellAddress(0, registers, targetIndex);
+        if (resultCell === 0) resultCell = valueCellAddress(0, registers, targetIndex);
         return intrinsicCallKernel(heapBase, state, frame, functionCell,
             descriptorCell, operation, targetIndex, context, stringSupport,
             arrayPrototype, bytecodeAddress, forwardedRegisters, pc, opcode,
@@ -6102,7 +6103,7 @@
             pc, opcode, instructions, platformServices, receiverIndex, targetCell) {
         if (receiverIndex < 0) return unsupportedDiagnosticExitKernel(
             heapBase, state, frame, pc, opcode, instructions);
-        var functionCell = bytecodeRegisterCellAddress(0, registerAddress, receiverIndex);
+        var functionCell = valueCellAddress(0, registerAddress, receiverIndex);
         if (valueCellTag(0, functionCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
             return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
         }
@@ -6207,7 +6208,7 @@
         if (closure === 0) return 0;
         var implementation = vectorCellAddress(heapBase, closure, GUEST_BUILTIN_IMPLEMENTATION);
         var receiver = engineScratchRightAddress(heapBase, state);
-        if (receiverIndex >= 0) receiver = bytecodeRegisterCellAddress(0, registerAddress, receiverIndex);
+        if (receiverIndex >= 0) receiver = valueCellAddress(0, registerAddress, receiverIndex);
         else setValueCellUndefined(receiver);
         return bytecodeCallKernel(heapBase, state, frame, implementation, 0,
             CALL_OPERATION_CALL, targetIndex, currentContext, stringSupport,
@@ -6341,7 +6342,7 @@
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             }
-            var forwardedFunctionCell = bytecodeRegisterCellAddress(
+            var forwardedFunctionCell = valueCellAddress(
                 0, registerAddress, callReceiverIndex);
             if (valueCellTag(0, forwardedFunctionCell) !==
                     RecordLayout.VALUE_TAG_REFERENCE) {
@@ -6416,11 +6417,11 @@
         }
         if (intrinsicId === NativeIntrinsics.FUNCTION_BIND) {
             var bindResultCell = explicitTargetCell;
-            if (bindResultCell === 0) bindResultCell = bytecodeRegisterCellAddress(
+            if (bindResultCell === 0) bindResultCell = valueCellAddress(
                 0, registerAddress, callTargetIndex);
             var bindReceiver = engineScratchRightAddress(heapBase, state);
             setValueCellUndefined(bindReceiver);
-            if (callReceiverIndex >= 0) bindReceiver = bytecodeRegisterCellAddress(
+            if (callReceiverIndex >= 0) bindReceiver = valueCellAddress(
                 0, registerAddress, callReceiverIndex);
             var bindResult = functionBindKernel(heapBase, state, bindResultCell,
                 bindReceiver,
@@ -6437,7 +6438,7 @@
         }
         if (intrinsicId === NativeIntrinsics.FUNCTION_APPLY) {
             var applyTargetCell = explicitTargetCell;
-            if (applyTargetCell === 0) applyTargetCell = bytecodeRegisterCellAddress(
+            if (applyTargetCell === 0) applyTargetCell = valueCellAddress(
                 0, registerAddress, callTargetIndex);
             return applyNativeIntrinsicKernel(heapBase, state, frame,
                 intrinsicArgumentsVector, intrinsicArgumentCount, callTargetIndex,
@@ -6498,11 +6499,11 @@
         }
         if (intrinsicId === NativeIntrinsics.ARRAY_TO_STRING && callReceiverIndex >= 0) {
             intrinsicHandled = arrayBuiltinStringKernel(heapBase, state, intrinsicTarget,
-                bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
+                valueCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
         }
         if (intrinsicId === NativeIntrinsics.OBJECT_TO_STRING && callReceiverIndex >= 0) {
             intrinsicHandled = objectToStringKernel(heapBase, intrinsicTarget,
-                bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
+                valueCellAddress(0, registerAddress, callReceiverIndex), stringSupport);
         }
         if (intrinsicId === NativeIntrinsics.TRY_COPY_INT32_ARRAY) {
             intrinsicHandled = copyInt32ArrayIntrinsicKernel(heapBase,
@@ -6589,7 +6590,7 @@
         if (intrinsicId === NativeIntrinsics.OBJECT_IS_PROTOTYPE_OF) {
             var prototypeReceiver = 0;
             if (callReceiverIndex >= 0) {
-                prototypeReceiver = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
+                prototypeReceiver = valueCellAddress(0, registerAddress, callReceiverIndex);
             }
             var prototypeArgument = programArgumentCellKernel(
                 heapBase, intrinsicArgumentsVector, registerAddress, 0);
@@ -6953,7 +6954,7 @@
             var functionStringReceiverIndex = callReceiverIndex;
             var functionStringReceiverCell = 0;
             if (functionStringReceiverIndex >= 0) {
-                functionStringReceiverCell = bytecodeRegisterCellAddress(
+                functionStringReceiverCell = valueCellAddress(
                     0, registerAddress, functionStringReceiverIndex);
             }
             intrinsicHandled = functionToStringKernel(
@@ -7182,7 +7183,7 @@
             if (genericArraySupportIndex !== 0) {
                 var genericArrayReceiver = engineScratchRightAddress(heapBase, state);
                 if (callReceiverIndex >= 0) {
-                    genericArrayReceiver = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
+                    genericArrayReceiver = valueCellAddress(0, registerAddress, callReceiverIndex);
                 } else setValueCellUndefined(genericArrayReceiver);
                 if (valueCellTag(0, genericArrayReceiver) !== RecordLayout.VALUE_TAG_REFERENCE ||
                     recordType(heapBase, valueCellReference(0, genericArrayReceiver)) !== RecordLayout.HEAP_TYPE_ARRAY) {
@@ -7268,7 +7269,7 @@
             var copyReceiverIndex = callReceiverIndex;
             var copyReceiverCell = 0;
             if (copyReceiverIndex >= 0) {
-                copyReceiverCell = bytecodeRegisterCellAddress(
+                copyReceiverCell = valueCellAddress(
                     0, registerAddress, copyReceiverIndex);
             }
             intrinsicHandled = bufferCopyKernel(
@@ -7310,7 +7311,7 @@
             var replaceReceiverIndex = callReceiverIndex;
             var replaceReceiverCell = 0;
             if (replaceReceiverIndex >= 0) {
-                replaceReceiverCell = bytecodeRegisterCellAddress(
+                replaceReceiverCell = valueCellAddress(
                     0, registerAddress, replaceReceiverIndex);
             }
             intrinsicHandled = stringReplaceKernel(
@@ -8379,7 +8380,7 @@
             frame, callReceiverIndex, stringSupport) {
         var intrinsicHandled = 0;
         if (callReceiverIndex >= 0) {
-            var guardedReceiver = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
+            var guardedReceiver = valueCellAddress(0, registerAddress, callReceiverIndex);
             if (valueCellTag(0, guardedReceiver) === RecordLayout.VALUE_TAG_REFERENCE) {
                 var guardedArray = valueCellReference(0, guardedReceiver);
                 if (recordType(heapBase, guardedArray) === RecordLayout.HEAP_TYPE_ARRAY &&
@@ -8788,7 +8789,7 @@
         if (intrinsicHandled === 0) {
         if (intrinsicId === NativeIntrinsics.ARRAY_JOIN) {
             if (callReceiverIndex >= 0 && intrinsicArgumentCount <= 1) {
-                var joinReceiverCell = bytecodeRegisterCellAddress(0, registerAddress, callReceiverIndex);
+                var joinReceiverCell = valueCellAddress(0, registerAddress, callReceiverIndex);
                 var joinSeparator = valueCellReference(0, vectorCellAddress(
                     heapBase, stringSupport, RuntimeSupportLayout.COMMA_STRING));
                 var joinArgumentValid = 1;
@@ -18982,6 +18983,7 @@
         }
         this.stringSupportAddress = runtime.heapRecords.allocateValueVector(
             RuntimeSupportLayout.COUNT);
+        this.setPropertyOperations(runtime.propertyOperationsAddress || 0);
         var bytecodeLayout = runtime.heapRecords.allocateValueVector(
             Bytecode.NAMES.length * BYTECODE_LAYOUT_STRIDE);
         var bytecodeOpcode = 0;
@@ -19526,6 +19528,13 @@
                 this.stringSupportAddress,
                 RuntimeSupportLayout.FUNCTION_PROGRAM_CACHE),
             cache.heapAddress);
+    };
+
+    NativeInterpreter.prototype.setPropertyOperations = function (address) {
+        var cell = this.runtime.heapRecords.vectorCell(this.stringSupportAddress,
+            RuntimeSupportLayout.PROPERTY_OPERATIONS);
+        if (address) this.runtime.valueCells.writeReferenceAt(cell, address);
+        else this.runtime.writeHeapValue(cell, undefined);
     };
 
     NativeInterpreter.prototype.setArrayMethodFallback = function (name, helper) {

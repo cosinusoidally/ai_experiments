@@ -8,6 +8,7 @@
     var HeapRecords = root.GuestVMHeapRecords;
     var PropertySemantics = root.GuestVMPropertySemanticsKernel;
     var Bytecode = root.GuestVMBytecode;
+    var PropertyOperations = root.GuestVMPropertyOperationsRuntime;
     var ThreadedCompiler = root.GuestVMThreadedCompiler;
     var RecordInitializer = root.GuestVMRecordInitializer;
     var HeapSweeper = root.GuestVMHeapSweeper;
@@ -28,6 +29,7 @@
         HeapRecords = require("./heap_records.js");
         PropertySemantics = require("./property_semantics_kernel.js");
         Bytecode = require("./bytecode.js");
+        PropertyOperations = require("./property_operations_runtime.js");
         ThreadedCompiler = require("./threaded_compiler.js");
         RecordInitializer = require("./aot/record_initializer.js");
         HeapSweeper = require("./aot/heap_sweeper.js");
@@ -4672,7 +4674,17 @@
     Runtime.prototype.propertyKey = function (value) {
         /* Primitive strings have value identity. Avoid re-interning the already
          * canonical string constants used by almost every property opcode. */
-        return typeof value === "string" ? value : this.toString(value);
+        if (typeof value === "string") return value;
+        if (value && value.guestType && this.propertyOperationsAddress) {
+            return this.invokePropertyFunction(
+                this.propertyOperationCallable(PropertyOperations.slots.KEY), undefined, [value]);
+        }
+        return this.toString(value);
+    };
+
+    Runtime.prototype.propertyOperationCallable = function (operation) {
+        return this.readHeapValue(this.heapRecords.vectorCell(
+            this.propertyOperationsAddress, operation));
     };
 
     Runtime.prototype.getProperty = function (object, key, accessReceiver) {
@@ -6134,6 +6146,7 @@
         function record(address, source) { if (address) visit(address, source); }
         record(runtime.globalObject ? runtime.globalObject.heapAddress : 0, "runtime global");
         record(runtime.nativeCallbackRootHead, "registered native callbacks");
+        record(runtime.propertyOperationsAddress, "private property continuations");
         var index = 0;
         while (index < runtime.contexts.length) {
             record(runtime.contexts[index++].heapAddress, "registered context");

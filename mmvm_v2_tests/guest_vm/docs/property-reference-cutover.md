@@ -54,3 +54,14 @@ Preserve genuine cross-host/self-hosted fixed-point snapshot construction.
   479188 KiB peak RSS). The earlier old-seed construction was 86.25 s /
   478800 KiB; final build comparisons remain required after conversion work.
   General callback conversion is not implemented by this representation step.
+- Private guest operations bootstrap is implemented (contract 113). A traced
+  runtime-owned vector holds the callables; its temporary factory result is
+  rooted in the bootstrap context until publication. Constructor failure
+  destroys the partially initialized runtime. Descriptor operations and the
+  portable property-key path share the guest converter; the old duplicate
+  descriptor ToPrimitive implementation is removed.
+- Existing Node core (both operand modes), pre-cutover property integration on
+  js_min/native and standalone execution pass. Genuine old-seed snapshot
+  construction matches Node byte for byte: 83.26 s / 480204 KiB peak RSS.
+  Native opcode callback conversion and captured-write reference preparation
+  are the next step; new end-to-end fixture cases are being developed for it.

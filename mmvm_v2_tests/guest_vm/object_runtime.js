@@ -10,6 +10,8 @@
     var number = Number, isArray = Array.isArray;
     var indexedViewLength = __guestObjectPrimitives.indexedViewLength;
     var call = __guestObjectPrimitives.call;
+    var primitive = __guestObjectPrimitives.primitive;
+    var propertyKey = __guestObjectPrimitives.propertyKey;
     var indexedViewDescriptorAllowed = GuestVMIndexedViewDescriptorAllowed;
     var MAX_ARRAY_LENGTH = 4294967295;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
@@ -19,28 +21,7 @@
         }
         return value;
     }
-    function primitive(value, stringHint) {
-        if (value !== null && (typeof value === "object" || typeof value === "function")) {
-            var method = stringHint ? value.toString : value.valueOf, result;
-            if (typeof method === "function") {
-                result = call(method, value);
-                if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
-            }
-            method = stringHint ? value.valueOf : value.toString;
-            if (typeof method === "function") {
-                result = call(method, value);
-                if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
-            }
-            throw new TypeError("cannot convert object to a primitive");
-        }
-        return value;
-    }
-    function propertyKey(value) {
-        return string(primitive(value, true));
-    }
-    this.__guestStringConvert = function (value) {
-        return string(primitive(value, true));
-    };
+    this.__guestStringConvert = propertyKey;
     var substring = String.prototype.substring;
     var floor = Math.floor, ceil = Math.ceil;
     function relativeStringIndex(value, length) {

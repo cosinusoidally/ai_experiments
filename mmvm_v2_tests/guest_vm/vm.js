@@ -6,6 +6,7 @@
     var verify = root.GuestVMVerify;
     var NativeIntrinsics = root.GuestVMNativeIntrinsics;
     var HeapRecords = root.GuestVMHeapRecords;
+    var PropertyOperations = root.GuestVMPropertyOperationsRuntime;
     if (typeof module !== "undefined" && module.exports) {
         Parser = require("./parser.js");
         Compiler = require("./compiler.js");
@@ -14,6 +15,7 @@
         verify = require("./verifier.js");
         NativeIntrinsics = require("./native_intrinsics.js");
         HeapRecords = require("./heap_records.js");
+        PropertyOperations = require("./property_operations_runtime.js");
     }
 
     function own(object, key) {
@@ -74,8 +76,36 @@
                 }
             });
         }
-        this.installContextFunctions();
+        try {
+            this.installContextFunctions();
+            this.installPropertyOperations();
+        } catch (initializationError) {
+            this.destroy();
+            throw initializationError;
+        }
     }
+
+    JSRuntime.prototype.installPropertyOperations = function () {
+        var runtime = this.runtime, records = runtime.heapRecords;
+        var context = this.createContext();
+        try {
+            /* The temporary global roots the factory result across vector
+             * allocation. Publish the vector before any subsequent operation
+             * can collect; the ordinary root-owner walk covers both backends. */
+            context.run("this.__guestPrivatePropertyOperations = " + PropertyOperations.source,
+                        "<property-operations>");
+            var operations = runtime.getGlobal(context, "__guestPrivatePropertyOperations");
+            var vector = records.allocateValueVector(PropertyOperations.methods.length);
+            runtime.propertyOperationsAddress = vector;
+            if (runtime.nativeInterpreter) runtime.nativeInterpreter.setPropertyOperations(vector);
+            for (var index = 0; index < PropertyOperations.methods.length; index++) {
+                runtime.writeHeapValue(records.vectorCell(vector, index),
+                    runtime.getProperty(operations, PropertyOperations.methods[index]));
+                records.setVectorLength(vector, index + 1);
+            }
+            runtime.deleteProperty(context.globalObject, "__guestPrivatePropertyOperations", false);
+        } finally { context.destroy(); }
+    };
 
     JSRuntime.prototype.installContextFunctions = function () {
         var jsRuntime = this;
@@ -273,6 +303,10 @@
         /* Private primitives cannot recursively re-enter public conversion
          * continuations. Guest library closures capture this table once. */
         var objectPrimitives = runtime.makeObject();
+        runtime.defineBuiltinProperty(objectPrimitives, "primitive",
+            runtime.propertyOperationCallable(PropertyOperations.slots.PRIMITIVE));
+        runtime.defineBuiltinProperty(objectPrimitives, "propertyKey",
+            runtime.propertyOperationCallable(PropertyOperations.slots.KEY));
         var objectPrimitiveNames = ["defineProperty", "getOwnPropertyDescriptor", "getOwnPropertyNames", "keys"];
         for (var objectPrimitiveIndex = 0; objectPrimitiveIndex < objectPrimitiveNames.length; objectPrimitiveIndex++) {
             var objectPrimitiveName = objectPrimitiveNames[objectPrimitiveIndex];
