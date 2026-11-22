@@ -2266,22 +2266,34 @@
         if (argumentsList.length !== 5 || !Bytecode) {
             throw new SyntaxError("instruction register accessor requires bytecode schema and five arguments");
         }
-        var opcode = lowerKernelExpression(argumentsList[2], symbols);
+        var family = argumentsList[2].type === "ArrayExpression" ?
+            argumentsList[2].elements : [argumentsList[2]];
         var operand = lowerKernelExpression(argumentsList[3], symbols);
-        if (opcode.op !== "const_i32" || operand.op !== "const_i32") {
+        if (operand.op !== "const_i32" || !family.length) {
             throw new SyntaxError("instruction opcode and operand position must be constant");
         }
-        var sources = Bytecode.SOURCE_OPERANDS[opcode.value];
-        var isRegister = Bytecode.DESTINATION_OPERANDS[opcode.value] === operand.value;
-        if (sources) {
-            for (var index = 0; index < sources.length; index++) {
-                if (sources[index] === operand.value) isRegister = true;
+        var decoded = -1;
+        for (var member = 0; member < family.length; member++) {
+            var opcode = lowerKernelExpression(family[member], symbols);
+            if (opcode.op !== "const_i32") {
+                throw new SyntaxError("instruction opcode and operand position must be constant");
             }
+            var sources = Bytecode.SOURCE_OPERANDS[opcode.value];
+            var isRegister = Bytecode.DESTINATION_OPERANDS[opcode.value] === operand.value;
+            if (sources) {
+                for (var index = 0; index < sources.length; index++) {
+                    if (sources[index] === operand.value) isRegister = true;
+                }
+            }
+            if (!sources || operand.value <= 0 || !isRegister) {
+                throw new SyntaxError("instruction accessor does not name a register operand");
+            }
+            var memberDecoded = (Bytecode.NATIVE_REGISTER_MASKS[opcode.value] || 0) & (1 << operand.value);
+            if (decoded !== -1 && decoded !== memberDecoded) {
+                throw new SyntaxError("instruction family mixes register representations");
+            }
+            decoded = memberDecoded;
         }
-        if (!sources || operand.value <= 0 || !isRegister) {
-            throw new SyntaxError("instruction accessor does not name a register operand");
-        }
-        var decoded = (Bytecode.NATIVE_REGISTER_MASKS[opcode.value] || 0) & (1 << operand.value);
         return indexedAddressDescriptor({fieldValue: 0,
             stride: decoded ? "BYTECODE_REGISTER_SCALE" : "VALUE_CELL_BYTES"},
             [argumentsList[0], argumentsList[1], argumentsList[4]], symbols);

@@ -1849,12 +1849,15 @@
                 var setPropertySourceIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var setPropertyObjectCell = registerAddress +
-                    setPropertyObjectIndex * RecordLayout.VALUE_CELL_BYTES;
+                var setPropertyObjectCell = instructionRegisterCellAddress(
+                    0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
+                    FIRST_OPERAND, setPropertyObjectIndex);
                 var setPropertyKeyCell = heapBase + constantCells +
                     setPropertyKeyIndex * RecordLayout.VALUE_CELL_BYTES;
                 if (opcode === Bytecode.SET_PROPERTY) {
-                    setPropertyKeyCell = frameRegisterCellAddress(heapBase, frame, setPropertyKeyIndex);
+                    setPropertyKeyCell = instructionRegisterCellAddress(
+                        0, registerAddress, Bytecode.SET_PROPERTY,
+                        SECOND_OPERAND, setPropertyKeyIndex);
                 }
                 var setPropertyOperandsValid = 1;
                 if (load32(setPropertyObjectCell) !== RecordLayout.VALUE_TAG_REFERENCE) {
@@ -1901,8 +1904,9 @@
                         stringKeysEqualKernel(heapBase, setPropertyNamedKey,
                             arrayLengthKey) === 1) {
                     if (setArrayLengthKernel(heapBase, state, setPropertyObject,
-                            frameRegisterCellAddress(heapBase, frame,
-                                setPropertySourceIndex), arrayLengthKey) === 0) {
+                            instructionRegisterCellAddress(
+                                0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
+                                THIRD_OPERAND, setPropertySourceIndex), arrayLengthKey) === 0) {
                         return unsupportedExitKernel(heapBase, state, frame,
                             pc, opcode, initialBudget - budget);
                     }
@@ -1996,8 +2000,9 @@
                 if (setPropertyAction === PropertyWriteAction.CALL_SETTER) {
                     var setterCell = engineScratchLeftAddress(heapBase, state);
                     setValueCellReference(setterCell, setter);
-                    var setterArgumentCell = registerAddress +
-                        setPropertySourceIndex * RecordLayout.VALUE_CELL_BYTES;
+                    var setterArgumentCell = instructionRegisterCellAddress(
+                        0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
+                        THIRD_OPERAND, setPropertySourceIndex);
                     setEngineCallRejectReason(heapBase, state, CALL_REJECT_NONE);
                     setPropertyAccessorEntered = bytecodeCallKernel(
                         heapBase, state, frame, setterCell, 0, 1, -1,
@@ -2031,8 +2036,9 @@
                     pc = 0;
                 } else {
                     var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
-                    var setPropertySource = registerAddress +
-                        setPropertySourceIndex * RecordLayout.VALUE_CELL_BYTES;
+                    var setPropertySource = instructionRegisterCellAddress(
+                        0, registerAddress, [Bytecode.SET_PROPERTY, Bytecode.SET_PROPERTY_CONST],
+                        THIRD_OPERAND, setPropertySourceIndex);
                     copyValueCell(setPropertyDestination, setPropertySource);
                     pc = pc + FOUR_WORD_INSTRUCTION;
                 }
@@ -4168,12 +4174,15 @@
                     (pc + THIRD_OPERAND) * WORD_BYTES);
                 var deleteResult = deletePropertyInstructionKernel(heapBase, state, frame, pc, opcode,
                         initialBudget - budget, stringSupport,
-                        frameRegisterCellAddress(heapBase, frame,
-                                                 deleteTargetIndex),
-                        frameRegisterCellAddress(heapBase, frame,
-                                                 deleteObjectIndex),
-                        frameRegisterCellAddress(heapBase, frame,
-                                                 deleteKeyIndex),
+                        instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.DELETE_PROPERTY,
+                            FIRST_OPERAND, deleteTargetIndex),
+                        instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.DELETE_PROPERTY,
+                            SECOND_OPERAND, deleteObjectIndex),
+                        instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.DELETE_PROPERTY,
+                            THIRD_OPERAND, deleteKeyIndex),
                         programFlags(heapBase, currentProgram) &
                             PROGRAM_FLAG_STRICT, arrayLengthKey);
                 if (deleteResult !== PropertyDeleteResult.HANDLED) return deleteResult;
@@ -4190,10 +4199,12 @@
                     (pc + THIRD_OPERAND) * WORD_BYTES);
                 var deleteConstantResult = deletePropertyInstructionKernel(heapBase, state, frame, pc, opcode,
                         initialBudget - budget, stringSupport,
-                        frameRegisterCellAddress(heapBase, frame,
-                            deleteConstantTargetIndex),
-                        frameRegisterCellAddress(heapBase, frame,
-                            deleteConstantObjectIndex),
+                        instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.DELETE_PROPERTY_CONST,
+                            FIRST_OPERAND, deleteConstantTargetIndex),
+                        instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.DELETE_PROPERTY_CONST,
+                            SECOND_OPERAND, deleteConstantObjectIndex),
                         heapBase + constantCells +
                             deleteConstantKeyIndex * RecordLayout.VALUE_CELL_BYTES,
                         programFlags(heapBase, currentProgram) &
@@ -4211,12 +4222,9 @@
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
                 if (hasPropertyKernel(heapBase, state,
-                        frameRegisterCellAddress(heapBase, frame,
-                                                 inTargetIndex),
-                        frameRegisterCellAddress(heapBase, frame,
-                                                 inKeyIndex),
-                        frameRegisterCellAddress(heapBase, frame,
-                                                 inObjectIndex),
+                        instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, FIRST_OPERAND, inTargetIndex),
+                        instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, SECOND_OPERAND, inKeyIndex),
+                        instructionRegisterCellAddress(0, registerAddress, Bytecode.IN, THIRD_OPERAND, inObjectIndex),
                         arrayLengthKey, stringSupport) === 0) {
                     return unsupportedExitKernel(
                         heapBase, state, frame, pc, opcode, (initialBudget - budget));
@@ -4305,8 +4313,9 @@
                 var propertyKeyIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var propertyObjectCell = registerAddress +
-                    propertyObjectIndex * RecordLayout.VALUE_CELL_BYTES;
+                var propertyObjectCell = instructionRegisterCellAddress(
+                    0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                    SECOND_OPERAND, propertyObjectIndex);
                 var propertyKeyCell = heapBase + constantCells +
                     propertyKeyIndex * RecordLayout.VALUE_CELL_BYTES;
                 var propertyOperandsValid = 1;
@@ -4380,7 +4389,9 @@
                         propertyConstantKey, stringSupport);
                     if (constantStringKind !== 0) {
                         if (stringVirtualPropertyValueKernel(heapBase, state,
-                                bytecodeRegisterCellAddress(0, registerAddress, propertyTargetIndex),
+                                instructionRegisterCellAddress(
+                                    0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                                    FIRST_OPERAND, propertyTargetIndex),
                                 propertyObject, propertyConstantKey, stringSupport, constantStringKind) === 0) return unsupportedExitKernel(
                             heapBase, state, frame, pc, opcode, initialBudget - budget);
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
@@ -4393,8 +4404,9 @@
                         if (arrayReserved(heapBase, propertyObject) === 0) {
                             var propertyArrayVector = arrayElements(
                                 heapBase, propertyObject);
-                            var propertyLengthTarget = registerAddress +
-                                propertyTargetIndex * RecordLayout.VALUE_CELL_BYTES;
+                            var propertyLengthTarget = instructionRegisterCellAddress(
+                                0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                                FIRST_OPERAND, propertyTargetIndex);
                             setValueCellInt32(propertyLengthTarget, vectorLength(heapBase, propertyArrayVector));
                             propertyRecord = PROPERTY_FOUND_SENTINEL;
                             propertyObject = 0;
@@ -4403,14 +4415,17 @@
                 } else if (virtualPropertyObjectType ===
                            RecordLayout.HEAP_TYPE_BUFFER_VIEW) {
                     if (typedArrayMetadataGetKernel(heapBase,
-                            bytecodeRegisterCellAddress(0, registerAddress, propertyTargetIndex),
+                            instructionRegisterCellAddress(
+                                0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                                FIRST_OPERAND, propertyTargetIndex),
                             propertyObject, propertyConstantKey, stringSupport) === 1) {
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                         propertyObject = 0;
                     } else if (stringKeysEqualKernel(heapBase,
                             propertyConstantKey, arrayLengthKey) === 1) {
-                        var bufferLengthTarget = registerAddress +
-                            propertyTargetIndex * RecordLayout.VALUE_CELL_BYTES;
+                        var bufferLengthTarget = instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                            FIRST_OPERAND, propertyTargetIndex);
                         setValueCellInt32(bufferLengthTarget, bufferViewLength(heapBase, propertyObject));
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                         propertyObject = 0;
@@ -4436,8 +4451,9 @@
                                         heapBase, constantBufferBacking);
                                 if (constantArrayBuffer !== 0) {
                                     var constantBufferTarget =
-                                        registerAddress + propertyTargetIndex *
-                                        RecordLayout.VALUE_CELL_BYTES;
+                                        instructionRegisterCellAddress(
+                                            0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                                            FIRST_OPERAND, propertyTargetIndex);
                                     setValueCellReference(
                                         constantBufferTarget,
                                         constantArrayBuffer);
@@ -4452,8 +4468,9 @@
                 } else if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_STRING) {
                     if (stringKeysEqualKernel(heapBase,
                             propertyConstantKey, arrayLengthKey) === 1) {
-                        var stringLengthTarget = registerAddress +
-                            propertyTargetIndex * RecordLayout.VALUE_CELL_BYTES;
+                        var stringLengthTarget = instructionRegisterCellAddress(
+                            0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                            FIRST_OPERAND, propertyTargetIndex);
                         setValueCellInt32(stringLengthTarget, stringLength(heapBase, propertyObject));
                         propertyRecord = PROPERTY_FOUND_SENTINEL;
                         propertyObject = 0;
@@ -4527,8 +4544,9 @@
                      * kind (Object, Array, function, RegExp, Buffer, or
                      * boxed String); only an unrecognised record kind above
                      * warrants a semantic exit. */
-                    var missingPropertyTarget = registerAddress +
-                        propertyTargetIndex * RecordLayout.VALUE_CELL_BYTES;
+                    var missingPropertyTarget = instructionRegisterCellAddress(
+                        0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                        FIRST_OPERAND, propertyTargetIndex);
                     setValueCellUndefined(missingPropertyTarget);
                     propertyRecord = PROPERTY_FOUND_SENTINEL;
                 }
@@ -4542,9 +4560,9 @@
                             if (valueCellTag(0, getterCell) ===
                                     VALUE_TAG_UNDEFINED) {
                                 setValueCellUndefined(
-                                    frameRegisterCellAddress(
-                                        heapBase, frame,
-                                        propertyTargetIndex));
+                                    instructionRegisterCellAddress(
+                                        0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                                        FIRST_OPERAND, propertyTargetIndex));
                                 propertyRecord = PROPERTY_FOUND_SENTINEL;
                             } else {
                                 propertyAccessorEntered = enterPropertyGetterKernel(
@@ -4570,8 +4588,9 @@
                 }
                 if (propertyRecord !== PROPERTY_FOUND_SENTINEL) {
                     var propertySource = propertyDescriptorValueCell(0, resolvedPropertyDescriptor);
-                    var propertyTarget = registerAddress +
-                        propertyTargetIndex * RecordLayout.VALUE_CELL_BYTES;
+                    var propertyTarget = instructionRegisterCellAddress(
+                        0, registerAddress, Bytecode.GET_PROPERTY_CONST,
+                        FIRST_OPERAND, propertyTargetIndex);
                     copyValueCell(propertyTarget, propertySource);
                 }
                 if (propertyAccessorEntered === 1) {
@@ -4592,11 +4611,14 @@
                 } else pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.DEFINE_DATA_PROPERTY) {
                 if (defineLiteralDataKernel(heapBase, state,
-                    frameRegisterCellAddress(heapBase, frame,
+                    instructionRegisterCellAddress(0, registerAddress,
+                        Bytecode.DEFINE_DATA_PROPERTY, FIRST_OPERAND,
                         load32(bytecodeAddress + (pc + FIRST_OPERAND) * WORD_BYTES)),
-                    frameRegisterCellAddress(heapBase, frame,
+                    instructionRegisterCellAddress(0, registerAddress,
+                        Bytecode.DEFINE_DATA_PROPERTY, SECOND_OPERAND,
                         load32(bytecodeAddress + (pc + SECOND_OPERAND) * WORD_BYTES)),
-                    frameRegisterCellAddress(heapBase, frame,
+                    instructionRegisterCellAddress(0, registerAddress,
+                        Bytecode.DEFINE_DATA_PROPERTY, THIRD_OPERAND,
                         load32(bytecodeAddress + (pc + THIRD_OPERAND) * WORD_BYTES))) !== 1) {
                     return unsupportedExitKernel(heapBase, state, frame, pc,
                         opcode, initialBudget - budget);
@@ -4612,12 +4634,15 @@
                 var accessorCallableIndex = load32(
                     bytecodeAddress +
                     (pc + THIRD_OPERAND) * WORD_BYTES);
-                var accessorObjectCell = registerAddress +
-                    accessorObjectIndex * RecordLayout.VALUE_CELL_BYTES;
-                var accessorKeyCell = registerAddress +
-                    accessorKeyIndex * RecordLayout.VALUE_CELL_BYTES;
-                var accessorCallableCell = registerAddress +
-                    accessorCallableIndex * RecordLayout.VALUE_CELL_BYTES;
+                var accessorObjectCell = instructionRegisterCellAddress(
+                    0, registerAddress, [Bytecode.DEFINE_GETTER, Bytecode.DEFINE_SETTER],
+                    FIRST_OPERAND, accessorObjectIndex);
+                var accessorKeyCell = instructionRegisterCellAddress(
+                    0, registerAddress, [Bytecode.DEFINE_GETTER, Bytecode.DEFINE_SETTER],
+                    SECOND_OPERAND, accessorKeyIndex);
+                var accessorCallableCell = instructionRegisterCellAddress(
+                    0, registerAddress, [Bytecode.DEFINE_GETTER, Bytecode.DEFINE_SETTER],
+                    THIRD_OPERAND, accessorCallableIndex);
                 if (valueCellTag(0, accessorObjectCell) !==
                         RecordLayout.VALUE_TAG_REFERENCE) {
                     return unsupportedExitKernel(

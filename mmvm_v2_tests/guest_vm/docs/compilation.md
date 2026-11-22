@@ -357,6 +357,13 @@ before `kernel_compiler.js` when using this accessor; CommonJS loads that
 dependency automatically. Legacy address accessors remain available
 while instruction families migrate; they do not perform this validation.
 
+A shared branch may pass a literal array of constant opcodes. Every family
+member must declare that register operand and the same representation in the
+private execution view, even when the current build does not enable predecode.
+The array is compiler metadata only; generated code performs no allocation or
+opcode-family test. Incompatible families are rejected rather than selecting
+one representative instruction and assuming the others match.
+
 After NativeInterpreter consumes those results, diagnostic IR is discarded on
 both execution backends unless `retainNativeBuildIR` is enabled. The JS path
 keeps its compiled functions/source and cross-build x86 bytes; the native path

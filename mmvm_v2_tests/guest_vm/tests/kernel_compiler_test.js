@@ -12,7 +12,9 @@
             return instructionRegisterCellAddress(base, registers,
                 Instruction.GET_PROPERTY, 2, operand) +
                 instructionRegisterCellAddress(base, registers,
-                    Instruction.SET_PROPERTY, 2, operand);
+                    Instruction.SET_PROPERTY, 2, operand) +
+                instructionRegisterCellAddress(base, registers,
+                    [Instruction.SET_PROPERTY, Instruction.SET_PROPERTY_CONST], 1, operand);
         }
         /* One mixed-instruction fixture checks both execution views through
          * both backends; the store must remain canonical in predecode mode. */
@@ -24,7 +26,7 @@
             var operandJS = new JSBackend().compile(operandIR);
             var operandX86 = new X86Backend().compile(operandIR);
             try {
-                var expectedAddress = 2 * (100 + 200) + 3 * (operandScale + cellBytes);
+                var expectedAddress = 3 * (100 + 200) + 3 * (operandScale + 2 * cellBytes);
                 if (operandJS.fn(null, 100, 200, 3) !== expectedAddress ||
                         operandX86.fn && operandX86.fn(100, 200, 3) !== expectedAddress) {
                     throw new Error("instruction register representation differs between backends");
@@ -40,6 +42,15 @@
             constantNamespaces: {Instruction: Instruction}}); }
         catch (invalidOperandError) { invalidOperandRejected = invalidOperandError instanceof SyntaxError; }
         if (!invalidOperandRejected) throw new Error("constant-pool operand accepted as a register");
+        function incompatibleFamilyKernel(base, registers, operand) {
+            return instructionRegisterCellAddress(base, registers,
+                [Instruction.GET_PROPERTY, Instruction.SET_PROPERTY], 2, operand);
+        }
+        invalidOperandRejected = false;
+        try { compiler.compile(incompatibleFamilyKernel, {
+            constantNamespaces: {Instruction: Instruction}}); }
+        catch (familyError) { invalidOperandRejected = familyError instanceof SyntaxError; }
+        if (!invalidOperandRejected) throw new Error("mixed instruction register representations accepted");
         /* Compare normal JavaScript with both backends, rather than asserting
          * a particular private IR shape for the loop implementation. */
         var ChecksumLayout = {COLUMNS: 3, FINAL_ROWS: 2};
