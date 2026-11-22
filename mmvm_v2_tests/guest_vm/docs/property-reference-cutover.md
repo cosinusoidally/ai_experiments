@@ -13,6 +13,25 @@ right operand before key conversion. Delete preserves the caller's strictness.
 Callbacks may mutate objects, throw arbitrary values, reenter the VM or cause
 collection. Their progress and live values must be ordinary traced guest frames.
 
+## Follow-up sequence
+
+1. Investigate build costs before changing runtime behavior.
+2. Prepare ES5.1 write references before RHS evaluation, retaining their key.
+3. Enter shared guest conversion continuations from native property operations.
+4. Extract property execution helpers and delete competing paths, preserving
+   explicit completion/frame-entry/exception/allocation outcomes.
+
+2026-11-22 build investigation: the existing ES3 phase profiler now accepts
+`--hashing`. A serial instrumented js_min snapshot build reports 7171
+`Records.stringHash` calls, 147 ms combined (48 ms maximum, including first-use
+kernel compilation); 60 `readString` calls take 3 ms. Kernel preparation takes
+8751 ms; standalone preparation is 65024 ms, versus the earlier 64102 ms and
+the more recent 69701 ms observations. Hash-call cost is therefore far too
+small to explain the eight-second whole-build difference. Keep one shared
+hash implementation; do not add an unmeasured host-text fast path. These
+inclusive instrumented times locate costs, not establish throughput parity.
+Receipt: ignored `artifacts/property-build-hash-profile.log`.
+
 ## Execution design
 
 - Property register access is schema-checked, including shared instruction

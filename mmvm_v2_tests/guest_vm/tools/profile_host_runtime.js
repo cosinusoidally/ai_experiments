@@ -1,6 +1,7 @@
 /* Inclusive host phases around the real guest runner. ES3-compatible.
  * Run from mmvm_v2_tests with js_min or Node, followed by guest_runner's
- * normal options/program, optionally preceded by --frontend for build phases.
+ * normal options/program, optionally preceded by --frontend for build phases
+ * or --hashing for the narrower string/hash and kernel-preparation profile.
  * Wrappers add overhead: this locates costs, not
  * throughput. Noncapturing wrappers avoid Firefox 1 activation/FFI hazards. */
 var GuestHostPhaseNode = typeof module !== "undefined" && module.exports;
@@ -8,7 +9,9 @@ var GuestHostPhaseNode = typeof module !== "undefined" && module.exports;
  * flag here leaves the ordinary guest_runner command line unchanged. */
 var GuestHostPhaseFrontend = GuestHostPhaseNode ?
     process.argv[2] === "--frontend" : arguments[0] === "--frontend";
-if (GuestHostPhaseFrontend) {
+var GuestHostPhaseHashing = GuestHostPhaseNode ?
+    process.argv[2] === "--hashing" : arguments[0] === "--hashing";
+if (GuestHostPhaseFrontend || GuestHostPhaseHashing) {
     if (GuestHostPhaseNode) process.argv.splice(2, 1);
     else arguments.shift();
 }
@@ -64,7 +67,11 @@ function GuestHostPhaseReport() {
     }
 }
 GuestHostPhaseRoot.GuestHostPhaseReport = GuestHostPhaseReport;
-if (GuestHostPhaseFrontend) {
+if (GuestHostPhaseHashing) {
+    GuestHostPhaseWrap(GuestHostPhaseRecords.prototype, "records", ["stringHash", "readString"]);
+    var hashingCompiler = GuestHostPhaseNode ? require("../aot/kernel_compiler.js") : GuestVMKernelCompiler;
+    GuestHostPhaseWrap(hashingCompiler.prototype, "kernel", ["prepareSource"]);
+} else if (GuestHostPhaseFrontend) {
     var frontendParser = GuestHostPhaseNode ? require("../parser.js") : GuestVMParser;
     var frontendCompiler = GuestHostPhaseNode ? require("../compiler.js") : GuestVMCompiler;
     GuestHostPhaseWrap(frontendParser.prototype, "parser", ["parseProgram"]);
