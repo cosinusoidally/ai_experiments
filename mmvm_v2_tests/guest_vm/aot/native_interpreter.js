@@ -158,6 +158,7 @@
      * unlike observable exits this never returns to the embedder. */
     var NATIVE_INTERNAL_RESUME = 4;
     var PropertyInstructionResult = {COMPLETED: 1, FRAME_ENTERED: 2};
+    var OwnDataProbeResult = {NEEDS_FULL_LOOKUP: 0, COMPLETED: 1, OWN_ENTRY_ABSENT: 2};
     var OP_ADD_INT32 = Bytecode.ADD_INT32;
     var OP_SUBTRACT_INT32 = Bytecode.SUBTRACT_INT32;
     var OP_TO_INT32 = Bytecode.TO_INT32;
@@ -1218,7 +1219,7 @@
                     setValueCellReference(normalizedGetKey, namedGetKey);
                     var namedGetResult = executeNamedPropertyGetKernel(heapBase, state, frame, pc, opcode,
                         initialBudget - budget, arrayGetObjectCell, normalizedGetKey, arrayGetTarget,
-                        stringSupport, arrayLengthKey, arrayPrototype);
+                        stringSupport, arrayLengthKey, arrayPrototype, OwnDataProbeResult.NEEDS_FULL_LOOKUP);
                     if (namedGetResult === PropertyInstructionResult.FRAME_ENTERED) {
                         return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
                     }
@@ -4000,12 +4001,14 @@
                     bytecodePayloadWord(0, bytecodeAddress, pc + THIRD_OPERAND) * RecordLayout.VALUE_CELL_BYTES;
                 var constantGetTarget = instructionRegisterCellAddress(0, registerAddress, Bytecode.GET_PROPERTY_CONST,
                     FIRST_OPERAND, bytecodePayloadWord(0, bytecodeAddress, pc + FIRST_OPERAND));
-                if (tryOwnDataPropertyGetKernel(heapBase, state, constantGetObject, constantGetKey, constantGetTarget) !== 0) {
+                var constantOwnProbe = tryOwnDataPropertyGetKernel(heapBase, state,
+                    constantGetObject, constantGetKey, constantGetTarget);
+                if (constantOwnProbe === OwnDataProbeResult.COMPLETED) {
                     pc = pc + FOUR_WORD_INSTRUCTION;
                 } else {
                 var constantGetResult = executeNamedPropertyGetKernel(heapBase, state, frame, pc, opcode,
                     initialBudget - budget, constantGetObject, constantGetKey, constantGetTarget,
-                    stringSupport, arrayLengthKey, arrayPrototype);
+                    stringSupport, arrayLengthKey, arrayPrototype, constantOwnProbe);
                 if (constantGetResult === PropertyInstructionResult.FRAME_ENTERED) {
                     return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
                 }
@@ -5771,15 +5774,15 @@
      * wrapper data; virtual properties without entries miss to the full path.
      * It never invokes user code. */
     function tryOwnDataPropertyGetKernel(heapBase, state, receiver, keyCell, target) {
-        if (valueCellTag(0, receiver) !== RecordLayout.VALUE_TAG_REFERENCE) return 0;
+        if (valueCellTag(0, receiver) !== RecordLayout.VALUE_TAG_REFERENCE) return OwnDataProbeResult.NEEDS_FULL_LOOKUP;
         var object = valueCellReference(0, receiver);
-        if (recordType(heapBase, object) !== RecordLayout.HEAP_TYPE_OBJECT) return 0;
+        if (recordType(heapBase, object) !== RecordLayout.HEAP_TYPE_OBJECT) return OwnDataProbeResult.NEEDS_FULL_LOOKUP;
         var key = valueCellReference(0, keyCell);
         var entry = findCachedOwnObjectPropertyKernel(heapBase, state, object, key);
-        if (entry === 0) return 0;
-        if ((ownPropertyEntryAttributesKernel(heapBase, object, entry) & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return 0;
+        if (entry === 0) return OwnDataProbeResult.OWN_ENTRY_ABSENT;
+        if ((ownPropertyEntryAttributesKernel(heapBase, object, entry) & RecordLayout.PROPERTY_ATTRIBUTE_ACCESSOR) !== 0) return OwnDataProbeResult.NEEDS_FULL_LOOKUP;
         copyValueCell(target, ownPropertyEntryValueCellKernel(heapBase, object, entry));
-        return 1;
+        return OwnDataProbeResult.COMPLETED;
     }
 
     /* The write counterpart only accepts an existing writable own data
@@ -5803,7 +5806,7 @@
      * Other returns retain the native exception/allocation/diagnostic protocol. */
     function executeNamedPropertyGetKernel(heapBase, state, frame, pc, opcode,
             instructions, propertyObjectCell, propertyKeyCell, propertyTargetCell,
-            stringSupport, arrayLengthKey, arrayPrototype) {
+            stringSupport, arrayLengthKey, arrayPrototype, ownProbe) {
         var currentContext = frameContext(heapBase, frame);
         var registerAddress = frameRegisterCellAddress(heapBase, frame, 0);
         var bytecodeAddress = 0;
@@ -5861,7 +5864,8 @@
         var propertyOwner = propertyReceiver;
         var propertyReceiverStorage = 0;
         var propertyCacheIndex = 0;
-        if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT) {
+        if (virtualPropertyObjectType === RecordLayout.HEAP_TYPE_OBJECT &&
+                ownProbe !== OwnDataProbeResult.OWN_ENTRY_ABSENT) {
             propertyCacheIndex =
                 stringKeyHashKernel(heapBase, propertyConstantKey) &
                 (RecordLayout.PROPERTY_CACHE_ENTRY_COUNT - 1);
@@ -5959,6 +5963,13 @@
                 propertyObject = load32(
                     constantStringPrototypeCell + RecordLayout.VALUE_CELL_LOW);
             }
+        }
+        /* A successful absence probe is valid until the next callback/GC.
+         * None has run here. Wrapper virtual properties still had priority
+         * above; only the already-searched ordinary own-entry list is skipped. */
+        if (ownProbe === OwnDataProbeResult.OWN_ENTRY_ABSENT &&
+                propertyObject === propertyReceiver) {
+            propertyObject = objectPrototypeReferenceKernel(heapBase, propertyObject);
         }
         while (propertyObject !== 0) {
             if (objectReferenceIsObjectKernel(heapBase, propertyObject) === 0) {
@@ -13746,6 +13757,7 @@
     }
 
     var stringKeysEqualKernel = StringKeyKernels.stringKeysEqualKernel;
+    var equalLengthStringKeysEqualKernel = StringKeyKernels.equalLengthStringKeysEqualKernel;
     var stringKeyHashKernel = StringKeyKernels.stringKeyHashKernel;
     var initializeUnhashedStringKernel = StringKeyKernels.initializeUnhashedStringKernel;
     var computeStringKeyHashKernel = StringKeyKernels.computeStringKeyHashKernel;
@@ -18423,6 +18435,7 @@
             reservePortableRecordKernel: reservePortableRecordKernel,
             initializePortableRecordKernel: initializePortableRecordKernel,
             stringKeysEqualKernel: stringKeysEqualKernel,
+            equalLengthStringKeysEqualKernel: equalLengthStringKeysEqualKernel,
             stringIntrinsicKernel: stringIntrinsicKernel,
             stringConstructorKernel: stringConstructorKernel,
             stringCharacterCodeUnit: stringCharacterCodeUnit,
@@ -18607,6 +18620,7 @@
                 constantNamespaces: {
                     PropertyOperation: PropertyOperations.slots,
                     PropertyInstructionResult: PropertyInstructionResult,
+                    OwnDataProbeResult: OwnDataProbeResult,
                     HeapSizePolicy: HeapSizePolicy,
                     DescriptorFields: PropertySemantics.namespaces.DescriptorFields,
                     PropertyAttributes: PropertySemantics.namespaces.PropertyAttributes,

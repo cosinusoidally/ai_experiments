@@ -117,6 +117,12 @@ logs and timings. Source snapshots remain moved aside during executable gates.
 
 ## Execution design
 
+- The constant Get probe returns a named `OwnDataProbeResult`: completed,
+  needs full lookup, or ordinary own entry absent. A confirmed absence is
+  carried into the shared Get helper, avoiding a second receiver search.
+  No callback or collection occurs between probe and use. Wrapper virtual
+  properties still take priority; prototypes, accessors and exotics retain
+  the normal descriptor path. No descriptor pointer is cached across a call.
 - Property register access is schema-checked, including shared instruction
   branches. A constant opcode family is accepted only when every member has
   the named register operand and the same execution-view representation.

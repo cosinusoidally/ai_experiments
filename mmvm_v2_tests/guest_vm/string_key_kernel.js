@@ -6,8 +6,16 @@
 (function (root) {
     function stringKeysEqualKernel(heapBase, left, right) {
         if (left === right) return 1;
+        if (stringLength(heapBase, left) !== stringLength(heapBase, right)) return 0;
+        return equalLengthStringKeysEqualKernel(heapBase, left, right);
+    }
+
+    /* Keep identity/length rejection separate from content traversal. The
+     * normal bounded inliner can reject unequal names without setting up the
+     * rope/view traversal's locals and native frame. Both backends still use
+     * the same exact comparison for equal-length, distinct references. */
+    function equalLengthStringKeysEqualKernel(heapBase, left, right) {
         var length = stringLength(heapBase, left);
-        if (length !== stringLength(heapBase, right)) return 0;
         if (length === 0) return 1;
         if (stringKeyHashKernel(heapBase, left) !==
                 stringKeyHashKernel(heapBase, right)) return 0;
@@ -175,6 +183,7 @@
 
     var functions = {
         stringKeysEqualKernel: stringKeysEqualKernel,
+        equalLengthStringKeysEqualKernel: equalLengthStringKeysEqualKernel,
         initializeUnhashedStringKernel: initializeUnhashedStringKernel,
         stringKeyHashKernel: stringKeyHashKernel,
         computeStringKeyHashKernel: computeStringKeyHashKernel,

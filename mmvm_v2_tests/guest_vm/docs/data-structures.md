@@ -203,6 +203,14 @@ Its `stringKeysEqualKernel` handles code-unit equality and
 `Records.findPropertyStorageEntry` provides the corresponding portable
 property-lookup path. Hash equality alone is never string equality.
 
+The identity/length rejection in `stringKeysEqualKernel` is a small kernel
+function eligible for the ordinary bounded inliner. Distinct equal-length
+references enter `equalLengthStringKeysEqualKernel`, which owns hash checks,
+flat/view comparison and rope traversal. This separation avoids setting up
+the larger traversal frame for a simple rejection; it does not change key
+identity, hashing, encodings or exact collision comparison. The same functions
+serve property-storage compilation and both interpreter backends.
+
 [`string_hash.js`](../string_hash.js) owns the FNV offset basis, prime and
 exact `stringHashStep` arithmetic. `Records.stringHashStep` remains an alias
 for compiler dependency wiring, not a second implementation. Both portable
