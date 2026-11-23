@@ -1,5 +1,18 @@
 # Test262 status
 
+2026-11-23, array/number family (`794a89d`, contract 121):
+
+- Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
+  3292 passed / zero failures / zero timeouts / zero unrun**. No corpus,
+  harness, limit or exclusion changes. Source snapshot moved aside.
+- Harness **371003.426 ms**, summed tests **349322.603 ms**; process
+  **371.68 s / 512740 KiB**. Preceding checkpoint: 377.86 s / 512632 KiB.
+  This is a 1.6% shorter individual observation, not a controlled speedup.
+- Focused historical Array/Number acceptance gains all 20 targeted
+  Node-passing files. The full historical ECMA run is separate and is not
+  implied by this Test262 result.
+- Receipts: ignored `artifacts/ecma-arrays-accept-test262.log` and `.time`.
+
 2026-11-23, shared RegExp/String family (`81d2238`, contract 119):
 
 - Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
