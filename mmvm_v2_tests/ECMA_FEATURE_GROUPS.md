@@ -1,6 +1,6 @@
 # ECMA parity work by feature family
 
-## Batch 2 in progress: arrays and number conversion, 2026-11-23
+## Batch 2: arrays and number conversion, 2026-11-23
 
 The number checkpoint (contract 120) passes all 17 selected files, including
 all nine original number-family Node-only gaps, with no lost pass in that
@@ -99,6 +99,22 @@ not retained; the shared policy remains authoritative. An initial fixed-image
 repeat passes both switch files in **2.33/2.30 s**, rather than timing out at
 10 seconds; the pre-batch observations were **2.01/2.01 s**. Final acceptance
 and build identity must use the corrected image, not contract 121.
+
+### Completed whole-ECMA acceptance (`d5cac4c`, contract 122)
+
+- **1041 pass / 288 fail / four existing skips / zero unrun**, 1333 selected
+  and 1329 executed. Failures include the unchanged **39** watchdog timeouts.
+- Compared with `81d2238`: **20 gained passes, zero lost passes**, no missing
+  or extra filenames. All eleven Array and nine Number targets listed above
+  are gains also passing Node. The per-file matrix appends the new column.
+- Node overlap: **1010 common / 208 Node-only / 31 guest-only**; the
+  outside-Date gap decreases **147 -> 127**, Date gap remains **81**.
+- Process **607.13 s / 464160 KiB**, harness **605263.755 ms**, versus the
+  preceding 619.50 s / 463748 KiB. These individual observations do not
+  establish a controlled speedup.
+- The two large switch files pass in the full run at **2.28/2.15 s**. This
+  corrects the intermediate policy's lost passes under unchanged limits.
+- Receipt: ignored `artifacts/ecma-arrays-budget-ecma.log` and `.time`.
 
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,

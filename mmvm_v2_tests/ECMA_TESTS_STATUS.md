@@ -2,6 +2,36 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Array/number feature-family batch, 2026-11-23
+
+- Guest `d5cac4c` / contract 122, full serial `TZ=UTC`: **1041 passed /
+  288 failed (39 timeouts included) / four configured skips / zero not run**;
+  1333 selected / 1329 executed. Exact comparison with `81d2238`: **20 gained
+  passes / zero lost passes / zero missing or extra files**. Every gain also
+  passes the retained Node UTC reference; no guest-only gain offsets a gap.
+- Exact Node overlap: **1010 common passes / 208 Node-only passes / 31
+  guest-only passes**. Date-directory gap remains **81**; outside Date the
+  gap falls **147 -> 127**, matching **917/1044** specific non-Date Node passes.
+  Corpus, harness, limits and exclusions are unchanged.
+- All eleven targeted Array and nine Number/conversion gaps are fixed. Shared
+  changes separate uint32 logical array length from dense storage, preserve
+  sparse descriptor/truncation semantics, and unify parsing/decimal rounding.
+  See [feature inventory and acceptance](ECMA_FEATURE_GROUPS.md),
+  [array storage](guest_vm/docs/data-structures.md#arrays-and-arguments), and
+  [number conversion](guest_vm/docs/number-conversion.md).
+- Per-tree pass/fail: ecma **488/132**, ecma_2 **153/19**,
+  ecma_3 **190/35**, ecma_5 **210/102**; timeouts **11/0/1/27**. Harness
+  **605263.755 ms**, process **607.13 s / 464160 KiB**; preceding 619.50 s /
+  463748 KiB. This is a 2.0% shorter individual observation, not a controlled
+  throughput estimate.
+- An intermediate density-only write policy caused two large switch tests
+  to time out. The initial whole run was stopped, the common storage policy
+  was fixed forward, and both pass in this completed rerun (**2.28/2.15 s**).
+  No timeout, skip or expected result was changed to recover the passes.
+- Per-file history appends `d5cac4c` in [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv).
+  Receipts: ignored `artifacts/ecma-arrays-budget-ecma.log` and `.time`.
+  Broader final-image acceptance is recorded separately as it completes.
+
 ### RegExp/String feature-family batch, 2026-11-23
 
 - Guest `81d2238` / contract 119, full serial `TZ=UTC`: **1021 passed /
