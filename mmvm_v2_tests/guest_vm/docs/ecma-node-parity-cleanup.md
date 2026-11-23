@@ -1,5 +1,12 @@
 # Standard-semantics cleanup toward the Node-passing ECMA set
 
+The subsequent RegExp/String family cutover is documented in
+[the feature inventory](../../ECMA_FEATURE_GROUPS.md) and
+[the implementation reference](regexp-and-string.md). Its full checkpoint
+`81d2238` adds **20 specific Node-parity passes / zero lost passes**;
+the outside-Date gap falls **167 -> 147**. The counts below retain the
+earlier enumeration checkpoint rather than silently rewriting history.
+
 ## Target and exclusions
 
 The target is each specific historical ECMA corpus file which passes the

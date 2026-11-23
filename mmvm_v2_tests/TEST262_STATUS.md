@@ -1,5 +1,24 @@
 # Test262 status
 
+2026-11-23, shared RegExp/String family (`81d2238`, contract 119):
+
+- Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
+  3292 passed / zero failures / zero timeouts / zero unrun**. Corpus,
+  harness and limits are unchanged.
+- Harness **377202.398 ms**, summed tests **360566.317 ms**; process
+  **377.86 s / 512632 KiB**. Previous checkpoint: 330.24 s / 512456 KiB.
+  This is a **14.4% whole-run timing regression**, not unchanged performance.
+  Eager RegExp literal validation now constructs/discards complete matcher
+  syntax trees; a validation-only grammar sink is a candidate improvement,
+  but it must share grammar decisions rather than become another parser.
+- The first broad attempt exposed two escaped-code-unit regressions caused
+  by rejecting legacy identity/control escapes at parse time. They were
+  fixed in the shared grammar, not excluded or relabeled. Both exhaustive
+  files pass separately and in this completed full rerun.
+- Receipts: ignored `artifacts/ecma-groups-final-test262.log` and `.time`,
+  plus `ecma-groups-final-escapes.log`. The separate two-file check takes
+  167.53 seconds; it is not included in the whole-suite time above.
+
 2026-11-22, standard enumeration checkpoint (`a80c661`, contract 118):
 
 - Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /

@@ -2,6 +2,40 @@
 
 ## Current target: all Node-passing files except Date first
 
+### RegExp/String feature-family batch, 2026-11-23
+
+- Guest `81d2238` / contract 119, full serial `TZ=UTC`: **1021 passed /
+  308 failed (39 timeouts included) / four configured skips / zero not run**;
+  1333 selected / 1329 executed. Exact comparison with `a80c661`: **21 gained
+  passes / zero lost passes / zero missing or extra files**.
+- **20 gains pass the retained Node UTC reference**; one additional guest-only
+  pass is `ecma/String/15.5.4.10-1.js`. Exact parity is now **990 common passes /
+  228 Node-only passes / 31 guest-only passes**, versus 970/248/30. The
+  Date-directory gap stays **81**; outside Date the gap falls **167 -> 147**,
+  matching **897/1044** specific non-Date Node passes. Guest-only passes do
+  not offset Node gaps. Corpus, harness, limits and exclusions are unchanged.
+- Shared fixes cover repeated-capture reset, split boundaries/separator
+  state, replacement references, speculative quantifier parsing, constructor
+  and literal validation, and callback-capable String conversion. See the
+  [feature inventory and acceptance](ECMA_FEATURE_GROUPS.md) and
+  [implementation reference](guest_vm/docs/regexp-and-string.md).
+- Per-tree pass/fail: ecma **477/143**, ecma_2 **153/19**,
+  ecma_3 **186/39**, ecma_5 **205/107**; timeouts **11/0/1/27**. Harness
+  **619193.775 ms**, process **619.50 s / 463748 KiB**; preceding 608.84 s /
+  463944 KiB. No overall ECMA speedup is claimed.
+- Test262 remains **3292/3292**, but takes **377.86 s** versus 330.24 s:
+  eager literal validation introduces a documented timing regression. The
+  first broad attempt found two escape-grammar regressions; the shared fix
+  passes both exhaustive files and the complete rerun. See
+  [Test262 status](TEST262_STATUS.md).
+- Cross-host and genuine self-build snapshot identity, all seven standalone
+  program gates, all eleven demo/server gates and bounded structural GC pass.
+  Self-build **82.27 s**, js_min build **93.28 s**. Selected Octane comparisons
+  are mixed, not an all-suite performance-parity claim. Full receipts and
+  exact image identity are in the feature inventory.
+- The [per-file matrix](ECMA_TEST_RESULTS.tsv) appends `81d2238` and preserves
+  every historical column. Ignored logs: `artifacts/ecma-groups-final-ecma.*`.
+
 ### Standard enumeration and Node filename-parity checkpoint, 2026-11-22
 
 - Guest `a80c661` / contract 118, full serial `TZ=UTC` run: **1000 passed /
