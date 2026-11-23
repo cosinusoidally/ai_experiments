@@ -1,5 +1,20 @@
 # Test262 status
 
+2026-11-23, profiled named-index lookup (`af3c405`, contract 124):
+
+- Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
+  3292 passed / zero failures / zero timeouts / zero unrun**. Source snapshot
+  absent; corpus, harness and limits unchanged.
+- Harness **359431.241 ms**, summed tests **341090.155 ms**; process
+  **360.07 s / 512644 KiB**. Contract 122 was 359.58 s / 513840 KiB;
+  pre-batch contract 119 was 377.86 s / 512632 KiB. These individual timings
+  do not demonstrate a controlled speedup; there is no material increase
+  between the two array/number checkpoints.
+- The lookup follow-up removes redundant named-descriptor scans and repeated
+  numeric spelling work. Node/js_min/genuine self-build snapshots match;
+  bounded structural GC and all standalone program/demo/server gates pass.
+- Receipts: ignored `artifacts/ecma-arrays-accepted-test262.log` and `.time`.
+
 2026-11-23, final bounded Array storage policy (`d5cac4c`, contract 122):
 
 - Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
