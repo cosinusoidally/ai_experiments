@@ -53,7 +53,7 @@ exports.compile = function (source, filename, options) {
             options && options.finishFunction)).compile(ast));
 };
 
-function adoptProgramDescriptor(program, contextAnchor) {
+function adoptProgramDescriptor(program, contextAnchor, consumeLocations) {
     if (typeof __guestVMProgramCreate !== "function") {
         throw new Error("self-hosted program adoption is unavailable");
     }
@@ -86,7 +86,7 @@ function adoptProgramDescriptor(program, contextAnchor) {
             !!program.strict,
             !!program.evalCode,
             contextAnchor,
-            program.source || null, programDebugData(program));
+            program.source || null, programDebugData(program, consumeLocations));
         retainAdoptionRoot(callable);
         try {
             if (!bindingRegisters) {
@@ -106,7 +106,7 @@ function adoptProgramDescriptor(program, contextAnchor) {
                 if (constant && typeof constant === "object" &&
                     constant.code && constant.constants) {
                     constant = adoptProgramDescriptor(
-                        constant, contextAnchor);
+                        constant, contextAnchor, consumeLocations);
                 }
                 __guestVMProgramSetConstant(callable, index, constant);
                 index++;
@@ -141,17 +141,30 @@ function adoptProgramDescriptor(program, contextAnchor) {
 
 var selfHostedAdoptionRoots = [];
 
-/* A traced, compact statement map; no retained AST or source-position graph.
- * Triples are bytecode PC, source line, source column. */
-function programDebugData(program) {
+/* A traced, paged statement map; no retained AST or source-position graph.
+ * Keep bounded allocations through adoption, not just during compilation.
+ * Flattening these triples recreated a large tagged vector precisely when
+ * the nonmoving heap is fragmented by the frontend's temporary objects. */
+function programDebugData(program, consumeLocations) {
     var location = program.location || {};
     var result = [];
     result[ProgramDebugLayout.FILENAME] = program.filename || location.filename || "<unknown>";
     result[ProgramDebugLayout.DEFAULT_LINE] = location.line || 1;
     result[ProgramDebugLayout.DEFAULT_COLUMN] = location.column || 1;
+    var pages = [], page = null, count = 0;
+    result[ProgramDebugLayout.LOCATIONS] = pages;
     SelfHostedCompiler.visitSourceLocations(program.sourceLocations, function (pc, at) {
-        result.push(pc, at.line, at.column);
+        if ((count & ProgramDebugLayout.PAGE_LOCATION_MASK) === 0) {
+            page = [];
+            pages.push(page);
+        }
+        page.push(pc, at.line, at.column);
+        count++;
     });
+    result[ProgramDebugLayout.LOCATION_COUNT] = count;
+    /* Only the private consuming frontend transfers ownership. Public
+     * adoptProgram callers may keep inspecting their descriptors. */
+    if (consumeLocations) program.sourceLocations = null;
     return result;
 }
 
@@ -180,10 +193,10 @@ exports.compileExecutable = function (source, filename, contextAnchor,
          * callback may retain its descriptor, so scratch reuse is opt-in. */
         wordArena: SelfHostedCompiler.createWordArena(source.length),
         finishFunction: function (nestedProgram) {
-            return adoptProgramDescriptor(selfHostedVerify(nestedProgram), contextAnchor);
+            return adoptProgramDescriptor(selfHostedVerify(nestedProgram), contextAnchor, true);
         }
     });
-    var executable = adoptProgramDescriptor(program, contextAnchor);
+    var executable = adoptProgramDescriptor(program, contextAnchor, true);
     var globalDeclarations = program.globalDeclarations || [];
     /* The returned closure needs the adopted callable and declaration names,
      * not the compiler's temporary descriptor graph and numeric builders. */

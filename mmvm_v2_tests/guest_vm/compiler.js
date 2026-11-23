@@ -333,6 +333,10 @@
          * Its parent then retains only the executable template rather than
          * every child's temporary bytecode and analysis arrays. */
         if (this.finishFunction) {
+            /* The completed descriptor owns this map now. Do not keep a
+             * second edge from the suspended compiler while its sink turns
+             * locations into persistent debug pages and allocates code. */
+            nested.sourceLocations = null;
             var adopted = this.finishFunction(program);
             nested.code.releaseWorkspace(nested.wordArena);
             return adopted;

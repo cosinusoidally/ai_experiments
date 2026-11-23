@@ -297,6 +297,20 @@
                 }
             }
             output("operands: " + operands.join(", "));
+            if (opcode === bytecodes.CALL || opcode === bytecodes.CONSTRUCT) {
+                var callConstants = records.programConstants(program);
+                var argumentIndex = operands[opcode === bytecodes.CALL ? 3 : 2];
+                var argumentReference = inspectedHeap.recordType(callConstants) === Heap.Types.CONSTANT_POOL ?
+                    records.constantPoolLow(callConstants, argumentIndex) :
+                    cells.referenceAddressAt(records.vectorCell(callConstants, argumentIndex));
+                if (inspectedHeap.recordType(argumentReference) === Heap.Types.INTEGER_VECTOR) {
+                    for (var argument = 0; argument < records.integerVectorLength(argumentReference); argument++) {
+                        var argumentRegister = records.integerVectorValue(argumentReference, argument);
+                        output("call argument " + argument + " register " + argumentRegister + ": " +
+                            describeCell(records.frameRegisterCell(frame, argumentRegister)));
+                    }
+                }
+            }
             if (opcode === bytecodes.GET_PROPERTY_CONST || opcode === bytecodes.SET_PROPERTY_CONST) {
                 var constants = records.programConstants(program);
                 if (inspectedHeap.recordType(constants) === Heap.Types.VALUE_VECTOR) {

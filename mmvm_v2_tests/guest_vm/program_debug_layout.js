@@ -1,8 +1,14 @@
-/* Shared compact guest-program source map. All positions are UTF-16 based. */
+/* Shared guest-program source map. All positions are UTF-16 based.
+ * Header: filename, default line, default column, pages, location count.
+ * Each page is an ordinary traced array of up to PAGE_LOCATIONS triples:
+ * bytecode PC, line, column. No geometrically growing flat triple buffer. */
 (function (root) {
     var layout = {FILENAME: 0, DEFAULT_LINE: 1, DEFAULT_COLUMN: 2,
         LOCATIONS: 3, LOCATION_PC: 0, LOCATION_LINE: 1,
-        LOCATION_COLUMN: 2, LOCATION_WORDS: 3, MAX_FRAMES: 64,
+        LOCATION_COLUMN: 2, LOCATION_WORDS: 3,
+        LOCATION_COUNT: 4, PAGE_LOCATION_SHIFT: 8,
+        PAGE_LOCATIONS: 256, PAGE_LOCATION_MASK: 255,
+        MAX_FRAMES: 64,
         UTF8_SINGLE_LIMIT: 128, UTF8_PAIR_LIMIT: 2048,
         UTF8_PAIR_PREFIX: 192, UTF8_TRIPLE_PREFIX: 224,
         UTF8_QUAD_PREFIX: 240, UTF8_CONTINUATION: 128,

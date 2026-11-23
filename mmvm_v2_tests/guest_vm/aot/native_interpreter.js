@@ -14597,6 +14597,17 @@
         return pointer;
     }
 
+    /* The debug header owns ordinary traced arrays of bounded triple pages.
+     * Return the PC cell; line/column immediately follow in the same page. */
+    function programDebugLocationCellKernel(heapBase, entries, index) {
+        var pages = valueCellReference(0, vectorCellAddress(
+            heapBase, entries, DiagnosticLayout.LOCATIONS));
+        var page = valueCellReference(0, vectorCellAddress(heapBase,
+            arrayElements(heapBase, pages), index >>> DiagnosticLayout.PAGE_LOCATION_SHIFT));
+        return vectorCellAddress(heapBase, arrayElements(heapBase, page),
+            (index & DiagnosticLayout.PAGE_LOCATION_MASK) * DiagnosticLayout.LOCATION_WORDS);
+    }
+
     function reportGuestStackKernel(heapBase, state, dprintfPointer, format, unknown) {
         var services = enginePlatformServices(heapBase, state);
         var mallocPointer = platformMallocPointer(heapBase, services);
@@ -14615,7 +14626,7 @@
             if (debug !== 0 && recordType(heapBase, debug) === RecordLayout.HEAP_TYPE_ARRAY) {
                 var entries = arrayElements(heapBase, debug);
                 var length = vectorLength(heapBase, entries);
-                if (length >= DiagnosticLayout.LOCATIONS) {
+                if (length > DiagnosticLayout.LOCATION_COUNT) {
                     var fileCell = vectorCellAddress(heapBase, entries, DiagnosticLayout.FILENAME);
                     if (valueCellTag(0, fileCell) === RecordLayout.VALUE_TAG_REFERENCE) {
                         var file = valueCellReference(0, fileCell);
@@ -14626,15 +14637,20 @@
                     }
                     line = valueCellInt32(0, vectorCellAddress(heapBase, entries, DiagnosticLayout.DEFAULT_LINE));
                     column = valueCellInt32(0, vectorCellAddress(heapBase, entries, DiagnosticLayout.DEFAULT_COLUMN));
-                    var index = DiagnosticLayout.LOCATIONS;
-                    while (index + DiagnosticLayout.LOCATION_WORDS <= length) {
-                        var locationPC = valueCellInt32(0, vectorCellAddress(heapBase, entries, index + DiagnosticLayout.LOCATION_PC));
-                        if (locationPC > pc) index = length;
-                        else {
-                            line = valueCellInt32(0, vectorCellAddress(heapBase, entries, index + DiagnosticLayout.LOCATION_LINE));
-                            column = valueCellInt32(0, vectorCellAddress(heapBase, entries, index + DiagnosticLayout.LOCATION_COLUMN));
-                            index = index + DiagnosticLayout.LOCATION_WORDS;
-                        }
+                    var first = 0;
+                    var end = valueCellInt32(0, vectorCellAddress(
+                        heapBase, entries, DiagnosticLayout.LOCATION_COUNT));
+                    /* Floor lookup of the last statement boundary <= pc. */
+                    while (first < end) {
+                        var middle = (first + end) >>> 1;
+                        var position = programDebugLocationCellKernel(heapBase, entries, middle);
+                        if (valueCellInt32(0, position) <= pc) first = middle + 1;
+                        else end = middle;
+                    }
+                    if (first > 0) {
+                        var selected = programDebugLocationCellKernel(heapBase, entries, first - 1);
+                        line = valueCellInt32(0, valueCellAddress(0, selected, DiagnosticLayout.LOCATION_LINE));
+                        column = valueCellInt32(0, valueCellAddress(0, selected, DiagnosticLayout.LOCATION_COLUMN));
                     }
                 }
             }
@@ -15217,15 +15233,7 @@
      * after a full collection releases the preference rather than lowering
      * usable capacity. This is nonmoving placement, not another allocation. */
     function nativeTailAllocationLimitKernel(heapBase, state, bytes, limit) {
-        if (bytes >= RecordLayout.PREFERRED_NATIVE_REGION_BYTES) return limit;
-        if (engineLargeReserveReleased(heapBase, state) !== 0) return limit;
-        var maximum = engineNativeMaximumLimit(heapBase, state);
-        /* Portable embedding owns growth/collection and has no standalone
-         * reservation bound. Do not turn its zero sentinel into a zero cap. */
-        if (maximum === 0) return limit;
-        var smallLimit = maximum - (maximum >> RecordLayout.NATIVE_LARGE_SPAN_RESERVE_SHIFT);
-        if (limit > smallLimit) return smallLimit;
-        return limit;
+        return nativeAllocationRegionLimitKernel(heapBase, state, bytes, limit);
     }
 
     function reserveNativeAllocationKernel(heapBase, state, bytes) {
@@ -18641,6 +18649,7 @@
             programBooleanArgumentKernel: programBooleanArgumentKernel,
             programCallableKernel: programCallableKernel,
             programCreateKernel: programCreateKernel,
+            programDebugLocationCellKernel: programDebugLocationCellKernel,
             reportGuestStackKernel: reportGuestStackKernel,
             diagnosticFilenameKernel: diagnosticFilenameKernel,
             programSetBindingNameKernel: programSetBindingNameKernel,

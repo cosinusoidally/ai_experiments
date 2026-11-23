@@ -104,6 +104,29 @@
         return word * 32 + lowestFreeBitKernel(bits);
     }
 
+    /* The same placement preference must survive a collection. Protecting
+     * only the never-used tail allowed the free-space index to hand reclaimed
+     * reserve spans straight back to small interleaved records. */
+    function nativeAllocationRegionLimitKernel(heapBase, state, bytes, limit) {
+        if (bytes >= PREFERRED_NATIVE_REGION_BYTES) return limit;
+        if (engineLargeReserveReleased(heapBase, state) !== 0) return limit;
+        var maximum = engineNativeMaximumLimit(heapBase, state);
+        if (maximum === 0) return limit;
+        var smallLimit = maximum - (maximum >> NATIVE_LARGE_SPAN_RESERVE_SHIFT);
+        if (limit > smallLimit) return smallLimit;
+        return limit;
+    }
+
+    function eligibleNativeFreeRegionKernel(heapBase, state, region, bytes, required) {
+        while (region !== 0) {
+            var limit = nativeAllocationRegionLimitKernel(heapBase, state,
+                bytes, region + recordSize(heapBase, region));
+            if (required <= limit - region) return region;
+            region = freeBinNext(heapBase, region);
+        }
+        return 0;
+    }
+
     function takeNativeFreeRegionKernel(heapBase, state, bytes) {
         var ensured = ensureNativeFreeIndexKernel(heapBase, state);
         var required = bytes + FREE_RECORD_HEADER_BYTES;
@@ -113,16 +136,18 @@
         if (nativeFreeBinLowerBoundKernel(containing) < required) preferred = preferred + 1;
         var bin = nextNativeFreeBinKernel(heapBase, state, preferred);
         var region = 0;
-        if (bin >= 0) region = engineFreeBinHead(heapBase, state, bin);
-        else {
+        while (bin >= 0 && region === 0) {
+            region = eligibleNativeFreeRegionKernel(heapBase, state,
+                engineFreeBinHead(heapBase, state, bin), bytes, required);
+            if (region === 0) bin = nextNativeFreeBinKernel(heapBase, state, bin + 1);
+        }
+        if (region === 0) {
             /* Rounded-up classes avoid searching undersized fragments. If
              * they are empty, search the one partial class: usable capacity
              * must not be rejected merely because it falls inside a bucket. */
             bin = containing;
-            region = engineFreeBinHead(heapBase, state, bin);
-            while (region !== 0 && recordSize(heapBase, region) < required) {
-                region = freeBinNext(heapBase, region);
-            }
+            region = eligibleNativeFreeRegionKernel(heapBase, state,
+                engineFreeBinHead(heapBase, state, bin), bytes, required);
         }
         if (region === 0) return 0;
         var previous = freeRegionPrevious(heapBase, region);
@@ -152,6 +177,8 @@
         var arenaBytes = bytes + FREE_RECORD_HEADER_BYTES;
         if (arenaBytes < PREFERRED_NATIVE_REGION_BYTES) arenaBytes = PREFERRED_NATIVE_REGION_BYTES;
         var end = region + regionSize;
+        var allocationLimit = nativeAllocationRegionLimitKernel(heapBase, state, bytes, end);
+        if (arenaBytes > allocationLimit - region) arenaBytes = allocationLimit - region;
         if (regionSize - arenaBytes >= MIN_NATIVE_REGION_BYTES) {
             var suffix = region + arenaBytes;
             setRecordType(heapBase, suffix, HEAP_TYPE_FREE);
@@ -178,6 +205,8 @@
         insertNativeFreeRegionKernel: insertNativeFreeRegionKernel,
         nextNativeFreeBinKernel: nextNativeFreeBinKernel,
         takeNativeFreeRegionKernel: takeNativeFreeRegionKernel,
+        nativeAllocationRegionLimitKernel: nativeAllocationRegionLimitKernel,
+        eligibleNativeFreeRegionKernel: eligibleNativeFreeRegionKernel,
         activateNativeFreeRegionKernel: activateNativeFreeRegionKernel
     };
     root.GuestVMNativeFreeIndexKernel = exported;

@@ -22,12 +22,23 @@ bytecode module. Optimizer relocation preserves source positions, including
 when removed instructions carry a boundary. Missing locations are not written
 as undefined sparse entries.
 
-Adoption emits the existing traced filename/default-position/PC-line-column
-metadata; no native record, snapshot format or DWARF ABI changes. ASTs and
+Adoption emits a small traced array header containing filename, default line,
+default column, a page directory and the location count. Each directory entry
+owns an ordinary traced array of at most 256 PC/line/column triples. The layout
+is defined once in `program_debug_layout.js`. The standalone error reporter
+uses a binary floor lookup across these pages, without allocating guest memory
+on the failure path. Native record and DWARF layouts are unchanged; native
+contract 125 identifies the updated guest-program debug representation. ASTs and
 compiler-only location tables are not retained merely for diagnostics.
 Exact function source remains available for toString. This fixes the 2026-11-15
 Mandreel loading regression caused by location capture requiring a large
 contiguous guest vector; capture remains enabled and the heap cap unchanged.
+The 2026-11-23 follow-up also removes the adoption-time flattening of that
+compact table: bounded compiler storage alone was insufficient when adoption
+rebuilt a single large tagged array. Both the temporary map and the persistent
+adopted map now use bounded pages. Ordinary GC array edges trace the header,
+directory and pages, so no additional collector record or rooting convention
+is needed. Function source text and `Function.prototype.toString` are unaffected.
 
 ## Bounded kernel string literals
 

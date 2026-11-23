@@ -118,6 +118,25 @@
     run(executable, packArguments(snapshot, directory + "/self.exe"));
     check(fs.readFileSync(directory + "/self.exe").equals(packed), "packager works inside generated executable");
     check(run(executable, ["hello.js"]) === "Hello, world!\n", "hello program");
+    /* Exercise adoption and cold stack reporting across debug-page boundaries,
+     * not a second implementation of the location encoding. Include nested
+     * callers so a failed lookup cannot silently use another frame's map. */
+    var locationCounts = [0, 255, 256, 257, 800];
+    for (var locationCase = 0; locationCase < locationCounts.length; locationCase++) {
+        var locationSource = "function locationFailure() {\nvar value = 0;\n";
+        for (var statement = 0; statement < locationCounts[locationCase]; statement++) {
+            locationSource += "value++;\n";
+        }
+        var failureLine = locationCounts[locationCase] + 3;
+        locationSource += "missingLocationValue();\n}\nlocationFailure();\n";
+        var locationFile = directory + "/location-" + locationCase + ".js";
+        fs.writeFileSync(locationFile, locationSource);
+        var locationFailure = run(executable, [locationFile], 70);
+        check(locationFailure.indexOf(locationFile + ":" + failureLine + ":1") >= 0,
+            "adopted source location across debug pages: " + locationCounts[locationCase]);
+        check(locationFailure.indexOf(locationFile + ":" + (failureLine + 2) + ":1") >= 0,
+            "caller source location across debug pages: " + locationCounts[locationCase]);
+    }
     check(run(executable, ["--vm-max-heap-mib", "64", "hello.js"]) ===
         "Hello, world!\n", "runtime heap minimum");
     check(run(executable, ["--vm-max-heap-mib", "1024", "hello.js"]) ===
