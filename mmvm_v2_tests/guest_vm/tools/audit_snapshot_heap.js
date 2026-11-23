@@ -29,6 +29,10 @@
         args = shellArguments;
         output = print;
     }
+    var inspectProgramPC = args[0] === "--program-pc";
+    var programPC = inspectProgramPC ? Number(args[1]) : 0;
+    var programOpcode = inspectProgramPC ? args[2] : "";
+    if (inspectProgramPC) args = args.slice(3);
     var inspectFrame = args[0] === "--heap-frame";
     var frameAddress = inspectFrame ? Number(args[1]) : 0;
     if (inspectFrame) args = args.slice(2);
@@ -49,7 +53,7 @@
     var statisticsOnly = args[0] === "--heap-stats" || propertiesOnly || snapshotStatistics;
     var rawHeap = inspectFrame || (statisticsOnly && !snapshotStatistics);
     if (statisticsOnly) args = args.slice(1);
-    var inspectionOnly = inspectFrame || statisticsOnly || inspectString || inspectSources || inspectSharing || inspectMetadata;
+    var inspectionOnly = inspectProgramPC || inspectFrame || statisticsOnly || inspectString || inspectSources || inspectSharing || inspectMetadata;
     if (!args.length) {
         throw new Error("usage: audit_snapshot_heap.js snapshot | " +
                         "--snapshot-stats snapshot | " +
@@ -57,7 +61,7 @@
                         "--string-sharing snapshot | " +
                         "--share-backings snapshot | " +
                         "--metadata-sharing snapshot | " +
-                        "--heap-frame ADDRESS raw-heap-dump | " +
+                        "--program-pc PC OPCODE snapshot | --heap-frame ADDRESS raw-heap-dump | " +
                         "--heap-stats raw-heap-dump | " +
                         "--heap-properties raw-heap-dump");
     }
@@ -125,7 +129,8 @@
             destroy: function () {}
         };
         inspectionHeap.bump = heapLength;
-        if (inspectFrame) reportFrame(inspectionHeap);
+        if (inspectProgramPC) reportProgramPC(inspectionHeap);
+        else if (inspectFrame) reportFrame(inspectionHeap);
         else if (inspectMetadata) reportMetadataSharing(inspectionHeap);
         else if (inspectSharing) reportStringSharing(inspectionHeap);
         else if (inspectString || inspectSources) reportSource(inspectionHeap);
@@ -168,7 +173,8 @@
         reportStringSharing(heap);
     }
     if (inspectionOnly) {
-        if (inspectFrame) reportFrame(heap);
+        if (inspectProgramPC) reportProgramPC(heap);
+        else if (inspectFrame) reportFrame(heap);
         else if (inspectMetadata) reportMetadataSharing(heap);
         else if (inspectSharing) reportStringSharing(heap);
         else if (inspectString || inspectSources) reportSource(heap);
@@ -329,6 +335,40 @@
             }
             position += record.size;
         }
+    }
+
+    function reportProgramPC(inspectedHeap) {
+        var records = inspectionRecordsFor(inspectedHeap, new Cells(inspectedHeap));
+        var bytecodes = nodeHost ? require("../bytecode.js") : GuestVMBytecode;
+        var opcode = bytecodes[programOpcode];
+        if (!(programPC >= 0) || programPC !== Math.floor(programPC) || !opcode) {
+            throw new Error("--program-pc requires an integer PC and opcode name");
+        }
+        var position = Heap.FIRST_RECORD, count = 0;
+        while (position < inspectedHeap.bump) {
+            var record = inspectedHeap.inspectRecordHeader(position);
+            if (record.type === Heap.Types.PROGRAM) {
+                var code = records.programBytecode(position);
+                if (records.bytecodeLength(code) > programPC && records.bytecodeWord(code, programPC) === opcode) {
+                    var source = records.programSource(position), preview = "", index = 0;
+                    if (source) {
+                        while (index < records.stringLength(source) && index < 480) {
+                            preview += String.fromCharCode(records.stringCharacterCodeUnit(source, index++));
+                        }
+                    }
+                    output("program " + position + " pc=" + programPC + " " + programOpcode +
+                        " words=" + records.bytecodeLength(code) + " source=" + preview);
+                    var operands = [], operandIndex = 1;
+                    while (operandIndex < 4 && programPC + operandIndex < records.bytecodeLength(code)) {
+                        operands.push(records.bytecodeWord(code, programPC + operandIndex++));
+                    }
+                    output("following words: " + operands.join(", "));
+                    count++;
+                }
+            }
+            position += record.size;
+        }
+        output("matching programs: " + count);
     }
 
     /* A representation audit, not a source minifier. Count tiny inline leaves

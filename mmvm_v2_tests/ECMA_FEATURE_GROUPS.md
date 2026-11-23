@@ -76,6 +76,18 @@ entire eleven-job matrix passes (`artifacts/ecma-arrays-dense-policy-apps.log`).
 No demo-specific condition or demo edit was used. Final broad acceptance uses
 the shared heap-budget policy, not the initial regression image.
 
+Broad acceptance also exposed an existing Mandreel load failure at the default
+512 MiB cap. A same-command control with the preceding `81d2238` executable
+fails at the same `SET_PROPERTY` pc 275 in the compiler constant table; it is
+not a newly passing benchmark lost by this batch. Control: **79.91 s /
+538916 KiB**, 52 collections, 101396448 live bytes. Current: **139.81 s /
+539108 KiB**, 162 collections, 106658976 live bytes. Both exhaust the arena
+while loading, before a score. The additional time/collections are recorded,
+not called performance parity. Receipts: `artifacts/ecma-array-mandreel-control.*`
+and `artifacts/ecma-arrays-accept-octane-Mandreel.*`. The heap cap is unchanged.
+The offline snapshot audit now supports `--program-pc PC OPCODE snapshot`
+to locate candidate functions and operand words without expanding the heap.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts
