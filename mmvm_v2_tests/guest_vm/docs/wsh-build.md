@@ -1,9 +1,12 @@
 # WSH build bring-up
 
-Implementation in progress. Acceptance requires genuine builds from the same
-checkout/options to produce bit-identical snapshots and executables under WSH,
-Node, js_min and the native guest. No native extension, precompiled compiler,
-snapshot-copy shortcut or changes to the existing native memory fast path.
+Source-build identity verified on 2026-11-23 for native contract 124
+(implementation `af3c405`). Genuine WSH and fresh Node source builds produce
+bit-identical snapshots, also matching the accepted js_min/native self-build
+image. Independently packaged Win32 executables match and the WSH-produced
+executable passes the Wine hello smoke test. No native extension, precompiled
+compiler, snapshot-copy shortcut or implementation change was needed for this
+verification. This is not a fresh Windows conformance-suite or self-build run.
 
 Plan: prove bounded hex/binary transport; provide explicit WSH filesystem,
 console/argument/scheduling services; select packed-word emulated memory once
@@ -16,6 +19,42 @@ must error, never silently substitute bytes. End-to-end all-byte and binary
 image comparisons are required in addition to the mapping preflight.
 
 ## Working points
+
+2026-11-23:
+
+- Retried the complete source bootstrap using Microsoft Windows Script Host
+  **5.7**, the supplied 32-bit Wine prefix and a **3 GiB host**. The previous
+  2 GiB attempt was stopped by a low-memory guard during serialization, before
+  publishing a snapshot. Both runs used the same implementation and options;
+  only the available host RAM changed.
+- WSH command: `cscript //nologo guest_vm/tools/wsh_runner.js guest_runner.js
+  --vm-native --snapshot artifacts/cscript-source-retry.snap`. This parsed,
+  lowered and assembled from source and constructed/prepared a new runtime;
+  it did not package or copy a seed snapshot.
+- A fresh `node guest_runner.js --vm-native --snapshot
+  artifacts/cscript-source-retry-node.snap` build compares byte-for-byte equal.
+  Both files are **7845568 bytes**, SHA-256
+  `fb8b5ee98587d939e77b44357ceac60f6df46b60f9e89d60fc551d96d338d91f`.
+  The already accepted Node/js_min/genuine self-build image has the same hash.
+- WSH and Node each converted their own fresh snapshot with
+  `guest_vm/tools/snapshot_to_exe.js INPUT OUTPUT --win32`. Outputs are
+  **7884800 bytes**, byte-identical, SHA-256
+  `6b1b4ce169b04813ec393173942697fc3f39cb456195175e86681cff6b847c4e`.
+  The WSH-produced executable ran `hello.js` under Wine, printed
+  `Hello, world!` and exited zero.
+- Logged WSH phases: source loading **3.293 s**; parse/fingerprint **31.991 s**;
+  lowering **25.604 s**; JS execution-backend compilation **159.902 s**;
+  x86 assembly **29.424 s**. Runtime construction **253.416 s** includes the
+  kernel-build phases and must not be added to them again. Guest environment
+  setup **8.010 s**; standalone preparation **294.360 s**; snapshot writing
+  **163.004 s**. The whole source build took approximately **12 minutes**.
+- Actual cscript PID sampled every five seconds: highest observed high-water
+  RSS **1318020 KiB**, process swap **zero**, lowest observed host available
+  memory **593280 KiB**. No concurrent heavy build/test was run. A low-memory
+  guard remained enabled but did not fire on the 3 GiB host.
+- Receipts remain in ignored `artifacts/cscript-source-retry.log`,
+  `cscript-source-retry-memory.log`, `cscript-source-retry-node.log` and their
+  corresponding snapshot/executable files. No generated image is checked in.
 
 2026-11-17:
 
@@ -97,16 +136,22 @@ input is decoded from actual bytes. WSH module wrappers supply explicit shell
 arguments and IIFE global roots because classic indirect eval inherits caller
 arguments. Guest load/module execution semantics remain the shared VM's own.
 
-The full source-build snapshot identity, execution and self-hosted acceptance
-remain in progress. Do not infer a successful full WSH bootstrap from packaging
-an existing snapshot.
+The full WSH source-build identity gate is now complete at contract 124;
+the separate packaging check is no longer the only evidence. Win32 execution
+coverage in this verification is the hello smoke test, not a new full test
+suite. Equality with the accepted self-built snapshot is verified, but no new
+Windows self-hosted build was performed as part of this check.
 
 ## Resource limitations
 
 The full build is much heavier than the transport check. On the supplied
-Microsoft JScript 5.7 under Wine, the latest monitored run reached at least
-1261724 KiB RSS (about 1.20 GiB), with swapping on a 2 GiB Linux host. Run builds
-and regression suites serially. This is not a claim about native XP memory use.
+Microsoft JScript 5.7 under Wine, an earlier monitored run reached at least
+1261724 KiB RSS (about 1.20 GiB), with swapping on a 2 GiB Linux host. A later
+2 GiB attempt was stopped when host available memory fell below the 192 MiB
+safety reserve. The successful 3 GiB retry is measured above; the extra RAM
+allowed completion without cscript swapping. Run builds and regression suites
+serially. This is not a claim about native XP memory use or a universal minimum
+RAM requirement.
 GNU time on the Wine launcher does not measure the actual cscript process;
 sample that process directly rather than reporting the launcher's small RSS.
 
