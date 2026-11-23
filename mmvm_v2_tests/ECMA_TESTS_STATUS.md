@@ -2,6 +2,30 @@
 
 ## Current target: all Node-passing files except Date first
 
+### Final profiled array/number acceptance, 2026-11-23
+
+- Guest `af3c405` / contract 124, full serial `TZ=UTC`: **1041 passed /
+  288 failed (39 timeouts included) / four configured skips / zero not run**;
+  1333 selected / 1329 executed. **Every per-file status matches `d5cac4c`**.
+  The full batch retains **20 gained passes and zero lost passes** against
+  `81d2238`, with no missing or extra files. No corpus/harness/limit changes.
+- Exact Node overlap stays **1010 common / 208 Node-only / 31 guest-only**;
+  outside-Date coverage **917/1044**, gap **127**. Date gap remains **81**.
+- Harness **609644.801 ms**, process **609.94 s / 464040 KiB**. Contract 122:
+  607.13 s / 464160 KiB; pre-batch: 619.50 s / 463748 KiB. These are
+  individual observations, not a controlled throughput estimate.
+- The profile-driven follow-up avoids redundant linked-descriptor scans and
+  repeated numeric spelling work without changing formatting or semantics.
+  Initial stock PdfJS fell from 830 to 167; the shared lookup fix restores
+  808 in the initial final-code probe. The final-code native kernel matches
+  that probe byte-for-byte. No benchmark-specific path or demo edit is used.
+- Final-image Test262 **3292/3292**, Node/js_min/genuine self-build snapshots
+  identical, bounded structural GC and all seven program/eleven demo-server
+  gates pass. See [the complete family log](ECMA_FEATURE_GROUPS.md) for scope,
+  follow-up host-core validation and selected scored observations.
+- Per-file history appends `af3c405` in [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv).
+  Receipts: ignored `artifacts/ecma-arrays-accepted-ecma.log` and `.time`.
+
 ### Array/number feature-family batch, 2026-11-23
 
 - Guest `d5cac4c` / contract 122, full serial `TZ=UTC`: **1041 passed /

@@ -136,7 +136,7 @@ Those full results remain labeled `d5cac4c`, rather than being relabeled as
 new runs. Final Node core also passes. Follow-up self-build, executable smoke
 checks and paired scores are recorded below when complete.
 
-### Profile-driven lookup follow-up (contract 124, acceptance in progress)
+### Profile-driven lookup follow-up (contract 124)
 
 The first stock probes caught a serious regression that quick correctness
 alone did not expose: PdfJS **830 -> 167** (control `81d2238`, new contract
@@ -187,6 +187,24 @@ Correct hole/prototype lookup had introduced repeated linked-descriptor scans.
   are not stock scores; the separate selected scored probes are listed above.
   Final-image Test262/ECMA and the final Mandreel attempt are still pending.
 - Receipts: ignored `artifacts/ecma-arrays-accepted-*`.
+
+### Completed final corpus runs (`af3c405`, contract 124)
+
+- Full ECMA: **1041 pass / 288 fail / four existing skips / zero unrun**,
+  1333 selected / 1329 executed, unchanged **39** timeouts. All 1333 statuses
+  equal contract 122's completed run. Against `81d2238`, all **20** targeted
+  Node-parity gains remain and **zero** passing files are lost.
+- Node overlap stays **1010 common / 208 Node-only / 31 guest-only**;
+  outside-Date gap **127**, Date gap **81**. The matrix appends `af3c405`.
+- ECMA process **609.94 s / 464040 KiB**, harness **609644.801 ms**, compared
+  with 607.13 s / 464160 KiB for contract 122 and 619.50 s / 463748 KiB for
+  the pre-batch checkpoint. No controlled overall speedup is claimed.
+- Test262: **3292/3292**, zero failures/timeouts/unrun, **360.07 s /
+  512644 KiB**. Contract 122 was 359.58 s / 513840 KiB; pre-batch was
+  377.86 s / 512632 KiB. No corpus, harness or limit was changed.
+- The two large switch files pass at **2.15/2.21 s** in the full ECMA run.
+- Receipts: ignored `artifacts/ecma-arrays-accepted-ecma.*` and
+  `ecma-arrays-accepted-test262.*`.
 
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
