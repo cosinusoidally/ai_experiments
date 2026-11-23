@@ -3977,9 +3977,8 @@
                     if (length < 0 || length > 4294967295 || length !== Math.floor(length)) {
                         throw new RangeError("invalid array length");
                     }
-                    if (length <= HeapRecords.KernelConstants.MAX_INITIAL_DENSE_ARRAY_CAPACITY) {
-                        runtime.ensureArrayCapacity(array, length);
-                    }
+                    runtime.ensureArrayCapacity(array, HeapRecords.initialArrayCapacity(length,
+                        runtime.linearHeap.maximumAllocationLimit, ValueCells.PAYLOAD_BYTES));
                     runtime.heapRecords.setArrayLength(array.heapAddress, length);
                 } else {
                     var index = 0;

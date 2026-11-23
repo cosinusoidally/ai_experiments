@@ -10,7 +10,8 @@ Source definitions remain the final authority for binary layouts and flags.
 The current native interpreter uses contract **121**, separating uint32 array
 length from initialized dense storage. See [data structures](data-structures.md)
 and [the feature-family inventory](../../ECMA_FEATURE_GROUPS.md). Contract 120
-adds shared Number parsing/formatting policy; contract 119 introduced the shared
+adds [shared Number parsing/formatting policy](number-conversion.md);
+contract 119 introduced the shared
 RegExp constructor entry and String semantic continuations described in
 [RegExp and String](regexp-and-string.md). Contract 118 adds standard live-key
 enumeration; contracts 116–117 add guarded property references and shared

@@ -159,11 +159,16 @@ Absent cells are holes. Dense elements are not individually allocated objects.
 Numeric explicit descriptors coexist with dense storage, so get/set/delete
 must honor descriptor precedence and inherited semantics. Array length
 changes and methods cannot be implemented as unconditional vector writes.
-Hole-only constructor preallocation is bounded by
-`MAX_INITIAL_DENSE_ARRAY_CAPACITY`; sequential writes can grow past that
-threshold geometrically. A distant write uses a linked numeric descriptor
+Hole-only constructor preallocation uses shared `initialArrayCapacity`:
+at most `MAX_INITIAL_DENSE_ARRAY_CAPACITY` cells (16 MiB of cells), and at
+most one eighth of the runtime's maximum heap. Ordinary randomly filled
+numeric work buffers therefore stay dense without exhausting small heaps.
+Sequential writes can grow past the initial threshold geometrically.
+A distant write uses a linked numeric descriptor
 instead of allocating a huge gap (`DENSE_ARRAY_GROWTH_FACTOR` selects the
-density policy). Native headers share one initializer. Dense mutations update
+density policy). Ordinary native array headers share one initializer; mapped
+arguments additionally initialize their inline descriptors/environment link.
+Dense mutations update
 both physical and logical lengths; explicit descriptors need no dense cell.
 Enumeration, deletion and GC traverse actual storage, not logical length.
 The portable root-discovery path no longer walks arrays with [[Get]]: the

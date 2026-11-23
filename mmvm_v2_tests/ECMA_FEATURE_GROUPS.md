@@ -66,6 +66,16 @@ Additional shared work required by the array cutover:
 
 See [current array storage](guest_vm/docs/data-structures.md#arrays-and-arguments).
 
+The first broad application attempt caught a performance regression in demo5:
+a 4096-slot hole-only preallocation cutoff made random raster-buffer writes
+build linked sparse storage. That attempt was stopped after the watchdog;
+no passing result is claimed for it. The policy now keeps ordinary work
+buffers dense, bounded by 16 MiB of cells and one eighth of the runtime's
+maximum heap. Both backends call the same policy. The adjusted application's
+entire eleven-job matrix passes (`artifacts/ecma-arrays-dense-policy-apps.log`).
+No demo-specific condition or demo edit was used. Final broad acceptance uses
+the shared heap-budget policy, not the initial regression image.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts

@@ -7642,8 +7642,8 @@
             }
             if (arrayConstructValid === 0) return 0;
             var arrayConstructCapacity = arrayConstructLength;
-            if (arrayConstructCopiesArguments === 0 &&
-                (arrayConstructCapacity < 0 || arrayConstructCapacity > RecordLayout.MAX_INITIAL_DENSE_ARRAY_CAPACITY)) arrayConstructCapacity = RecordLayout.INITIAL_ARRAY_CAPACITY;
+            if (arrayConstructCopiesArguments === 0) arrayConstructCapacity = initialArrayCapacityKernel(
+                arrayConstructLength, engineNativeMaximumLimit(heapBase, state), RecordLayout.VALUE_CELL_BYTES);
             if (arrayConstructCapacity < RecordLayout.INITIAL_ARRAY_CAPACITY) {
                 arrayConstructCapacity = RecordLayout.INITIAL_ARRAY_CAPACITY;
             }
@@ -18481,6 +18481,7 @@
             refreshExternalBufferThresholdKernel: refreshExternalBufferThresholdKernel,
             relativeIndexKernel: relativeIndexKernel,
             grownArrayCapacityKernel: HeapRecords.grownArrayCapacity,
+            initialArrayCapacityKernel: HeapRecords.initialArrayCapacity,
             argumentRegisterTailKernel: argumentRegisterTailKernel,
             allocateArrayBufferKernel: allocateArrayBufferKernel,
             initializeBufferBackingKernel: initializeBufferBackingKernel,

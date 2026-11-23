@@ -18,9 +18,13 @@
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
     var INITIAL_ARRAY_CAPACITY = 4;
     var DENSE_ARRAY_GROWTH_FACTOR = 4;
-    /* Bound hole-only preallocation; sequential writes can still grow dense
-     * storage geometrically beyond this initial-allocation policy. */
-    var MAX_INITIAL_DENSE_ARRAY_CAPACITY = 4096;
+    /* Keep ordinary numeric work buffers dense even when their first write
+     * is far from zero. Bound hole-only preallocation to 16 MiB of cells;
+     * larger arrays start sparse and sequential writes can still grow dense
+     * storage geometrically. This is a general storage policy, not a logical
+     * length limit or a limit on the number of actual elements. */
+    var MAX_INITIAL_DENSE_ARRAY_CAPACITY = 1 << 20;
+    var INITIAL_DENSE_ARRAY_BUDGET_SHIFT = 3;
     var MAX_VECTOR_LENGTH = 134217726;
     /* Record algorithms (property storage and strings) are shared with
      * native execution. Cache code only: the memory argument selects a heap
@@ -73,6 +77,13 @@
             else capacity = capacity + growth;
         }
         return capacity;
+    }
+
+    function initialArrayCapacityKernel(length, maximumBytes, cellBytes) {
+        if (length < 0 || length > MAX_INITIAL_DENSE_ARRAY_CAPACITY ||
+                length * cellBytes > (maximumBytes >>> INITIAL_DENSE_ARRAY_BUDGET_SHIFT)) return INITIAL_ARRAY_CAPACITY;
+        if (length < INITIAL_ARRAY_CAPACITY) return INITIAL_ARRAY_CAPACITY;
+        return length;
     }
 
     var OBJECT_PROTOTYPE = 0;
@@ -419,6 +430,7 @@
     Records.ArgumentsLayout = {UNMAPPED_ENVIRONMENT: 4294967295};
     Records.ArgumentsLayout.MAPPING_WORD_BITS = Heap.WORD_BYTES * 8;
     Records.grownArrayCapacity = grownArrayCapacityKernel;
+    Records.initialArrayCapacity = initialArrayCapacityKernel;
 
     Records.PropertyStorageLayout = {
         ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
@@ -512,6 +524,7 @@
         INITIAL_ARRAY_CAPACITY: INITIAL_ARRAY_CAPACITY,
         DENSE_ARRAY_GROWTH_FACTOR: DENSE_ARRAY_GROWTH_FACTOR,
         MAX_INITIAL_DENSE_ARRAY_CAPACITY: MAX_INITIAL_DENSE_ARRAY_CAPACITY,
+        INITIAL_DENSE_ARRAY_BUDGET_SHIFT: INITIAL_DENSE_ARRAY_BUDGET_SHIFT,
         MAX_ARRAY_INDEX_DECIMAL_QUOTIENT: Math.floor((4294967295 - 1) / 10),
         MAX_ARRAY_INDEX_DECIMAL_REMAINDER: (4294967295 - 1) % 10,
         MAX_VECTOR_LENGTH: MAX_VECTOR_LENGTH,
