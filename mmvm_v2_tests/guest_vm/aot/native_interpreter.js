@@ -1512,9 +1512,9 @@
                     arraySetVector = arrayElements(heapBase, arraySetObject);
                     var arraySetCapacity = vectorCapacity(
                         heapBase, arraySetVector);
-                    if (arraySetIndex >= RecordLayout.MAX_VECTOR_LENGTH ||
-                        (arraySetIndex >= RecordLayout.INITIAL_ARRAY_CAPACITY &&
-                         arraySetIndex >= arraySetCapacity * RecordLayout.DENSE_ARRAY_GROWTH_FACTOR)) arraySetSupported = 0;
+                    if (denseArrayIndexKernel(arraySetIndex, arraySetCapacity,
+                            engineNativeMaximumLimit(heapBase, state),
+                            RecordLayout.VALUE_CELL_BYTES) === 0) arraySetSupported = 0;
                 }
                 if (arraySetSupported === 1) {
                     if (arraySetIndex >= arraySetCapacity) {
@@ -18482,6 +18482,7 @@
             relativeIndexKernel: relativeIndexKernel,
             grownArrayCapacityKernel: HeapRecords.grownArrayCapacity,
             initialArrayCapacityKernel: HeapRecords.initialArrayCapacity,
+            denseArrayIndexKernel: HeapRecords.denseArrayIndex,
             argumentRegisterTailKernel: argumentRegisterTailKernel,
             allocateArrayBufferKernel: allocateArrayBufferKernel,
             initializeBufferBackingKernel: initializeBufferBackingKernel,

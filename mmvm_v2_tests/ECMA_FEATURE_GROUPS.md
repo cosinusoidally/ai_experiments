@@ -88,6 +88,18 @@ and `artifacts/ecma-arrays-accept-octane-Mandreel.*`. The heap cap is unchanged.
 The offline snapshot audit now supports `--program-pc PC OPCODE snapshot`
 to locate candidate functions and operand words without expanding the heap.
 
+The first whole-ECMA attempt also exposed **two new watchdog failures**:
+`ecma_3/Statements/regress-74474-002.js` and `regress-74474-003.js`.
+The run was stopped after finding them; it is not a completed acceptance run.
+Density-only writes kept moderately gapped compiler work tables in sparse
+descriptor storage. Contract 122 shares the constructor's bounded heap budget
+with indexed writes, retaining geometric growth for established dense arrays.
+An attempted extra in-capacity bypass did not preserve those results and was
+not retained; the shared policy remains authoritative. An initial fixed-image
+repeat passes both switch files in **2.33/2.30 s**, rather than timing out at
+10 seconds; the pre-batch observations were **2.01/2.01 s**. Final acceptance
+and build identity must use the corrected image, not contract 121.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts

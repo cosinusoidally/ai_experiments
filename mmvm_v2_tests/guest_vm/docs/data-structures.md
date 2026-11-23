@@ -164,9 +164,12 @@ at most `MAX_INITIAL_DENSE_ARRAY_CAPACITY` cells (16 MiB of cells), and at
 most one eighth of the runtime's maximum heap. Ordinary randomly filled
 numeric work buffers therefore stay dense without exhausting small heaps.
 Sequential writes can grow past the initial threshold geometrically.
-A distant write uses a linked numeric descriptor
-instead of allocating a huge gap (`DENSE_ARRAY_GROWTH_FACTOR` selects the
-density policy). Ordinary native array headers share one initializer; mapped
+Contract 122 also applies that bounded budget to initially distant writes,
+through shared `denseArrayIndex`. Density alone incorrectly trapped growing
+work tables in linked sparse storage after an early gap. Beyond that budget,
+`DENSE_ARRAY_GROWTH_FACTOR` admits growth proportional to existing capacity;
+truly distant indices use linked numeric descriptors instead of huge gaps.
+Ordinary native array headers share one initializer; mapped
 arguments additionally initialize their inline descriptors/environment link.
 Dense mutations update
 both physical and logical lengths; explicit descriptors need no dense cell.

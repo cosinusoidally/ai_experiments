@@ -1789,9 +1789,9 @@
 
     Runtime.prototype.publishArrayLength = function (array, length, writable) {
         this.heapRecords.setArrayLength(array.heapAddress, length);
-        /* The element vector owns the value; a materialized named entry
+        /* The array header owns the value; a materialized named entry
          * stores exceptional attributes. Descriptor reads always use the
-         * current vector length, not an obsolete mirror in that entry. */
+         * current logical length, not an obsolete mirror in that entry. */
         if (!writable || this.heapOwnProperty(array, "length", false)) {
             this.defineDataProperty(array, "length", length,
                 writable ? HeapRecords.Attributes.WRITABLE : 0);
@@ -2010,9 +2010,8 @@
         var mappedCell = this.argumentsMappedCell(array, index);
         var elements = this.heapRecords.arrayElements(array.heapAddress);
         var capacity = this.heapRecords.vectorCapacity(elements);
-        if (index >= Math.max(HeapRecords.KernelConstants.INITIAL_ARRAY_CAPACITY,
-                capacity * HeapRecords.KernelConstants.DENSE_ARRAY_GROWTH_FACTOR) ||
-                index >= MAX_ARRAY_CAPACITY) {
+        if (!HeapRecords.denseArrayIndex(index, capacity,
+                this.linearHeap.maximumAllocationLimit, ValueCells.PAYLOAD_BYTES)) {
             this.defineDataProperty(array, String(index), value, HeapRecords.Attributes.DEFAULT);
         } else {
             this.ensureArrayCapacity(array, index + 1);

@@ -86,6 +86,18 @@
         return length;
     }
 
+    /* Density alone is not enough: an initially distant write can be followed
+     * by many nearby writes. Keep bounded work tables dense even before their
+     * first write, using exactly the constructor's heap budget. Very distant
+     * indices still use descriptors; growing dense arrays retain geometric
+     * growth beyond the initial allocation budget. */
+    function denseArrayIndexKernel(index, capacity, maximumBytes, cellBytes) {
+        if (index < 0 || index >= MAX_VECTOR_LENGTH) return 0;
+        if (index < capacity * DENSE_ARRAY_GROWTH_FACTOR) return 1;
+        if (index < initialArrayCapacityKernel(index + 1, maximumBytes, cellBytes)) return 1;
+        return 0;
+    }
+
     var OBJECT_PROTOTYPE = 0;
     var OBJECT_PROPERTIES = 4;
     var OBJECT_EXTENSIBLE = 8;
@@ -407,7 +419,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 121;
+    Records.NativeInterpreterContractVersion = 122;
     Records.HeapSizePolicy = Heap.SizePolicy;
     Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
@@ -431,6 +443,7 @@
     Records.ArgumentsLayout.MAPPING_WORD_BITS = Heap.WORD_BYTES * 8;
     Records.grownArrayCapacity = grownArrayCapacityKernel;
     Records.initialArrayCapacity = initialArrayCapacityKernel;
+    Records.denseArrayIndex = denseArrayIndexKernel;
 
     Records.PropertyStorageLayout = {
         ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
