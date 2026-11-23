@@ -35,6 +35,37 @@ Dense access remains fast. Prototype lookup must cover holes and inherited
 virtual length; GC must only scan initialized physical cells. No larger heap,
 corpus changes, new skips or demo edits are part of this approach.
 
+The contract-121 focused checkpoint executes 84 files: **83 pass / one
+pre-existing Node-failing extension case / two configured skips** (86 selected).
+All **11 array and nine number targets pass**, with no lost pass in this
+selection. The remaining failure is `ecma_3/Array/15.5.4.8-01.js`, which calls
+the nonstandard static `String.split` API. No extension is added to satisfy it.
+Receipts: ignored `artifacts/ecma-array-number-group.log`,
+`ecma-array-core9.log`. Full acceptance is pending at this checkpoint.
+
+Additional shared work required by the array cutover:
+
+- Array headers have one initializer and named logical-length/padding accessors;
+  vector length stays physical. Numeric keys outside signed dense offsets take
+  the existing named-property path instead of exiting native execution.
+- Descriptor definitions no longer allocate a dense gap. Truncation merges
+  dense storage with sparse descriptor indices and preserves partial failure.
+- Array holes and inherited virtual length participate in normal lookup.
+- Read-only length assignment rejects even a SameValue write in strict code.
+- Concat retains a dense native path and a guest sparse-data path. It only skips
+  holes after proving that indexed getters/prototypes cannot make skipping
+  observable. Dynamic arrays keep the ordinary index-by-index algorithm.
+- Object.getPrototypeOf gains a native primitive and a guest validation
+  continuation, allowing the sparse algorithm to audit prototypes without
+  a host-language callback.
+- Portable root discovery used to walk logical length and invoke [[Get]].
+  That redundant walk is removed: authoritative record tracing owns all array
+  vector/descriptor edges. A temporary diagnostic was stopped at about
+  784 MiB RSS; after the fix the same portable sparse case finishes in under
+  one second. Larger heaps and longer test limits were not used.
+
+See [current array storage](guest_vm/docs/data-structures.md#arrays-and-arguments).
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts

@@ -1621,10 +1621,11 @@
                 if (mapped && own(desc, "value")) this.writeHeapValue(mapped, desc.value);
                 if (mapped && (accessor || desc.writable === false)) this.detachArgumentMapping(object, elementIndex);
                 if (elementIndex >= this.arrayLength(object)) {
-                    this.ensureArrayCapacity(object, elementIndex + 1);
                     this.heapRecords.setArrayLength(object.heapAddress, elementIndex + 1);
                 }
-                this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(object.heapAddress, elementIndex));
+                if (elementIndex < this.heapRecords.vectorLength(this.heapRecords.arrayElements(object.heapAddress))) {
+                    this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(object.heapAddress, elementIndex));
+                }
             }
             return object;
         } finally {
@@ -1821,18 +1822,25 @@
             present, requested, length !== this.arrayLength(array) ? PropertySemantics.fields.VALUE : 0);
         if (attributes < 0) throw new TypeError(PropertySemantics.messages[attributes]);
         var writable = !!(attributes & HeapRecords.Attributes.WRITABLE);
-        if (length > this.arrayLength(array)) {
-            var current = this.arrayLength(array);
-            this.ensureArrayCapacity(array, length);
-            while (current < length) {
-                this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(array.heapAddress, current++));
+        if (length < this.arrayLength(array)) {
+            /* Only existing own indices participate. Iterating the logical
+             * length makes sparse uint32 arrays both unbounded and incorrect
+             * on partial failure. Snapshot candidates, then delete descending. */
+            var candidates = [], elements = this.heapRecords.arrayElements(array.heapAddress);
+            var physical = this.heapRecords.vectorLength(elements), index;
+            for (index = length; index < physical; index++) {
+                if (this.arrayHas(array, index)) candidates.push(index);
             }
-        } else {
-            var index = this.arrayLength(array);
-            while (index > length) {
-                index--;
-                if (!this.deleteProperty(array, String(index), false)) {
-                    this.publishArrayLength(array, index + 1, writable);
+            var property = this.heapRecords.lastOwnPropertyEntry(array.heapAddress);
+            while (property) {
+                var key = this.heapRecords.readString(this.heapRecords.ownPropertyEntryKey(array.heapAddress, property));
+                if (isArrayIndex(key) && Number(key) >= length && Number(key) >= physical) candidates.push(Number(key));
+                property = this.heapRecords.previousOwnPropertyEntry(array.heapAddress, property);
+            }
+            candidates.sort(function (left, right) { return right - left; });
+            for (index = 0; index < candidates.length; index++) {
+                if (!this.deleteProperty(array, String(candidates[index]), false)) {
+                    this.publishArrayLength(array, candidates[index] + 1, writable);
                     if (throwOnReject === false) return false;
                     throw new TypeError("cannot truncate a non-configurable array element");
                 }
@@ -1906,7 +1914,7 @@
 
     Runtime.prototype.arrayHas = function (array, index) {
         if (this.heapRecords.objectPropertyHead(array.heapAddress) && this.heapOwnProperty(array, String(index), false)) return true;
-        if (index < 0 || index >= this.arrayLength(array)) return false;
+        if (index < 0 || index >= this.heapRecords.vectorLength(this.heapRecords.arrayElements(array.heapAddress))) return false;
         return this.valueCells.tagAt(
             this.heapRecords.arrayElementCell(array.heapAddress, index)) !== 0;
     };
@@ -2000,9 +2008,18 @@
         if (mappingEnvironment && mappingEnvironment !== HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT &&
                 !this.arrayHas(array, index)) this.detachArgumentMapping(array, index);
         var mappedCell = this.argumentsMappedCell(array, index);
-        this.ensureArrayCapacity(array, index + 1);
-        this.writeHeapValue(this.heapRecords.arrayElementCell(array.heapAddress, index),
-                            value);
+        var elements = this.heapRecords.arrayElements(array.heapAddress);
+        var capacity = this.heapRecords.vectorCapacity(elements);
+        if (index >= Math.max(HeapRecords.KernelConstants.INITIAL_ARRAY_CAPACITY,
+                capacity * HeapRecords.KernelConstants.DENSE_ARRAY_GROWTH_FACTOR) ||
+                index >= MAX_ARRAY_CAPACITY) {
+            this.defineDataProperty(array, String(index), value, HeapRecords.Attributes.DEFAULT);
+        } else {
+            this.ensureArrayCapacity(array, index + 1);
+            elements = this.heapRecords.arrayElements(array.heapAddress);
+            if (index >= this.heapRecords.vectorLength(elements)) this.heapRecords.setVectorLength(elements, index + 1);
+            this.writeHeapValue(this.heapRecords.arrayElementCell(array.heapAddress, index), value);
+        }
         if (mappedCell) this.writeHeapValue(mappedCell, value);
         if (index >= this.arrayLength(array)) {
             this.heapRecords.setArrayLength(array.heapAddress, index + 1);
@@ -2057,7 +2074,7 @@
                 this.heapRecords.vectorCell(vector, index), values[index]);
             index++;
         }
-        this.heapRecords.setVectorLength(vector, values.length);
+        this.heapRecords.setArrayLength(array.heapAddress, values.length);
         this.linearHeap.freeRecord(oldVector, "array replacement");
         return array;
     };
@@ -3574,7 +3591,7 @@
                     var prototype = runtime.heapRecords.objectPrototype(
                         object.heapAddress);
                     return prototype ? runtime.readHeapReference(prototype) : null;
-                }));
+                }, "intrinsic", NativeIntrinsics.OBJECT_GET_PROTOTYPE_OF));
         this.defineBuiltinProperty(objectConstructor, "getOwnPropertyDescriptor",
             this.makeNativeFunction("Object.getOwnPropertyDescriptor",
                 function (receiver, args) {
@@ -3957,10 +3974,12 @@
                 var array = runtime.makeArray();
                 if (args.length === 1 && typeof args[0] === "number") {
                     var length = Number(args[0]);
-                    if (length < 0 || length !== Math.floor(length)) {
+                    if (length < 0 || length > 4294967295 || length !== Math.floor(length)) {
                         throw new RangeError("invalid array length");
                     }
-                    runtime.ensureArrayCapacity(array, length);
+                    if (length <= HeapRecords.KernelConstants.MAX_INITIAL_DENSE_ARRAY_CAPACITY) {
+                        runtime.ensureArrayCapacity(array, length);
+                    }
                     runtime.heapRecords.setArrayLength(array.heapAddress, length);
                 } else {
                     var index = 0;
@@ -4932,7 +4951,7 @@
                     this.internStringAddress(key));
                 object.propertyVersion++;
             }
-            if (Number(key) >= this.arrayLength(object)) return true;
+            if (Number(key) >= this.heapRecords.vectorLength(this.heapRecords.arrayElements(object.heapAddress))) return true;
             this.detachArgumentMapping(object, Number(key));
             var arrayCell = this.heapRecords.arrayElementCell(
                 object.heapAddress, Number(key));
@@ -4969,7 +4988,7 @@
         var wrapper = object && object.guestType === "object" &&
             !!(this.linearHeap.flags(object.heapAddress) & HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER);
         if (object && object.guestType === "array") {
-            indexedLength = this.arrayLength(object);
+            indexedLength = this.heapRecords.vectorLength(this.heapRecords.arrayElements(object.heapAddress));
             virtualLength = !this.isArgumentsObject(object);
             for (index = 0; index < indexedLength; index++) {
                 if (this.arrayHas(object, index)) {
@@ -5371,17 +5390,9 @@
             else this.typedArraySupport.markView(value, generation);
             this.markValue(value.prototype, generation);
         }
-        if (value.guestType === "array") {
-            this.linearHeap.setMark(
-                this.heapRecords.arrayElements(value.heapAddress), generation);
-            var elementIndex = 0;
-            while (elementIndex < this.arrayLength(value)) {
-                if (this.arrayHas(value, elementIndex)) {
-                    this.markValue(this.arrayGet(value, elementIndex), generation);
-                }
-                elementIndex++;
-            }
-        }
+        /* Array edges belong to the authoritative record visitor below,
+         * just like named properties. Root discovery must not walk logical
+         * length or perform [[Get]] (which can run an indexed accessor). */
         if (value.guestType === "bytecodeFunction") {
             this.markEnvironment(this.functionClosure(value), generation);
         }
@@ -6112,7 +6123,7 @@
         if (isDirectArrayIndex(key)) return true;
         if (key === "") return false;
         var number = Number(key);
-        return number >= 0 && number === Math.floor(number) && String(number) === key;
+        return isDirectArrayIndex(number) && String(number) === key;
     }
 
     function isDirectArrayIndex(key) {

@@ -296,7 +296,7 @@
             runtime.nativeInterpreter.setArrayMethodFallback("slice",
                 runtime.getGlobal(context, "__guestArraySliceGeneric"));
         }
-        var arrayFallbacks = ["push", "slice", "pop", "shift", "unshift", "reverse", "splice", "join", "toString"];
+        var arrayFallbacks = ["push", "slice", "pop", "shift", "unshift", "reverse", "splice", "join", "toString", "concat"];
         for (var arrayFallbackIndex = 0; arrayFallbackIndex < arrayFallbacks.length; arrayFallbackIndex++) {
             var fallbackName = arrayFallbacks[arrayFallbackIndex];
             installFallback(runtime.arrayPrototype, fallbackName, "__guestArray" +
@@ -315,7 +315,7 @@
             runtime.propertyOperationCallable(PropertyOperations.slots.PRIMITIVE));
         runtime.defineBuiltinProperty(objectPrimitives, "propertyKey",
             runtime.propertyOperationCallable(PropertyOperations.slots.KEY));
-        var objectPrimitiveNames = ["defineProperty", "getOwnPropertyDescriptor", "getOwnPropertyNames", "keys"];
+        var objectPrimitiveNames = ["defineProperty", "getOwnPropertyDescriptor", "getOwnPropertyNames", "keys", "getPrototypeOf"];
         for (var objectPrimitiveIndex = 0; objectPrimitiveIndex < objectPrimitiveNames.length; objectPrimitiveIndex++) {
             var objectPrimitiveName = objectPrimitiveNames[objectPrimitiveIndex];
             var objectPrimitive = runtime.getProperty(objectConstructor, objectPrimitiveName);
@@ -368,6 +368,7 @@
         installFallback(objectConstructor, "getOwnPropertyDescriptor", "__guestObjectGetOwnPropertyDescriptor");
         installFallback(objectConstructor, "getOwnPropertyNames", "__guestObjectGetOwnPropertyNames");
         installFallback(objectConstructor, "keys", "__guestObjectKeys");
+        installFallback(objectConstructor, "getPrototypeOf", "__guestObjectGetPrototypeOf");
         installFallback(runtime.objectPrototype, "hasOwnProperty", "__guestObjectHasOwnProperty");
         installBuiltin(runtime.objectPrototype, "propertyIsEnumerable", "__guestObjectPropertyIsEnumerable", "Object.propertyIsEnumerable");
         runtime.deleteProperty(context.globalObject, "__guestObjectPrimitives", false);

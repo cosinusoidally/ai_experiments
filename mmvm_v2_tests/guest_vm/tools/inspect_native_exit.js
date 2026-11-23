@@ -72,7 +72,9 @@ function inspectExitCell(runtime, cell, depth) {
     }
     if (type === inspectExitHeap.Types.ARRAY && !depth) {
         var elements = records.arrayElements(reference);
-        result += " length=" + records.vectorLength(elements);
+        result += " length=" + records.arrayLength(reference) +
+            " initialized=" + records.vectorLength(elements) +
+            " capacity=" + records.vectorCapacity(elements);
         var element = 0;
         while (element < Math.min(records.vectorLength(elements), 4)) {
             result += "\n  [" + element + "]: " + inspectExitCell(runtime,

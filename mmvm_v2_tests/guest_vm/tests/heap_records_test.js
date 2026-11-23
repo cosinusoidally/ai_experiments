@@ -84,7 +84,7 @@
 
             var array = records.allocateArray(0, 3);
             var elements = records.arrayElements(array);
-            records.setVectorLength(elements, 3);
+            records.setArrayLength(array, 3);
             cells.writePrimitiveAt(records.arrayElementCell(array, 0), 7);
             cells.writeReferenceAt(records.arrayElementCell(array, 1), object);
             cells.writePrimitiveAt(records.arrayElementCell(array, 2), Math.PI);

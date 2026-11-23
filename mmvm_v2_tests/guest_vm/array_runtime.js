@@ -265,6 +265,68 @@ function __guestArraySliceGeneric(start, end) {
     return result;
 }
 
+/* A sparse concat may skip holes only when no skipped [[HasProperty]]/[[Get]]
+ * can observe an accessor or an indexed prototype. Otherwise use the ordinary
+ * index-by-index algorithm. This keeps huge empty arrays sparse without
+ * changing callback order on dynamic arrays. */
+(function () {
+    var ownNames = Object.getOwnPropertyNames, descriptor = Object.getOwnPropertyDescriptor;
+    var prototype = Object.getPrototypeOf, isArray = Array.isArray;
+    var object = Object, string = String, number = Number, rangeError = RangeError;
+    var call = Function.prototype.call.bind(Function.prototype.call);
+    var sort = __guestArraySort;
+    var MAX_ARRAY_LENGTH = 4294967295;
+    function arrayIndex(key) {
+        var index = number(key);
+        return index >= 0 && index < MAX_ARRAY_LENGTH && index === (index >>> 0) &&
+            string(index) === key ? index : -1;
+    }
+    function stableIndices(array) {
+        var names = ownNames(array), indices = [], index, key;
+        for (index = 0; index < names.length; index++) {
+            key = arrayIndex(names[index]);
+            if (key >= 0) {
+                var property = descriptor(array, names[index]);
+                if ("get" in property || "set" in property) return null;
+                indices.push(key);
+            }
+        }
+        var ancestor = prototype(array);
+        while (ancestor !== null) {
+            names = ownNames(ancestor);
+            for (index = 0; index < names.length; index++) {
+                if (arrayIndex(names[index]) >= 0) return null;
+            }
+            ancestor = prototype(ancestor);
+        }
+        call(sort, indices, function (left, right) { return left - right; });
+        return indices;
+    }
+    this.__guestArrayConcatGeneric = function () {
+        "use strict";
+        if (this === null || this === undefined) throw new TypeError("Array.concat receiver is null or undefined");
+        var receiver = object(this), result = [], next = 0;
+        for (var argument = -1; argument < arguments.length; argument++) {
+            var value = argument < 0 ? receiver : arguments[argument];
+            if (!isArray(value)) { result[next++] = value; continue; }
+            var length = value.length, indices = stableIndices(value), index;
+            if (indices !== null) {
+                for (index = 0; index < indices.length; index++) {
+                    if (indices[index] < length) result[next + indices[index]] = value[indices[index]];
+                }
+            } else {
+                for (index = 0; index < length; index++) {
+                    if (index in value) result[next + index] = value[index];
+                }
+            }
+            next += length;
+        }
+        if (next > MAX_ARRAY_LENGTH) throw new rangeError("invalid array length");
+        result.length = next;
+        return result;
+    };
+}());
+
 /* Iterative merge sort: comparator calls stay in the guest, and scratch space
  * is linear rather than an unbounded recursive JavaScript/host call stack.
  * Undefined entries precede holes and are never passed to the comparator. */

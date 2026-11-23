@@ -17,6 +17,10 @@
 
     var CELL_BYTES = ValueCells.PAYLOAD_BYTES;
     var INITIAL_ARRAY_CAPACITY = 4;
+    var DENSE_ARRAY_GROWTH_FACTOR = 4;
+    /* Bound hole-only preallocation; sequential writes can still grow dense
+     * storage geometrically beyond this initial-allocation policy. */
+    var MAX_INITIAL_DENSE_ARRAY_CAPACITY = 4096;
     var MAX_VECTOR_LENGTH = 134217726;
     /* Record algorithms (property storage and strings) are shared with
      * native execution. Cache code only: the memory argument selects a heap
@@ -136,7 +140,8 @@
     var ARRAY_PROPERTIES = 4;
     var ARRAY_ELEMENTS = 8;
     var ARRAY_RESERVED = 12;
-    var ARRAY_BYTES = 16;
+    var ARRAY_LENGTH = 16;
+    var ARRAY_BYTES = 24;
 
     var ENVIRONMENT_PARENT = 0;
     var ENVIRONMENT_COUNT = 4;
@@ -391,7 +396,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 120;
+    Records.NativeInterpreterContractVersion = 121;
     Records.HeapSizePolicy = Heap.SizePolicy;
     Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
@@ -505,6 +510,10 @@
         MAXIMUM_BUFFER_BYTES: Heap.BufferBackingPolicy.MAXIMUM_BYTES,
         PLATFORM_CALLOC_POINTER: Heap.HEADER_SIZE + PLATFORM_CALLOC_POINTER,
         INITIAL_ARRAY_CAPACITY: INITIAL_ARRAY_CAPACITY,
+        DENSE_ARRAY_GROWTH_FACTOR: DENSE_ARRAY_GROWTH_FACTOR,
+        MAX_INITIAL_DENSE_ARRAY_CAPACITY: MAX_INITIAL_DENSE_ARRAY_CAPACITY,
+        MAX_ARRAY_INDEX_DECIMAL_QUOTIENT: Math.floor((4294967295 - 1) / 10),
+        MAX_ARRAY_INDEX_DECIMAL_REMAINDER: (4294967295 - 1) % 10,
         MAX_VECTOR_LENGTH: MAX_VECTOR_LENGTH,
         PROPERTY_RECORD_SNAPSHOT_PIN: PROPERTY_RECORD_SNAPSHOT_PIN,
         PROPERTY_STORAGE_EPOCH_MASK: PROPERTY_STORAGE_EPOCH_MASK,
@@ -574,6 +583,8 @@
         OBJECT_PROTOTYPE: Heap.HEADER_SIZE + OBJECT_PROTOTYPE,
         ARRAY_ELEMENTS: Heap.HEADER_SIZE + ARRAY_ELEMENTS,
         ARRAY_RESERVED: Heap.HEADER_SIZE + ARRAY_RESERVED,
+        ARRAY_LENGTH: Heap.HEADER_SIZE + ARRAY_LENGTH,
+        ARRAY_PADDING: Heap.HEADER_SIZE + ARRAY_LENGTH + 4,
         FUNCTION_CLOSURE: Heap.HEADER_SIZE + FUNCTION_CLOSURE,
         FUNCTION_METADATA: Heap.HEADER_SIZE + FUNCTION_METADATA,
         FUNCTION_HOME_CONTEXT: Heap.HEADER_SIZE + FUNCTION_HOME_CONTEXT,
@@ -1703,7 +1714,7 @@
     };
 
     Records.prototype.arrayLength = function (array) {
-        return this.vectorLength(this.arrayElements(array));
+        return this.heap.readTrustedFieldU32(array, ARRAY_LENGTH, Heap.Types.ARRAY);
     };
 
     Records.prototype.arrayElementCell = function (array, index) {
@@ -1716,7 +1727,12 @@
     };
 
     Records.prototype.setArrayLength = function (array, length) {
-        this.setVectorLength(this.arrayElements(array), length);
+        if (length < 0 || length > 4294967295 || length !== Math.floor(length)) {
+            throw new RangeError("invalid array length");
+        }
+        this.heap.writeTrustedFieldU32(array, ARRAY_LENGTH, length, Heap.Types.ARRAY);
+        var elements = this.arrayElements(array);
+        this.setVectorLength(elements, Math.min(length, this.vectorCapacity(elements)));
     };
 
     Records.prototype.allocateEnvironment = function (parent, slotCount, program) {

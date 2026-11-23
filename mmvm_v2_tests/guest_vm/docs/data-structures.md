@@ -149,13 +149,25 @@ modern-Node ordering compatibility.
 
 ## Arrays and arguments
 
-An `ARRAY` holds prototype, named-property list, element-vector reference and
-a reserved field used by arguments mapping. `VALUE_VECTOR` stores logical
-length, capacity and inline tagged cells; capacity and logical length differ.
+Contract 121's 40-byte `ARRAY` holds prototype, named-property list,
+element-vector reference, arguments-mapping metadata, an independent uint32
+logical length and a zeroed padding word. Named accessors define these fields
+for both kernel backends. `VALUE_VECTOR` stores initialized physical length,
+capacity and inline tagged cells. Its length never exceeds capacity; neither
+value is the array's logical length, which can be 4294967295 with tiny storage.
 Absent cells are holes. Dense elements are not individually allocated objects.
 Numeric explicit descriptors coexist with dense storage, so get/set/delete
 must honor descriptor precedence and inherited semantics. Array length
 changes and methods cannot be implemented as unconditional vector writes.
+Hole-only constructor preallocation is bounded by
+`MAX_INITIAL_DENSE_ARRAY_CAPACITY`; sequential writes can grow past that
+threshold geometrically. A distant write uses a linked numeric descriptor
+instead of allocating a huge gap (`DENSE_ARRAY_GROWTH_FACTOR` selects the
+density policy). Native headers share one initializer. Dense mutations update
+both physical and logical lengths; explicit descriptors need no dense cell.
+Enumeration, deletion and GC traverse actual storage, not logical length.
+The portable root-discovery path no longer walks arrays with [[Get]]: the
+authoritative record visitor traces their vectors and descriptor edges.
 
 Virtual descriptor attributes have one policy in property_semantics_kernel.js.
 The native/portable adapters feed ordinary descriptor decisions with the
@@ -164,6 +176,16 @@ an own-index probe recognizes either representation. Array-length definition
 is a storage adapter with descending deletion and partial-shrink rollback,
 not a plain ordinary-property write. Callback conversions must revalidate
 current length writability rather than restore a pre-callback value.
+Truncation selects descending actual own indices across both representations,
+including indices above INT32_MAX. Unsigned lengths use named word/cell
+adapters, not signed integer writes. A rejected strict assignment to a read-only
+length still throws when the requested length equals the current length.
+
+Sparse concat may enumerate stable own data indices only after checking that
+there are no indexed accessors or indexed prototype properties. Otherwise it
+uses the observable index-by-index guest algorithm, so callbacks can create
+future elements. Overflow is checked after the required copies. Plain dense
+arrays retain native fast paths; sparse/descriptor cases use guest algorithms.
 
 Arguments use mapping metadata linking selected indices to environment
 slots. Strict/unmapped cases and detachment use explicit flags/sentinels.

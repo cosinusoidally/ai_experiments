@@ -102,8 +102,9 @@
                       OBJECT_GET_OWN_PROPERTY_NAMES: 135,
                       OBJECT_INDEXED_VIEW_LENGTH: 136,
                       UINT8_CLAMPED_ARRAY_CONSTRUCTOR: 137,
-                      NUMBER_VALUE_OF: 138};
-    Intrinsics.LAST_ID = Intrinsics.NUMBER_VALUE_OF;
+                      NUMBER_VALUE_OF: 138,
+                      OBJECT_GET_PROTOTYPE_OF: 139};
+    Intrinsics.LAST_ID = Intrinsics.OBJECT_GET_PROTOTYPE_OF;
     /* A non-constructible native-shaped public function delegates to guest
      * bytecode through a traced closure vector, never a host callback. */
     Intrinsics.GuestBuiltinLayout = {IMPLEMENTATION: 0, LENGTH: 1};
@@ -148,7 +149,7 @@
         "String.toUpperCase": 0, "String.toLocaleUpperCase": 0,
         "String.trim": 0, "Boolean.toString": 0, "Boolean.valueOf": 0,
         "Number.toString": 1, "Number.toLocaleString": 0,
-        "Number.valueOf": 0, "Number.toFixed": 1, "Number.toExponential": 1,
+        "Number.valueOf": 0, "Number.toFixed": 1,
         "Number.toExponential": 1, "Number.toPrecision": 1,
         "Math.abs": 1, "Math.acos": 1, "Math.asin": 1, "Math.atan": 1,
         "Math.atan2": 2, "Math.ceil": 1, "Math.cos": 1, "Math.exp": 1,
@@ -203,7 +204,7 @@
             Intrinsics.PARSE_INT, Intrinsics.IS_NAN, Intrinsics.ARRAY_BUFFER_CONSTRUCTOR,
             Intrinsics.ARRAY_REVERSE, Intrinsics.NUMBER_TO_PRECISION,
             Intrinsics.NUMBER_TO_FIXED, Intrinsics.MATH_RANDOM, Intrinsics.OBJECT_CONSTRUCTOR,
-            Intrinsics.OBJECT_TO_STRING, Intrinsics.OBJECT_VALUE_OF, Intrinsics.ARRAY_IS_ARRAY,
+            Intrinsics.OBJECT_TO_STRING, Intrinsics.OBJECT_VALUE_OF, Intrinsics.OBJECT_GET_PROTOTYPE_OF, Intrinsics.ARRAY_IS_ARRAY,
             Intrinsics.STRING_VALUE_OF, Intrinsics.STRING_TO_UPPER_CASE,
             Intrinsics.STRING_TO_LOWER_CASE, Intrinsics.NUMBER_TO_STRING, Intrinsics.NUMBER_VALUE_OF,
             Intrinsics.GC_STRESS_CONTROL, Intrinsics.OPCODE_COUNTER_WORD,

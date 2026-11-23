@@ -12,6 +12,7 @@
     var call = __guestObjectPrimitives.call;
     var primitive = __guestObjectPrimitives.primitive;
     var propertyKey = __guestObjectPrimitives.propertyKey;
+    var getPrototype = __guestObjectPrimitives.getPrototypeOf;
     var indexedViewDescriptorAllowed = GuestVMIndexedViewDescriptorAllowed;
     var MAX_ARRAY_LENGTH = 4294967295;
     var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
@@ -23,6 +24,9 @@
     }
     this.__guestStringConvert = function (value) {
         return arguments.length ? propertyKey(value) : "";
+    };
+    this.__guestObjectGetPrototypeOf = function (value) {
+        return getPrototype(requireObject(value));
     };
     var substring = String.prototype.substring;
     var floor = Math.floor, ceil = Math.ceil;

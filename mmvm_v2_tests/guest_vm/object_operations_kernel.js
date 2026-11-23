@@ -221,7 +221,7 @@
                     PROPERTY_ATTRIBUTE_WRITABLE) === 0) writable = 0;
             attributes = virtualPropertyAttributesKernel(VirtualPropertyKind.ARRAY_LENGTH, writable);
             value = engineScratchRightAddress(heapBase, state);
-            setValueCellInt32(value, vectorLength(heapBase, arrayElements(heapBase, owner)));
+            unsignedWordCellKernel(value, arrayLength(heapBase, owner));
         } else if (entry !== 0) {
             attributes = ownPropertyEntryAttributesKernel(heapBase, owner, entry);
             value = ownPropertyEntryValueCellKernel(heapBase, owner, entry);
@@ -634,6 +634,14 @@
     }
 
     function propertyKeyIndexKernel(heapBase, key) {
+        var word = arrayIndexWordKernel(heapBase, key);
+        if (word < 0) return -1;
+        return word;
+    }
+
+    /* Canonical ES5 array indices include the complete uint32 range except
+     * UINT32_MAX. -1 is therefore an unambiguous invalid-index sentinel. */
+    function arrayIndexWordKernel(heapBase, key) {
         var length = stringLength(heapBase, key);
         if (length === 0) return -1;
         if (length > 1) {
@@ -648,9 +656,10 @@
                 heapBase, key, characterIndex) & 65535;
             if (character < 48) return -1;
             if (character > 57) return -1;
-            if (parsed > divideI32(MAX_SIGNED_INT32, 10)) return -1;
-            parsed = parsed * 10 + character - 48;
-            if (parsed < 0) return -1;
+            if (parsed < 0 || parsed > RecordLayout.MAX_ARRAY_INDEX_DECIMAL_QUOTIENT) return -1;
+            if (parsed === RecordLayout.MAX_ARRAY_INDEX_DECIMAL_QUOTIENT &&
+                    character - ASCII_ZERO > RecordLayout.MAX_ARRAY_INDEX_DECIMAL_REMAINDER) return -1;
+            parsed = (parsed * DECIMAL_RADIX + character - ASCII_ZERO) | 0;
             characterIndex = characterIndex + 1;
         }
         return parsed;
@@ -835,6 +844,7 @@
         propertyNameReferenceKernel: propertyNameReferenceKernel,
         propertyKeyMatchesIndexKernel: propertyKeyMatchesIndexKernel,
         propertyKeyIndexKernel: propertyKeyIndexKernel,
+        arrayIndexWordKernel: arrayIndexWordKernel,
         hasPropertyKernel: hasPropertyKernel,
         hasEnumerationKeyKernel: hasEnumerationKeyKernel,
         arrayHasOwnElementKernel: arrayHasOwnElementKernel,

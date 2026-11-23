@@ -305,6 +305,20 @@
     check(Object.keys(privateArray).join(",") === "0,2,extra" &&
           Object.getOwnPropertyNames(privateArray).join(",") === "0,1,2,length,extra",
           "materialized indices have numeric ordering and honor enumerability");
+    var wideArray = new Array(4294967295);
+    wideArray[4294967294] = "edge";
+    Object.defineProperty(wideArray, "987654321", {value: "stop", configurable: false});
+    wideArray["4294967295"] = "ordinary";
+    wideArray.length = 0;
+    check(wideArray.length === 987654322 && wideArray[4294967294] === undefined &&
+          wideArray[987654321] === "stop" && wideArray["4294967295"] === "ordinary",
+          "uint32 sparse truncation deletes descending and stops at a nonconfigurable index");
+    var concatInput = [1, , 3], concatReads = 0;
+    Object.defineProperty(concatInput, "0", {get: function () {
+        concatReads++; concatInput[1] = 2; return 1;
+    }});
+    check(concatInput.concat([4]).join(",") === "1,2,3,4" && concatReads === 1,
+          "concat does not skip future holes when an indexed getter can fill them");
     var message = "object operations integration passed";
     if (typeof print === "function") print(message);
     else console.log(message);

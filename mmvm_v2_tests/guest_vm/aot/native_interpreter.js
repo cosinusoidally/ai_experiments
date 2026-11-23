@@ -1027,7 +1027,7 @@
                             arrayGetKeyCell + RecordLayout.VALUE_CELL_LOW, arrayGetKeyTag),
                             loadI32F64(engineScratchLeftAddress(
                                 heapBase, state))) === 0) {
-                        arrayGetSupported = 0;
+                        if (arrayGetSupported === 1) arrayGetSupported = 3;
                     }
                     }
                 } else if (arrayGetKeyTag === RecordLayout.VALUE_TAG_REFERENCE) {
@@ -1500,7 +1500,8 @@
                     else if (arrayPropertyHead(heapBase, arraySetObject) !== 0) {
                         if (indexedOwnPropertyDescriptorKernel(heapBase, state, arraySetObject, arraySetIndex) !== 0) arraySetSupported = 0;
                         else if (arrayReserved(heapBase, arraySetObject) === 0 &&
-                                arraySetIndex >= vectorLength(heapBase, arrayElements(heapBase, arraySetObject))) {
+                                (arrayLength(heapBase, arraySetObject) >= 0 &&
+                                 arraySetIndex >= arrayLength(heapBase, arraySetObject))) {
                             var setLengthEntry = findOwnPropertyEntryKernel(heapBase, state, arraySetObject, arrayLengthKey);
                             if (setLengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase,
                                     arraySetObject, setLengthEntry) & PROPERTY_ATTRIBUTE_WRITABLE) === 0) arraySetSupported = 0;
@@ -1511,6 +1512,11 @@
                     arraySetVector = arrayElements(heapBase, arraySetObject);
                     var arraySetCapacity = vectorCapacity(
                         heapBase, arraySetVector);
+                    if (arraySetIndex >= RecordLayout.MAX_VECTOR_LENGTH ||
+                        (arraySetIndex >= RecordLayout.INITIAL_ARRAY_CAPACITY &&
+                         arraySetIndex >= arraySetCapacity * RecordLayout.DENSE_ARRAY_GROWTH_FACTOR)) arraySetSupported = 0;
+                }
+                if (arraySetSupported === 1) {
                     if (arraySetIndex >= arraySetCapacity) {
                         var grownArrayCapacity = grownArrayCapacityKernel(
                             arraySetCapacity, arraySetIndex + 1);
@@ -1612,6 +1618,10 @@
                         setVectorLength(heapBase, arraySetVector,
                                         arraySetIndex + 1);
                     }
+                    if (arrayLength(heapBase, arraySetObject) >= 0 &&
+                            arraySetIndex >= arrayLength(heapBase, arraySetObject)) {
+                        setArrayLength(heapBase, arraySetObject, arraySetIndex + 1);
+                    }
                 } else if (arraySetSupported === 2) {
                     var indexedSetViewKind = bufferViewKind(heapBase, arraySetObject);
                     var indexedSetBufferLength = bufferViewLength(
@@ -1688,8 +1698,15 @@
                         }
                     }
                 } else if (arraySetSupported !== 3) {
-                    return unsupportedExitKernel(heapBase, state, frame, pc,
-                        opcode, initialBudget - budget);
+                    var sparseSetResult = executeNamedPropertySetKernel(heapBase, state,
+                        frame, pc, opcode, initialBudget - budget, arraySetObjectCell,
+                        arraySetKeyCell, instructionRegisterCellAddress(0, registerAddress,
+                            Bytecode.SET_PROPERTY, THIRD_OPERAND, arraySetSourceIndex),
+                        stringSupport, arrayLengthKey, arrayPrototype);
+                    if (sparseSetResult === PropertyInstructionResult.FRAME_ENTERED) {
+                        return resumeEnteredPropertyFrameKernel(heapBase, state, initialBudget - budget);
+                    }
+                    if (sparseSetResult !== PropertyInstructionResult.COMPLETED) return sparseSetResult;
                 }
                 pc = pc + FOUR_WORD_INSTRUCTION;
             } else if (opcode === Bytecode.SET_PROPERTY_CONST || opcode === Bytecode.SET_PROPERTY) {
@@ -4963,6 +4980,8 @@
                             bytecodeArgumentCount * RecordLayout.VALUE_CELL_BYTES);
                         setArrayElements(heapBase, calleeArgumentsArray,
                                          calleeArgumentsVector);
+                        setArrayLength(heapBase, calleeArgumentsArray, bytecodeArgumentCount);
+                        setArrayPadding(heapBase, calleeArgumentsArray, 0);
                         setArrayReserved(heapBase,
                                          calleeArgumentsArray,
                                          calleeEnvironment);
@@ -5687,6 +5706,10 @@
         }
         var setPropertyObject = valueCellReference(0, setPropertyObjectCell);
         var setPropertyObjectType = recordType(heapBase, setPropertyObject);
+        var sparseArrayIndex = -1;
+        if (setPropertyObjectType === RecordLayout.HEAP_TYPE_ARRAY && arrayReserved(heapBase, setPropertyObject) === 0) {
+            sparseArrayIndex = arrayIndexWordKernel(heapBase, setPropertyNamedKey);
+        }
         if (stringVirtualPropertyKindKernel(heapBase, setPropertyObject,
                 setPropertyNamedKey, stringSupport) !== 0) return rejectedPropertyWriteKernel(
             heapBase, state, frame, pc, opcode, instructions, stringSupport,
@@ -5697,8 +5720,22 @@
                 arrayReserved(heapBase, setPropertyObject) === 0 &&
                 stringKeysEqualKernel(heapBase, setPropertyNamedKey,
                     arrayLengthKey) === 1) {
+            if (arrayPropertyHead(heapBase, setPropertyObject) !== 0) {
+                var assignedLengthEntry = findOwnPropertyEntryKernel(heapBase, state, setPropertyObject, arrayLengthKey);
+                if (assignedLengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase,
+                        setPropertyObject, assignedLengthEntry) & PROPERTY_ATTRIBUTE_WRITABLE) === 0) return rejectedPropertyWriteKernel(
+                    heapBase, state, frame, pc, opcode, instructions, stringSupport,
+                    FOUR_WORD_INSTRUCTION, PropertyWriteAction.NON_WRITABLE);
+            }
             if (setArrayLengthKernel(heapBase, state, setPropertyObject,
                     setPropertySourceCell, arrayLengthKey) === 0) {
+                var arrayLengthResult = defineArrayLengthDescriptorKernel(heapBase, state,
+                    engineScratchLeftAddress(heapBase, state), setPropertyObjectCell,
+                    setPropertyObject, arrayLengthKey, setPropertySourceCell, 0, 0, 0, 0, 0);
+                if (arrayLengthResult === 1) return PropertyInstructionResult.COMPLETED;
+                if (arrayLengthResult === DEFINE_PROPERTY_REJECTED) return rejectedPropertyWriteKernel(
+                    heapBase, state, frame, pc, opcode, instructions, stringSupport,
+                    FOUR_WORD_INSTRUCTION, PropertyWriteAction.NON_WRITABLE);
                 return unsupportedExitKernel(heapBase, state, frame,
                     pc, opcode, instructions);
             }
@@ -5744,6 +5781,14 @@
         if (setPropertyRecord === 0) {
             /* Rejection follows the guest strict/sloppy rule without
              * asking the embedding interpreter to perform the write. */
+            if (sparseArrayIndex !== -1 &&
+                    (sparseArrayIndex ^ IEEE754_SIGN_BIT) >= (arrayLength(heapBase, setPropertyObject) ^ IEEE754_SIGN_BIT)) {
+                var sparseLengthEntry = findOwnPropertyEntryKernel(heapBase, state, setPropertyObject, arrayLengthKey);
+                if (sparseLengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase,
+                        setPropertyObject, sparseLengthEntry) & PROPERTY_ATTRIBUTE_WRITABLE) === 0) return rejectedPropertyWriteKernel(
+                    heapBase, state, frame, pc, opcode, instructions, stringSupport,
+                    FOUR_WORD_INSTRUCTION, PropertyWriteAction.NON_WRITABLE);
+            }
             if (objectIsExtensibleKernel(heapBase, setPropertyObject) === 0) {
                     return rejectedPropertyWriteKernel(
                         heapBase, state, frame, pc, opcode,
@@ -5791,6 +5836,10 @@
             var setPropertyDestination = propertyDescriptorValueCell(0, setPropertyDescriptor);
             var setPropertySource = setPropertySourceCell;
             copyValueCell(setPropertyDestination, setPropertySource);
+        if (sparseArrayIndex !== -1 &&
+                (sparseArrayIndex ^ IEEE754_SIGN_BIT) >= (arrayLength(heapBase, setPropertyObject) ^ IEEE754_SIGN_BIT)) {
+            setArrayLength(heapBase, setPropertyObject, sparseArrayIndex + 1);
+        }
         return PropertyInstructionResult.COMPLETED;
     }
 
@@ -5923,7 +5972,7 @@
                     var propertyArrayVector = arrayElements(
                         heapBase, propertyObject);
                     var propertyLengthTarget = propertyTargetCell;
-                    setValueCellInt32(propertyLengthTarget, vectorLength(heapBase, propertyArrayVector));
+                    unsignedWordCellKernel(propertyLengthTarget, arrayLength(heapBase, propertyObject));
                     propertyRecord = PROPERTY_FOUND_SENTINEL;
                     propertyObject = 0;
                 }
@@ -6005,6 +6054,12 @@
             propertyRecord = findOwnPropertyEntryKernel(heapBase, state, propertyObject, propertyConstantKey);
             if (propertyRecord !== 0) { propertyOwner = propertyObject; break; }
             if (recordType(heapBase, propertyObject) === RecordLayout.HEAP_TYPE_ARRAY) {
+                if (arrayReserved(heapBase, propertyObject) === 0 &&
+                        stringKeysEqualKernel(heapBase, propertyConstantKey, arrayLengthKey) === 1) {
+                    unsignedWordCellKernel(propertyTargetCell, arrayLength(heapBase, propertyObject));
+                    propertyRecord = PROPERTY_FOUND_SENTINEL;
+                    break;
+                }
                 var indexedValue = namedArrayIndexCellKernel(heapBase, propertyObject, propertyConstantKey);
                 if (indexedValue !== 0) {
                     copyValueCell(propertyTargetCell, indexedValue);
@@ -6385,6 +6440,24 @@
             callTargetIndex * RecordLayout.VALUE_CELL_BYTES;
         if (explicitTargetCell !== 0) intrinsicTarget = explicitTargetCell;
         var intrinsicHandled = 0;
+        if (intrinsicId === NativeIntrinsics.OBJECT_GET_PROTOTYPE_OF) {
+            var prototypeSource = programArgumentCellKernel(heapBase, intrinsicArgumentsVector, registerAddress, 0);
+            if (prototypeSource !== 0 && valueCellTag(0, prototypeSource) === VALUE_TAG_REFERENCE &&
+                    objectReferenceIsObjectKernel(heapBase, valueCellReference(0, prototypeSource)) !== 0) {
+                var prototype = objectPrototypeReferenceKernel(heapBase, valueCellReference(0, prototypeSource));
+                if (prototype === 0) {
+                    setValueCellUndefined(intrinsicTarget);
+                    setValueCellTag(0, intrinsicTarget, VALUE_TAG_NULL);
+                } else setValueCellReference(intrinsicTarget, prototype);
+                intrinsicHandled = 1;
+            } else {
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
         if (intrinsicId === NativeIntrinsics.OBJECT_INDEXED_VIEW_LENGTH) {
             var indexedViewArgument = programArgumentCellKernel(heapBase, intrinsicArgumentsVector, registerAddress, 0);
             var indexedViewSize = -1;
@@ -7520,6 +7593,32 @@
         return intrinsicHandled;
     }
 
+    /* Validate a uint32 logical length without signed conversion/wraparound
+     * accepting fractions or infinities. Publish its word through the engine
+     * scratch field; -1 itself is a valid length, not an error sentinel. */
+    function arrayLengthArgumentKernel(heapBase, state, cell) {
+        var tag = valueCellTag(0, cell), length = 0;
+        if (tag === VALUE_TAG_INT32) {
+            length = valueCellInt32(0, cell);
+            if (length < 0) return 0;
+        } else if (tag === VALUE_TAG_DOUBLE) {
+            var high = valueCellDoubleHigh(0, cell), low = valueCellDoubleLow(0, cell);
+            if ((high & IEEE754_ABSOLUTE_MASK) !== 0 || low !== 0) {
+                if (high < 0) return 0;
+                var exponent = ((high >>> IEEE754_EXPONENT_SHIFT) & IEEE754_EXPONENT_VALUE_MASK) - IEEE754_EXPONENT_BIAS;
+                if (exponent < 0 || exponent >= IEEE754_WORD_BITS) return 0;
+                var highFractionBits = IEEE754_FRACTION_BITS - IEEE754_WORD_BITS;
+                if (exponent <= highFractionBits) {
+                    if (low !== 0 || (high & ((1 << (highFractionBits - exponent)) - 1)) !== 0) return 0;
+                } else if ((low & ((1 << (IEEE754_FRACTION_BITS - exponent)) - 1)) !== 0) return 0;
+                length = toInt32F64(loadF64(valueCellPayloadAddress(0, cell)));
+            }
+        } else if (tag === VALUE_TAG_TRUE) length = 1;
+        else if (tag !== VALUE_TAG_FALSE && tag !== VALUE_TAG_NULL) return 0;
+        setEngineScratchRight(heapBase, state, length);
+        return 1;
+    }
+
     function arrayConstructorKernel(
             heapBase, state, intrinsicTarget, registerAddress,
             intrinsicArgumentsVector, intrinsicArgumentCount,
@@ -7530,69 +7629,21 @@
             var arrayConstructLength = intrinsicArgumentCount;
             var arrayConstructCopiesArguments = 1;
             if (intrinsicArgumentCount === 1) {
-                var arrayLengthDescriptor = heapBase +
-                    intrinsicArgumentsVector + RecordLayout.VECTOR_CELLS;
-                if (valueCellTag(0, arrayLengthDescriptor) !==
-                    VALUE_TAG_INT32) {
-                    arrayConstructValid = 0;
-                }
-                var arrayLengthRegister = 0;
-                if (arrayConstructValid === 1) {
-                    arrayLengthRegister = valueCellInt32(
-                        0, arrayLengthDescriptor);
-                }
-                var arrayLengthCell = registerAddress +
-                    arrayLengthRegister * RecordLayout.VALUE_CELL_BYTES;
-                if (arrayConstructValid === 1) {
-                    if (valueCellTag(0, arrayLengthCell) ===
-                        VALUE_TAG_INT32) {
-                        arrayConstructLength = valueCellInt32(
-                            0, arrayLengthCell);
-                        if (arrayConstructLength < 0) {
-                            arrayConstructValid = 0;
-                        }
+                var arrayLengthCell = programArgumentCellKernel(heapBase, intrinsicArgumentsVector, registerAddress, 0);
+                if (arrayLengthCell === 0) arrayConstructValid = 0;
+                else {
+                    var arrayLengthTag = valueCellTag(0, arrayLengthCell);
+                    if (arrayLengthTag === VALUE_TAG_INT32 || arrayLengthTag === VALUE_TAG_DOUBLE) {
+                        arrayConstructValid = arrayLengthArgumentKernel(heapBase, state, arrayLengthCell);
+                        arrayConstructLength = engineScratchRight(heapBase, state);
                         arrayConstructCopiesArguments = 0;
-                    } else if (valueCellTag(0, arrayLengthCell) ===
-                               VALUE_TAG_DOUBLE) {
-                        var arrayLengthScratch =
-                            engineScratchLeftAddress(heapBase, state);
-                        var arrayLengthLimitScratch =
-                            engineScratchRightAddress(heapBase, state);
-                        store32(arrayLengthScratch, 0);
-                        store32(arrayLengthLimitScratch, 2147483647);
-                        if (equalF64(loadF64(
-                                arrayLengthCell + RecordLayout.VALUE_CELL_LOW),
-                                loadF64(arrayLengthCell +
-                                        RecordLayout.VALUE_CELL_LOW)) === 0) {
-                            arrayConstructValid = 0;
-                        } else if (lessF64(loadF64(
-                                       arrayLengthCell + RecordLayout.VALUE_CELL_LOW),
-                                   loadI32F64(arrayLengthScratch)) === 1) {
-                            arrayConstructValid = 0;
-                        } else if (greaterF64(loadF64(
-                                       arrayLengthCell + RecordLayout.VALUE_CELL_LOW),
-                                   loadI32F64(
-                                       arrayLengthLimitScratch)) === 1) {
-                            arrayConstructValid = 0;
-                        } else {
-                            arrayConstructLength =
-                                toNativeI32F64(loadF64(
-                                    arrayLengthCell + RecordLayout.VALUE_CELL_LOW));
-                            store32(arrayLengthScratch,
-                                    arrayConstructLength);
-                            if (equalF64(loadF64(
-                                    arrayLengthCell + RecordLayout.VALUE_CELL_LOW),
-                                    loadI32F64(
-                                        arrayLengthScratch)) === 0) {
-                                arrayConstructValid = 0;
-                            } else {
-                                arrayConstructCopiesArguments = 0;
-                            }
-                        }
                     }
                 }
             }
+            if (arrayConstructValid === 0) return 0;
             var arrayConstructCapacity = arrayConstructLength;
+            if (arrayConstructCopiesArguments === 0 &&
+                (arrayConstructCapacity < 0 || arrayConstructCapacity > RecordLayout.MAX_INITIAL_DENSE_ARRAY_CAPACITY)) arrayConstructCapacity = RecordLayout.INITIAL_ARRAY_CAPACITY;
             if (arrayConstructCapacity < RecordLayout.INITIAL_ARRAY_CAPACITY) {
                 arrayConstructCapacity = RecordLayout.INITIAL_ARRAY_CAPACITY;
             }
@@ -7622,8 +7673,9 @@
                               arrayConstructVectorBytes);
                 setRecordMark(heapBase, arrayConstructVector, 0);
                 setRecordFlags(heapBase, arrayConstructVector, 0);
-                setVectorLength(heapBase, arrayConstructVector,
-                                arrayConstructLength);
+                var arrayConstructPhysicalLength = arrayConstructLength;
+                if (arrayConstructPhysicalLength < 0 || arrayConstructPhysicalLength > arrayConstructCapacity) arrayConstructPhysicalLength = arrayConstructCapacity;
+                setVectorLength(heapBase, arrayConstructVector, arrayConstructPhysicalLength);
                 setVectorCapacity(heapBase, arrayConstructVector,
                                   arrayConstructCapacity);
                 var clearedConstructedArrayCells =
@@ -7673,18 +7725,8 @@
                 }
             }
             if (arrayConstructValid === 1) {
-                setRecordType(heapBase, arrayConstructObject,
-                              RecordLayout.HEAP_TYPE_ARRAY);
-                setRecordSize(heapBase, arrayConstructObject,
-                              ARRAY_RECORD_BYTES);
-                setRecordMark(heapBase, arrayConstructObject, 0);
-                setRecordFlags(heapBase, arrayConstructObject, 0);
-                setArrayPrototype(heapBase, arrayConstructObject,
-                                  arrayPrototype);
-                setArrayPropertyHead(heapBase, arrayConstructObject, 0);
-                setArrayElements(heapBase, arrayConstructObject,
-                                 arrayConstructVector);
-                setArrayReserved(heapBase, arrayConstructObject, 0);
+                initializeArrayHeaderKernel(heapBase, arrayConstructObject, arrayConstructVector, arrayPrototype,
+                    arrayConstructLength);
                 setValueCellReference(intrinsicTarget, arrayConstructObject);
                 setEngineHeapBump(heapBase, state,
                     arrayConstructObject + ARRAY_RECORD_BYTES);
@@ -8141,35 +8183,26 @@
             if (lengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase,
                     array, lengthEntry) & PROPERTY_ATTRIBUTE_WRITABLE) === 0) return 0;
         }
-        var tag = valueCellTag(0, source);
-        var length = 0;
-        if (tag === VALUE_TAG_INT32) {
-            length = valueCellInt32(0, source);
-        } else if (tag === VALUE_TAG_DOUBLE) {
-            length = toInt32F64(loadF64(source + RecordLayout.VALUE_CELL_LOW));
-            setEngineScratchLeft(heapBase, state, length);
-            if (equalF64(loadF64(source + RecordLayout.VALUE_CELL_LOW),
-                    loadI32F64(engineScratchLeftAddress(heapBase, state))) === 0) return 0;
-        } else if (tag === VALUE_TAG_TRUE) {
-            length = 1;
-        } else if (tag !== VALUE_TAG_FALSE && tag !== VALUE_TAG_NULL) return 0;
-        if (length < 0 || length > RecordLayout.MAX_VECTOR_LENGTH) return 0;
+        if (arrayLengthArgumentKernel(heapBase, state, source) === 0) return 0;
+        var length = engineScratchRight(heapBase, state);
         while (property !== 0) {
-            var propertyIndex = propertyKeyIndexKernel(heapBase, ownPropertyEntryKeyKernel(heapBase, array, property));
-            if (propertyIndex >= length) return 0;
+            var propertyIndex = arrayIndexWordKernel(heapBase, ownPropertyEntryKeyKernel(heapBase, array, property));
+            if (propertyIndex !== -1 && unsignedWordLessKernel(propertyIndex, length) === 0) return 0;
             property = previousOwnPropertyEntryKernel(heapBase, array, property);
         }
-        if (ensureArrayCapacityKernel(heapBase, state, array, length) === 0) return 0;
         var vector = arrayElements(heapBase, array);
         var previousLength = vectorLength(heapBase, vector);
+        var physicalLength = length;
+        if (physicalLength < 0 || physicalLength > vectorCapacity(heapBase, vector)) physicalLength = vectorCapacity(heapBase, vector);
         var first = previousLength;
-        var end = length;
-        if (length < previousLength) {
-            first = length;
+        var end = physicalLength;
+        if (physicalLength < previousLength) {
+            first = physicalLength;
             end = previousLength;
         }
         var cleared = clearAbsentValueCellsKernel(heapBase, vector, first, end);
-        setVectorLength(heapBase, vector, length);
+        setVectorLength(heapBase, vector, physicalLength);
+        setArrayLength(heapBase, array, length);
         return 1;
     }
 
@@ -8317,6 +8350,7 @@
                 var guardedArray = valueCellReference(0, guardedReceiver);
                 if (recordType(heapBase, guardedArray) === RecordLayout.HEAP_TYPE_ARRAY &&
                     (arrayPropertyHead(heapBase, guardedArray) !== 0 ||
+                     arrayLength(heapBase, guardedArray) !== vectorLength(heapBase, arrayElements(heapBase, guardedArray)) ||
                      objectIsExtensibleKernel(heapBase, guardedArray) === 0)) return 0;
             }
         }
@@ -8456,6 +8490,7 @@
                 spliceIndex = spliceIndex + 1;
             }
             setVectorLength(heapBase, spliceVector, spliceNewLength);
+            setArrayLength(heapBase, spliceArray, spliceNewLength);
             intrinsicHandled = 1;
         }
         }
@@ -8654,6 +8689,7 @@
                     setValueCellUndefined(popLastCell);
                     setVectorLength(heapBase, popVector,
                                     popLength - 1);
+                    setArrayLength(heapBase, popArray, popLength - 1);
                 }
                 intrinsicHandled = 1;
             }
@@ -8713,6 +8749,7 @@
                     setValueCellUndefined(shiftLastCell);
                     setVectorLength(heapBase, shiftVector,
                                     shiftLength - 1);
+                    setArrayLength(heapBase, shiftArray, shiftLength - 1);
                 }
                 intrinsicHandled = 1;
             }
@@ -8814,6 +8851,7 @@
             }
             pushLength = pushLength + intrinsicArgumentCount;
             setVectorLength(heapBase, pushVector, pushLength);
+            setArrayLength(heapBase, pushArray, pushLength);
             setValueCellInt32(intrinsicTarget, pushLength);
             intrinsicHandled = 1;
         }
@@ -8888,6 +8926,7 @@
             }
             unshiftLength = unshiftLength + intrinsicArgumentCount;
             setVectorLength(heapBase, unshiftVector, unshiftLength);
+            setArrayLength(heapBase, unshiftArray, unshiftLength);
             setValueCellInt32(intrinsicTarget, unshiftLength);
             intrinsicHandled = 1;
         }
@@ -11495,6 +11534,35 @@
         return 1;
     }
 
+    function unsignedWordLessKernel(left, right) {
+        if ((left ^ MINIMUM_INT32) < (right ^ MINIMUM_INT32)) return 1;
+        return 0;
+    }
+
+    function unsignedWordCellKernel(target, word) {
+        if (word >= 0) setValueCellInt32(target, word);
+        else {
+            var mantissa = word & IEEE754_ABSOLUTE_MASK;
+            setValueCellDoubleBits(target, mantissa << UINT32_MANTISSA_LOW_SHIFT,
+                POSITIVE_2147483648_HIGH | (mantissa >>> UINT32_MANTISSA_HIGH_SHIFT));
+        }
+        return 1;
+    }
+
+    function initializeArrayHeaderKernel(heapBase, array, vector, prototype, length) {
+        setRecordType(heapBase, array, RecordLayout.HEAP_TYPE_ARRAY);
+        setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
+        setRecordMark(heapBase, array, 0);
+        setRecordFlags(heapBase, array, 0);
+        setArrayPrototype(heapBase, array, prototype);
+        setArrayPropertyHead(heapBase, array, 0);
+        setArrayElements(heapBase, array, vector);
+        setArrayReserved(heapBase, array, 0);
+        setArrayLength(heapBase, array, length);
+        setArrayPadding(heapBase, array, 0);
+        return 1;
+    }
+
     function allocateArrayKernel(heapBase, state, targetCell, capacity,
                                  arrayPrototype) {
         var vectorBytes = RecordLayout.VECTOR_CELLS + capacity * RecordLayout.VALUE_CELL_BYTES;
@@ -11518,14 +11586,8 @@
         setVectorCapacity(heapBase, vector, capacity);
         var clearedArrayCells = clearAbsentValueCellsKernel(
             heapBase, vector, 0, capacity);
-        setRecordType(heapBase, array, RecordLayout.HEAP_TYPE_ARRAY);
-        setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
-        setRecordMark(heapBase, array, 0);
-        setRecordFlags(heapBase, array, 0);
-        setArrayPrototype(heapBase, array, arrayPrototype);
-        setArrayPropertyHead(heapBase, array, 0);
-        setArrayElements(heapBase, array, vector);
-        setArrayReserved(heapBase, array, 0);
+        initializeArrayHeaderKernel(heapBase, array, vector, arrayPrototype,
+            vectorLength(heapBase, vector));
         setValueCellReference(targetCell, array);
         setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
         return 1;
@@ -11868,14 +11930,8 @@
             if (owner !== 0) ownerCount = enumerationOwnCountKernel(
                 heapBase, state, object, owner, arrayLengthKey, stringSupport);
         }
-        setRecordType(heapBase, array, RecordLayout.HEAP_TYPE_ARRAY);
-        setRecordSize(heapBase, array, ARRAY_RECORD_BYTES);
-        setRecordMark(heapBase, array, 0);
-        setRecordFlags(heapBase, array, 0);
-        setArrayPrototype(heapBase, array, arrayPrototype);
-        setArrayPropertyHead(heapBase, array, 0);
-        setArrayElements(heapBase, array, vector);
-        setArrayReserved(heapBase, array, 0);
+        initializeArrayHeaderKernel(heapBase, array, vector, arrayPrototype,
+            vectorLength(heapBase, vector));
         setValueCellReference(targetCell, array);
         setEngineHeapBump(heapBase, state, array + ARRAY_RECORD_BYTES);
         if (virtualLength !== 0) setValueCellReference(
@@ -14077,11 +14133,10 @@
             array, lengthKey, valueCell, writableCell, enumerableCell,
             configurableCell, getterCell, setterCell) {
         var elements = arrayElements(heapBase, array);
-        var oldLength = vectorLength(heapBase, elements), length = oldLength;
+        var oldLength = arrayLength(heapBase, array), length = oldLength;
         if (valueCell !== 0) {
-            if (valueCellTag(0, valueCell) !== VALUE_TAG_INT32) return 0;
-            length = valueCellInt32(0, valueCell);
-            if (length < 0) return 0;
+            if (arrayLengthArgumentKernel(heapBase, state, valueCell) === 0) return 0;
+            length = engineScratchRight(heapBase, state);
         }
         var entry = findOwnPropertyEntryKernel(heapBase, state, array, lengthKey);
         var attributes = PropertyAttributes.WRITABLE;
@@ -14098,16 +14153,33 @@
             entry = appendOwnPropertyEntryKernel(heapBase, state, array, lengthKey, attributes);
             if (entry === 0) return 2;
         }
-        if (length > oldLength) {
-            if (ensureArrayCapacityKernel(heapBase, state, array, length) === 0) return 2;
-        }
         var rejected = 0, index = oldLength;
         var keyCell = engineScratchLeftAddress(heapBase, state);
         var receiver = engineScratchRightAddress(heapBase, state);
         setValueCellReference(receiver, array);
-        while (index > length) {
-            index = index - 1;
-            setValueCellInt32(keyCell, index);
+        while (unsignedWordLessKernel(length, index) !== 0) {
+            /* Walk present storage, not a possibly billion-element logical
+             * gap. Select the next own index below the deletion cursor. */
+            var next = vectorLength(heapBase, elements);
+            if (index >= 0 && next > index) next = index;
+            next = next - 1;
+            var selectedKey = 0;
+            var property = lastOwnPropertyEntryKernel(heapBase, array);
+            while (property !== 0) {
+                var candidateKey = ownPropertyEntryKeyKernel(heapBase, array, property);
+                var candidate = arrayIndexWordKernel(heapBase, candidateKey);
+                if (candidate !== -1 && unsignedWordLessKernel(candidate, length) === 0 &&
+                    unsignedWordLessKernel(candidate, index) !== 0 &&
+                    (next === -1 || unsignedWordLessKernel(next, candidate) !== 0)) {
+                    next = candidate;
+                    selectedKey = candidateKey;
+                }
+                property = previousOwnPropertyEntryKernel(heapBase, array, property);
+            }
+            if (next === -1 || unsignedWordLessKernel(next, length) !== 0) break;
+            index = next;
+            if (index < 0) setValueCellReference(keyCell, selectedKey);
+            else setValueCellInt32(keyCell, index);
             if (deletePropertyKernel(heapBase, state, target, receiver, keyCell, 0, lengthKey, 0) === 0) return 0;
             if (valueCellTag(0, target) === VALUE_TAG_FALSE) {
                 length = index + 1;
@@ -14115,10 +14187,16 @@
                 rejected = 1;
             }
         }
-        setVectorLength(heapBase, arrayElements(heapBase, array), length);
+        var physicalLength = length;
+        if (physicalLength < 0 || physicalLength > vectorCapacity(heapBase, elements)) physicalLength = vectorCapacity(heapBase, elements);
+        if (physicalLength < vectorLength(heapBase, elements)) {
+            var cleared = clearAbsentValueCellsKernel(heapBase, elements, physicalLength, vectorLength(heapBase, elements));
+        }
+        setVectorLength(heapBase, elements, physicalLength);
+        setArrayLength(heapBase, array, length);
         if (entry !== 0) {
             setOwnPropertyEntryAttributesKernel(heapBase, array, entry, attributes);
-            setValueCellInt32(ownPropertyEntryValueCellKernel(heapBase, array, entry), length);
+            unsignedWordCellKernel(ownPropertyEntryValueCellKernel(heapBase, array, entry), length);
         }
         if (rejected !== 0) return DEFINE_PROPERTY_REJECTED;
         setValueCellReference(target, array);
@@ -14152,7 +14230,10 @@
         if (objectType === RecordLayout.HEAP_TYPE_ARRAY && arrayReserved(heapBase, object) === 0 &&
             stringKeysEqualKernel(heapBase, key, lengthKey) === 1) arrayLengthDefinition = 1;
         var arrayIndex = -1;
-        if (objectType === RecordLayout.HEAP_TYPE_ARRAY) arrayIndex = propertyKeyIndexKernel(heapBase, key);
+        if (objectType === RecordLayout.HEAP_TYPE_ARRAY) {
+            if (arrayReserved(heapBase, object) === 0) arrayIndex = arrayIndexWordKernel(heapBase, key);
+            else arrayIndex = propertyKeyIndexKernel(heapBase, key);
+        }
 
         var valueCell = descriptorDataFieldCellKernel(heapBase, state, descriptor,
             stringSupport, DescriptorFieldIndex.VALUE);
@@ -14248,15 +14329,15 @@
             if (stringVirtualPropertyValueKernel(heapBase, state, oldValueCell, object,
                     key, stringSupport, stringKind) === 0) return 2;
         }
-        if (arrayIndex >= 0) {
+        if (arrayIndex !== -1) {
             var elements = arrayElements(heapBase, object);
-            var oldLength = vectorLength(heapBase, elements);
-            if (arrayIndex >= oldLength && arrayReserved(heapBase, object) === 0) {
+            var oldLength = arrayLength(heapBase, object);
+            if (unsignedWordLessKernel(arrayIndex, oldLength) === 0 && arrayReserved(heapBase, object) === 0) {
                 var lengthEntry = findOwnPropertyEntryKernel(heapBase, state, object, lengthKey);
                 if (lengthEntry !== 0 && (ownPropertyEntryAttributesKernel(heapBase, object,
                         lengthEntry) & PropertyAttributes.WRITABLE) === 0) return DEFINE_PROPERTY_REJECTED;
             }
-            if (existingProperty === 0 && arrayIndex < oldLength) {
+            if (existingProperty === 0 && arrayIndex >= 0 && arrayIndex < vectorLength(heapBase, elements)) {
                 var denseCell = vectorCellAddress(heapBase, elements, arrayIndex);
                 if (valueCellTag(0, denseCell) !== 0) {
                     exists = 1;
@@ -14310,8 +14391,7 @@
             copyValueCell(savedDescriptorValue, valueCell);
             valueCell = savedDescriptorValue;
         }
-        if (arrayIndex >= 0) {
-            if (ensureArrayCapacityKernel(heapBase, state, object, arrayIndex + 1) === 0) return 2;
+        if (arrayIndex !== -1) {
             if (mappedArgument !== 0 && (accessorDescriptor !== 0 ||
                     (writableCell !== 0 && (requested & PropertyAttributes.WRITABLE) === 0))) {
                 if (detachArgumentMappingKernel(heapBase, state, object, arrayIndex) === 0) return 2;
@@ -14341,10 +14421,10 @@
             if (setterCell !== 0) setOwnPropertyEntrySetterKernel(heapBase, object, property, setter);
         } else if (valueCell !== 0) copyValueCell(destination, valueCell);
         if (mappedArgument !== 0 && valueCell !== 0) copyValueCell(mappedArgument, valueCell);
-        if (arrayIndex >= 0) {
+        if (arrayIndex !== -1) {
             var finalElements = arrayElements(heapBase, object);
-            if (arrayIndex >= vectorLength(heapBase, finalElements)) setVectorLength(heapBase, finalElements, arrayIndex + 1);
-            setValueCellTag(0, vectorCellAddress(heapBase, finalElements, arrayIndex), 0);
+            if (unsignedWordLessKernel(arrayIndex, arrayLength(heapBase, object)) === 0) setArrayLength(heapBase, object, arrayIndex + 1);
+            if (arrayIndex >= 0 && arrayIndex < vectorLength(heapBase, finalElements)) setValueCellTag(0, vectorCellAddress(heapBase, finalElements, arrayIndex), 0);
         }
         /* Lookup caches hold owner/entry references and read current flags
          * and values on use. Appending invalidates through the storage epoch;
@@ -16213,6 +16293,7 @@
 
     function arrayJoinKernel(heapBase, state, targetCell, joinArray, joinSeparator, stringSupport) {
         if (recordType(heapBase, joinArray) !== RecordLayout.HEAP_TYPE_ARRAY) return 0;
+        if (arrayLength(heapBase, joinArray) !== vectorLength(heapBase, arrayElements(heapBase, joinArray))) return 0;
         var joinValid = 1, joinAllocationFailed = 0;
             var joinVector = 0;
             var joinLength = 0;
@@ -16253,6 +16334,17 @@
                 var joinMeasureTag = 0;
                 if (joinMeasureIndex < joinLength) {
                     joinMeasureTag = valueCellTag(0, joinMeasureCell);
+                    if (joinMeasureTag === 0) {
+                        /* A hole is Get, not an own-storage-only read. The
+                         * generic algorithm observes inherited indexed values. */
+                        var joinAncestor = objectPrototypeReferenceKernel(heapBase, joinArray);
+                        while (joinAncestor !== 0) {
+                            if (indexedOwnPropertyDescriptorKernel(heapBase, state, joinAncestor, joinMeasureIndex) !== 0) return 0;
+                            if (recordType(heapBase, joinAncestor) === RecordLayout.HEAP_TYPE_ARRAY &&
+                                arrayHasOwnElementKernel(heapBase, joinAncestor, joinMeasureIndex) !== 0) return 0;
+                            joinAncestor = objectPrototypeReferenceKernel(heapBase, joinAncestor);
+                        }
+                    }
                     if (joinMeasureTag === VALUE_TAG_DOUBLE ||
                             joinMeasureTag === VALUE_TAG_TRUE || joinMeasureTag === VALUE_TAG_FALSE) {
                         var primitiveVector = joinPrimitiveVectorKernel(heapBase, state, joinVector, stringSupport);
@@ -16464,14 +16556,8 @@
             copyValueCell(resultCell, sourceCell);
             copyIndex = copyIndex + 1;
         }
-        setRecordType(heapBase, resultArray, RecordLayout.HEAP_TYPE_ARRAY);
-        setRecordSize(heapBase, resultArray, ARRAY_RECORD_BYTES);
-        setRecordMark(heapBase, resultArray, 0);
-        setRecordFlags(heapBase, resultArray, 0);
-        setArrayPrototype(heapBase, resultArray, arrayPrototype);
-        setArrayPropertyHead(heapBase, resultArray, 0);
-        setArrayElements(heapBase, resultArray, resultVector);
-        setArrayReserved(heapBase, resultArray, 0);
+        initializeArrayHeaderKernel(heapBase, resultArray, resultVector, arrayPrototype,
+            vectorLength(heapBase, resultVector));
         setEngineHeapBump(heapBase, state,
                           resultArray + ARRAY_RECORD_BYTES);
         setValueCellReference(targetCell, resultArray);
@@ -16511,6 +16597,8 @@
                     RecordLayout.HEAP_TYPE_ARRAY) {
                     addedLength = vectorLength(heapBase,
                         arrayElements(heapBase, argumentReference));
+                    if (arrayLength(heapBase, argumentReference) !== addedLength ||
+                        arrayPropertyHead(heapBase, argumentReference) !== 0) return 0;
                 }
             }
             if (addedLength > RecordLayout.MAX_VECTOR_LENGTH - resultLength) return 0;
@@ -16576,14 +16664,8 @@
             }
             argumentIndex = argumentIndex + 1;
         }
-        setRecordType(heapBase, resultArray, RecordLayout.HEAP_TYPE_ARRAY);
-        setRecordSize(heapBase, resultArray, ARRAY_RECORD_BYTES);
-        setRecordMark(heapBase, resultArray, 0);
-        setRecordFlags(heapBase, resultArray, 0);
-        setArrayPrototype(heapBase, resultArray, arrayPrototype);
-        setArrayPropertyHead(heapBase, resultArray, 0);
-        setArrayElements(heapBase, resultArray, resultVector);
-        setArrayReserved(heapBase, resultArray, 0);
+        initializeArrayHeaderKernel(heapBase, resultArray, resultVector, arrayPrototype,
+            vectorLength(heapBase, resultVector));
         setEngineHeapBump(heapBase, state,
                           resultArray + ARRAY_RECORD_BYTES);
         setValueCellReference(targetCell, resultArray);
@@ -18403,6 +18485,10 @@
             allocateArrayBufferKernel: allocateArrayBufferKernel,
             initializeBufferBackingKernel: initializeBufferBackingKernel,
             allocateArrayKernel: allocateArrayKernel,
+            initializeArrayHeaderKernel: initializeArrayHeaderKernel,
+            arrayLengthArgumentKernel: arrayLengthArgumentKernel,
+            unsignedWordCellKernel: unsignedWordCellKernel,
+            unsignedWordLessKernel: unsignedWordLessKernel,
             allocateErrorKernel: allocateErrorKernel,
             errorConstructorKernel: errorConstructorKernel,
             allocateObjectKernel: allocateObjectKernel,
