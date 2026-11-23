@@ -151,7 +151,8 @@ modern-Node ordering compatibility.
 
 Contract 121's 40-byte `ARRAY` holds prototype, named-property list,
 element-vector reference, arguments-mapping metadata, an independent uint32
-logical length and a zeroed padding word. Named accessors define these fields
+logical length and (since contract 124) a named-index descriptor summary in
+the former padding word. Named accessors define these fields
 for both kernel backends. `VALUE_VECTOR` stores initialized physical length,
 capacity and inline tagged cells. Its length never exceeds capacity; neither
 value is the array's logical length, which can be 4294967295 with tiny storage.
@@ -174,6 +175,16 @@ arguments additionally initialize their inline descriptors/environment link.
 Dense mutations update
 both physical and logical lengths; explicit descriptors need no dense cell.
 Enumeration, deletion and GC traverse actual storage, not logical length.
+The descriptor summary is a monotonic structural fact, not a value cache:
+zero proves that no named array-index descriptor has ever been inserted.
+Named numeric insertion sets it in both allocation paths; mapped arguments
+initialize it for their inline numeric descriptors, and cloning preserves it.
+Deletion may leave a conservative positive. Dense elements do not set it.
+This lets dense access and prototype-hole lookup skip linked descriptor scans
+without suppressing a getter, inherited element or later numeric definition.
+It uses no extra storage, pointer, host object or GC edge. Numeric descriptor
+lookup also rejects unequal cached key hashes before exact comparison;
+integer hashing/comparison process each decimal digit once, including INT32_MIN.
 The portable root-discovery path no longer walks arrays with [[Get]]: the
 authoritative record visitor traces their vectors and descriptor edges.
 

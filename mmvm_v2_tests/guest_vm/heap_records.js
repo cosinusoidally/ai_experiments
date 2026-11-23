@@ -164,6 +164,7 @@
     var ARRAY_ELEMENTS = 8;
     var ARRAY_RESERVED = 12;
     var ARRAY_LENGTH = 16;
+    var ARRAY_INDEXED_DESCRIPTORS = 20;
     var ARRAY_BYTES = 24;
 
     var ENVIRONMENT_PARENT = 0;
@@ -419,7 +420,7 @@
     /* Executable compatibility changes independently of the heap layout.
      * Bump when native kernel/backend semantics change: loaders deliberately
      * do not fingerprint current sources at startup. */
-    Records.NativeInterpreterContractVersion = 123;
+    Records.NativeInterpreterContractVersion = 124;
     Records.HeapSizePolicy = Heap.SizePolicy;
     Records.ProgramDebugLayout = ProgramDebugLayout;
     /* Ordinary-object header flags retain internal [[Class]] identity even
@@ -444,6 +445,16 @@
     Records.grownArrayCapacity = grownArrayCapacityKernel;
     Records.initialArrayCapacity = initialArrayCapacityKernel;
     Records.denseArrayIndex = denseArrayIndexKernel;
+    Records.isDirectArrayIndex = function (key) {
+        return typeof key === "number" && key >= 0 &&
+            key < 4294967295 && key === Math.floor(key);
+    };
+    Records.isArrayIndex = function (key) {
+        if (Records.isDirectArrayIndex(key)) return true;
+        if (key === "") return false;
+        var number = Number(key);
+        return Records.isDirectArrayIndex(number) && String(number) === key;
+    };
 
     Records.PropertyStorageLayout = {
         ENTRY_BYTES: PROPERTY_ENTRY_BYTES,
@@ -610,7 +621,7 @@
         ARRAY_ELEMENTS: Heap.HEADER_SIZE + ARRAY_ELEMENTS,
         ARRAY_RESERVED: Heap.HEADER_SIZE + ARRAY_RESERVED,
         ARRAY_LENGTH: Heap.HEADER_SIZE + ARRAY_LENGTH,
-        ARRAY_PADDING: Heap.HEADER_SIZE + ARRAY_LENGTH + 4,
+        ARRAY_INDEXED_DESCRIPTORS: Heap.HEADER_SIZE + ARRAY_INDEXED_DESCRIPTORS,
         FUNCTION_CLOSURE: Heap.HEADER_SIZE + FUNCTION_CLOSURE,
         FUNCTION_METADATA: Heap.HEADER_SIZE + FUNCTION_METADATA,
         FUNCTION_HOME_CONTEXT: Heap.HEADER_SIZE + FUNCTION_HOME_CONTEXT,
@@ -1372,6 +1383,10 @@
                 PROPERTY_BYTES, this.objectPropertyHead(object), keyAddress,
                 attributes === undefined ? DEFAULT_ATTRIBUTES : attributes, 0);
             this.setObjectPropertyHead(object, property);
+            if (this.heap.recordType(object) === Heap.Types.ARRAY &&
+                    Records.isArrayIndex(this.readString(keyAddress))) {
+                this.setArrayHasIndexedDescriptors(object, 1);
+            }
             return property;
         }
         this.heap.writeTrustedFieldU32(property, PROPERTY_ATTRIBUTES,
@@ -1455,6 +1470,11 @@
                               this.countOwnProperties(source)) :
             knownPropertyCount;
         if (!propertyCount) return 0;
+        if (this.heap.recordType(target) === Heap.Types.ARRAY) {
+            this.setArrayHasIndexedDescriptors(target,
+                this.heap.recordType(source) === Heap.Types.ARRAY ?
+                this.arrayHasIndexedDescriptors(source) : 1);
+        }
         if (this.heap.recordType(target) === Heap.Types.OBJECT) {
             var storage = this.allocatePropertyStorage(propertyCount);
             if (this.heap.recordType(source) === Heap.Types.OBJECT &&
@@ -1741,6 +1761,16 @@
 
     Records.prototype.arrayLength = function (array) {
         return this.heap.readTrustedFieldU32(array, ARRAY_LENGTH, Heap.Types.ARRAY);
+    };
+
+    /* A monotonic shape summary: zero proves no named numeric descriptors.
+     * Deletion may leave a conservative positive; it never creates a false
+     * negative. Dense elements are deliberately not part of this summary. */
+    Records.prototype.arrayHasIndexedDescriptors = function (array) {
+        return this.heap.readTrustedFieldU32(array, ARRAY_INDEXED_DESCRIPTORS, Heap.Types.ARRAY);
+    };
+    Records.prototype.setArrayHasIndexedDescriptors = function (array, value) {
+        this.heap.writeTrustedFieldU32(array, ARRAY_INDEXED_DESCRIPTORS, value ? 1 : 0, Heap.Types.ARRAY);
     };
 
     Records.prototype.arrayElementCell = function (array, index) {

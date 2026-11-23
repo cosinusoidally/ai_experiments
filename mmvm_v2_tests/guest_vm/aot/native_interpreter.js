@@ -4981,7 +4981,8 @@
                         setArrayElements(heapBase, calleeArgumentsArray,
                                          calleeArgumentsVector);
                         setArrayLength(heapBase, calleeArgumentsArray, bytecodeArgumentCount);
-                        setArrayPadding(heapBase, calleeArgumentsArray, 0);
+                        setArrayHasIndexedDescriptors(heapBase, calleeArgumentsArray, 0);
+                        if (bytecodeArgumentCount > 0) setArrayHasIndexedDescriptors(heapBase, calleeArgumentsArray, 1);
                         setArrayReserved(heapBase,
                                          calleeArgumentsArray,
                                          calleeEnvironment);
@@ -11559,7 +11560,7 @@
         setArrayElements(heapBase, array, vector);
         setArrayReserved(heapBase, array, 0);
         setArrayLength(heapBase, array, length);
-        setArrayPadding(heapBase, array, 0);
+        setArrayHasIndexedDescriptors(heapBase, array, 0);
         return 1;
     }
 
@@ -18341,13 +18342,20 @@
      * engine. */
     function numericStringKeyMatchesKernel(heapBase, key, number, length) {
         if (stringLength(heapBase, key) !== length) return 0;
-        var character = 0;
-        while (character < length) {
+        var firstDigit = 0;
+        if (number < 0) {
+            if (stringCharacterCodeUnit(heapBase, key, 0) !== ASCII_MINUS) return 0;
+            firstDigit = 1;
+        } else number = -number;
+        var character = length - 1;
+        while (character >= firstDigit) {
             if (stringCharacterCodeUnit(heapBase, key, character) !==
-                    integerDecimalCodeUnitKernel(number, character)) return 0;
-            character = character + 1;
+                    ASCII_ZERO - (number % DECIMAL_RADIX)) return 0;
+            number = divideI32(number, DECIMAL_RADIX);
+            character = character - 1;
         }
-        return 1;
+        if (number === 0) return 1;
+        return 0;
     }
 
     /* Numeric keys use the same canonical decimal text/hash as string keys,
@@ -18365,9 +18373,10 @@
                 while (probes < capacity) {
                     var entry = propertyIndexSlot(heapBase, index, bucket);
                     if (entry === 0) return 0;
-                    if (numericStringKeyMatchesKernel(heapBase,
-                            propertyStorageKeyAt(heapBase, storage, entry - 1),
-                            number, length) === 1) return entry;
+                    var indexedKey = propertyStorageKeyAt(heapBase, storage, entry - 1);
+                    if (stringKeyHashKernel(heapBase, indexedKey) === hash &&
+                            numericStringKeyMatchesKernel(heapBase, indexedKey,
+                                number, length) === 1) return entry;
                     bucket = (bucket + 1) & (capacity - 1);
                     probes = probes + 1;
                 }
@@ -18375,9 +18384,10 @@
         }
         var property = lastOwnPropertyEntryKernel(heapBase, object);
         while (property !== 0) {
-            if (numericStringKeyMatchesKernel(heapBase,
-                    ownPropertyEntryKeyKernel(heapBase, object, property),
-                    number, length) === 1) return property;
+            var linkedKey = ownPropertyEntryKeyKernel(heapBase, object, property);
+            if (stringKeyHashKernel(heapBase, linkedKey) === hash &&
+                    numericStringKeyMatchesKernel(heapBase, linkedKey,
+                        number, length) === 1) return property;
             property = previousOwnPropertyEntryKernel(heapBase, object, property);
         }
         return 0;

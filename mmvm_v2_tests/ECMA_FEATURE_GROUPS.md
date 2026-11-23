@@ -136,6 +136,37 @@ Those full results remain labeled `d5cac4c`, rather than being relabeled as
 new runs. Final Node core also passes. Follow-up self-build, executable smoke
 checks and paired scores are recorded below when complete.
 
+### Profile-driven lookup follow-up (contract 124, acceptance in progress)
+
+The first stock probes caught a serious regression that quick correctness
+alone did not expose: PdfJS **830 -> 167** (control `81d2238`, new contract
+123). Decimal formatting was an initial hypothesis, not the measured cause;
+that formatter is unchanged by this follow-up. A bounded native CPU sample
+finds **34.1% numeric name matching + 25.9% repeated integer digit counting**.
+Correct hole/prototype lookup had introduced repeated linked-descriptor scans.
+
+- Arrays now carry a monotonic named-index descriptor summary in their former
+  padding word. Zero proves absence of named index descriptors; descriptor
+  insertion/mapped arguments establish a positive, and cloning preserves it.
+  Deletion may leave a conservative positive, never a false negative. Dense
+  elements remain separate. There is no new allocation or GC edge.
+- The portable classifier is shared with the runtime. Numeric-key hashing and
+  exact comparison process digits once; lookup compares cached full hashes
+  before characters, retaining exact comparison for collisions.
+- Existing object integration now checks an earlier hole miss followed by
+  numeric prototype definition, an own getter, deletion and prototype cleanup.
+  Node core passes; focused selection remains **85 pass / one existing
+  Node-failing extension / two existing skips**, including both large switches.
+- Fresh stock observations: Box2D **412 -> 415**, CodeLoad **97.7 -> 95.4**,
+  PdfJS **830 -> 808**. PdfJS process time recovers **38.69 -> 18.97 s**;
+  control is 18.69 s. These are selected individual probes, not an all-Octane
+  score or a controlled claim of universal performance parity.
+- Profiling now supports a freestanding executable directly via
+  `profile_native_vm.js --executable`; no `js_runner.exe` rebuild is needed.
+- Receipts: ignored `artifacts/ecma-array-perf-pdfjs.log`,
+  `ecma-arrays-final123-stock-*`, `ecma-arrays-indexed-*`. Full validation and
+  cross-host/self-build identity remain pending for contract 124.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts

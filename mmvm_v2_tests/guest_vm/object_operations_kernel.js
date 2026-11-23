@@ -466,6 +466,8 @@
      * array cell. Resolve its insertion-order entry without allocating a
      * temporary decimal key string. The returned address is transient. */
     function indexedOwnPropertyDescriptorKernel(heapBase, state, owner, index) {
+        if (recordType(heapBase, owner) === HEAP_TYPE_ARRAY &&
+                arrayHasIndexedDescriptors(heapBase, owner) === 0) return 0;
         var digits = integerDecimalLengthKernel(index);
         var hash = integerPropertyKeyHashKernel(index, digits);
         var entry = numericOwnPropertyEntryKernel(heapBase, state, owner, index, digits, hash);
@@ -645,7 +647,7 @@
         var length = stringLength(heapBase, key);
         if (length === 0) return -1;
         if (length > 1) {
-            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === 48) {
+            if ((stringCharacterCodeUnit(heapBase, key, 0) & 65535) === ASCII_ZERO) {
                 return -1;
             }
         }
@@ -654,8 +656,8 @@
         while (characterIndex < length) {
             var character = stringCharacterCodeUnit(
                 heapBase, key, characterIndex) & 65535;
-            if (character < 48) return -1;
-            if (character > 57) return -1;
+            if (character < ASCII_ZERO) return -1;
+            if (character > ASCII_DIGIT_NINE) return -1;
             if (parsed < 0 || parsed > RecordLayout.MAX_ARRAY_INDEX_DECIMAL_QUOTIENT) return -1;
             if (parsed === RecordLayout.MAX_ARRAY_INDEX_DECIMAL_QUOTIENT &&
                     character - ASCII_ZERO > RecordLayout.MAX_ARRAY_INDEX_DECIMAL_REMAINDER) return -1;

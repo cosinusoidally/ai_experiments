@@ -2,7 +2,7 @@
  * the parent of the one measured process, so /proc memory access needs no
  * debugger, C helper, extra guest VM, or system configuration change.
  * Usage: node .../profile_native_vm.js [--after-seconds N]
- *        IMAGE SECONDS PROGRAM [ARGS...]
+ *        [--executable] IMAGE SECONDS PROGRAM [ARGS...]
  * The optional warmup is excluded by subtracting two counter reads. */
 var fs = require("fs");
 var spawn = require("child_process").spawn;
@@ -15,14 +15,17 @@ if (args[0] === "--after-seconds") {
         throw new Error("--after-seconds must be 0..120");
     }
 }
+var executable = args[0] === "--executable";
+if (executable) args.shift();
 var image = args.shift();
 var seconds = Number(args.shift());
 if (!(seconds > 0 && seconds <= 120)) throw new Error("seconds must be 1..120");
 if (afterSeconds + seconds > 120) throw new Error("total profiling window exceeds 120 seconds");
 if (!image || !args.length) throw new Error("expected IMAGE SECONDS PROGRAM [ARGS...]");
 var metadata = JSON.parse(fs.readFileSync(image + ".symbols.json", "utf8"));
-var child = spawn("./artifacts/js_runner.exe", [image,
-    "guest_vm/tools/native_profile_entry.js"].concat(args),
+var child = spawn(executable ? image : "./artifacts/js_runner.exe",
+    (executable ? [] : [image]).concat([
+    "guest_vm/tools/native_profile_entry.js"]).concat(args),
     {stdio: ["ignore", "pipe", "inherit"]});
 var pending = "", started = false, baseline = null, completed = false;
 var sampleTimer = null;

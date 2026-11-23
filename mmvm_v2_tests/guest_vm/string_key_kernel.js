@@ -114,10 +114,19 @@
      * same spelling and code-unit stream, including negative integers. */
     function integerPropertyKeyHashKernel(number, length) {
         var hash = RecordLayout.STRING_HASH_OFFSET_BASIS;
-        var index = 0;
-        while (index < length) {
-            hash = stringHashStep(hash, integerDecimalCodeUnitKernel(number, index));
-            index = index + 1;
+        if (number < 0) {
+            hash = stringHashStep(hash, ASCII_MINUS);
+            length = length - 1;
+        } else number = -number;
+        var divisor = 1;
+        while (length > 1) {
+            divisor = divisor * DECIMAL_RADIX;
+            length = length - 1;
+        }
+        while (divisor !== 0) {
+            hash = stringHashStep(hash, ASCII_ZERO - divideI32(number, divisor));
+            number = number % divisor;
+            divisor = divideI32(divisor, DECIMAL_RADIX);
         }
         return hash;
     }

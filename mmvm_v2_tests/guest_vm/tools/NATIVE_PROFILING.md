@@ -13,6 +13,13 @@ No symbol sidecar, debugger, compiler, Python or binutils is required.
 
 ## Host build phases
 
+For a freestanding executable, `profile_native_vm.js` also accepts
+`[--after-seconds N] --executable IMAGE.exe SECONDS PROGRAM [ARGS...]`.
+Use the matching `IMAGE.exe.symbols.json` emitted by the profile-image build
+(or copied from the same snapshot's sidecar). This mode does not require
+`artifacts/js_runner.exe`. It still runs one measured process, with libc
+`profil` and a bounded external reader, not a timer thread in the VM.
+
 For a focused profile of snapshot construction, run:
 
 ```

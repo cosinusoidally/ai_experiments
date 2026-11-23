@@ -6117,17 +6117,8 @@
         return array;
     };
 
-    function isArrayIndex(key) {
-        if (isDirectArrayIndex(key)) return true;
-        if (key === "") return false;
-        var number = Number(key);
-        return isDirectArrayIndex(number) && String(number) === key;
-    }
-
-    function isDirectArrayIndex(key) {
-        return typeof key === "number" && key >= 0 &&
-               key < 4294967295 && key === Math.floor(key);
-    }
+    var isArrayIndex = HeapRecords.isArrayIndex;
+    var isDirectArrayIndex = HeapRecords.isDirectArrayIndex;
 
     function integerHandle(handle, length) {
         handle = Number(handle);

@@ -319,6 +319,26 @@
     }});
     check(concatInput.concat([4]).join(",") === "1,2,3,4" && concatReads === 1,
           "concat does not skip future holes when an indexed getter can fill them");
+    var prototypeLength = Array.prototype.length, inheritedArray = [];
+    inheritedArray.annotation = "ordinary named property";
+    check(inheritedArray[173] === undefined, "hole before prototype mutation");
+    try {
+        Object.defineProperty(Array.prototype, "173", {
+            value: "inherited index", writable: true, configurable: true
+        });
+        check(inheritedArray[173] === "inherited index",
+              "named numeric prototype definition is visible after an earlier miss");
+        Object.defineProperty(inheritedArray, "173", {
+            get: function () { return "own getter"; }, configurable: true
+        });
+        check(inheritedArray[173] === "own getter", "indexed getter overrides inherited data");
+        delete inheritedArray[173];
+        check(inheritedArray[173] === "inherited index", "deleting an indexed getter reveals the prototype");
+    } finally {
+        delete Array.prototype[173];
+        Array.prototype.length = prototypeLength;
+    }
+    check(inheritedArray[173] === undefined, "prototype deletion restores the hole");
     var message = "object operations integration passed";
     if (typeof print === "function") print(message);
     else console.log(message);

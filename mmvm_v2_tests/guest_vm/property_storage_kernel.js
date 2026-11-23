@@ -415,6 +415,10 @@
         setPropertyReserved(heapBase, property, 0);
         setValueCellUndefined(propertyValueCellAddress(heapBase, property));
         setOwnPropertyStorageKernel(heapBase, owner, property);
+        if (recordType(heapBase, owner) === HEAP_TYPE_ARRAY &&
+                arrayIndexWordKernel(heapBase, key) !== -1) {
+            setArrayHasIndexedDescriptors(heapBase, owner, 1);
+        }
         setEngineHeapBump(heapBase, state, property + PROPERTY_RECORD_BYTES);
         return property;
     }
