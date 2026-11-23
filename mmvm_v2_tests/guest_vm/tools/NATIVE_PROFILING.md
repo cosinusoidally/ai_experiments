@@ -1,5 +1,16 @@
 # Bounded native interpreter sampling
 
+## Cross-host instruction selection
+
+`inspect_kernel_build.js --code-digests` prints each compiled kernel function's
+name, code-relative offset, length and byte digest. Run it under Node or
+js_min to localize a bootstrap discrepancy without constructing another full
+snapshot. It uses the common exact hash arithmetic; a matching digest is a
+diagnostic, not a substitute for a complete byte comparison of final images.
+`inspect_kernel_build.js FUNCTION_NAME` also prints the host-visible source
+and logical locals, useful when an old shell decompiler changes local names.
+No symbol sidecar, debugger, compiler, Python or binutils is required.
+
 ## Host build phases
 
 For a focused profile of snapshot construction, run:

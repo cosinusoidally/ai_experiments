@@ -116,6 +116,26 @@ and build identity must use the corrected image, not contract 121.
   corrects the intermediate policy's lost passes under unchanged limits.
 - Receipt: ignored `artifacts/ecma-arrays-budget-ecma.log` and `.time`.
 
+### Cross-host build follow-up (contract 123)
+
+The contract-122 Node and genuine self-build images matched, but js_min's
+image differed in three stack-displacement bytes and its fingerprint. The
+old shell's decompiler reused the new local name `prototype` for another
+dispatcher temporary. Renaming it to `prototypeReference` restores identical
+host-visible locals and code. No host-specific substitution, machine-code
+patch or new compiler semantics is involved. Helper-extraction and declaration-
+moving experiments were not retained.
+
+`inspect_kernel_build.js --code-digests` now localizes these differences by
+function, reusing the common exact byte-hash arithmetic. Complete Node/js_min
+snapshots compare equal: SHA-256
+`48f93cf36fa72e8ca1069bd4ed2986082d286e64d6dc7709cff3112b377ceb17`.
+The final **702935-byte native kernel is byte-identical** to the contract-122
+Node image used for the full ECMA, Test262 and fourteen Octane quick checks.
+Those full results remain labeled `d5cac4c`, rather than being relabeled as
+new runs. Final Node core also passes. Follow-up self-build, executable smoke
+checks and paired scores are recorded below when complete.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts

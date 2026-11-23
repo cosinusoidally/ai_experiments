@@ -8,6 +8,7 @@
  * Add --predecode first to inspect the opt-in operand view. --symbols reports
  * sorted code-relative labels for native debugger/profiler attribution.
  * --blocks [function-name] reports the shared control-flow block graph.
+ * --code-digests compares per-function machine-code fingerprints across hosts.
  */
 (function (shellArguments) {
     var nodeHost = typeof module !== "undefined" && module.exports;
@@ -93,6 +94,29 @@
         }
         var functions = engine.ir.functions;
         var labels = engine.nativeResult.symbols;
+        if (args[0] === "--code-digests") {
+            /* A quick cross-host diagnostic, not a replacement for comparing
+             * complete snapshots. Reuse the common exact hash arithmetic. */
+            var hashing = nodeHost ? require("../string_hash.js") : GuestVMStringHash;
+            var ranges = [], rangeIndex;
+            for (rangeIndex = 0; rangeIndex < functions.length; rangeIndex++) {
+                var name = functions[rangeIndex].name;
+                ranges.push({name: name, start: labels["kernel_function_" + name]});
+            }
+            ranges.sort(function (left, right) { return left.start - right.start; });
+            for (rangeIndex = 0; rangeIndex < ranges.length; rangeIndex++) {
+                var range = ranges[rangeIndex];
+                var end = rangeIndex + 1 < ranges.length ? ranges[rangeIndex + 1].start : engine.nativeResult.length;
+                var hash = hashing.offsetBasis, byteIndex = range.start;
+                while (byteIndex < end) {
+                    hash = hashing.step(hash, engine.nativeResult.bytes ?
+                        engine.nativeResult.bytes[byteIndex] : peek8(engine.nativeResult.pointer + byteIndex));
+                    byteIndex++;
+                }
+                report(range.name + " " + range.start + " " + (end - range.start) + " " + (hash >>> 0));
+            }
+            return;
+        }
         if (args[0] === "--symbols") {
             var symbols = [], symbol;
             for (symbol in labels) {

@@ -6444,11 +6444,11 @@
             var prototypeSource = programArgumentCellKernel(heapBase, intrinsicArgumentsVector, registerAddress, 0);
             if (prototypeSource !== 0 && valueCellTag(0, prototypeSource) === VALUE_TAG_REFERENCE &&
                     objectReferenceIsObjectKernel(heapBase, valueCellReference(0, prototypeSource)) !== 0) {
-                var prototype = objectPrototypeReferenceKernel(heapBase, valueCellReference(0, prototypeSource));
-                if (prototype === 0) {
+                var prototypeReference = objectPrototypeReferenceKernel(heapBase, valueCellReference(0, prototypeSource));
+                if (prototypeReference === 0) {
                     setValueCellUndefined(intrinsicTarget);
                     setValueCellTag(0, intrinsicTarget, VALUE_TAG_NULL);
-                } else setValueCellReference(intrinsicTarget, prototype);
+                } else setValueCellReference(intrinsicTarget, prototypeReference);
                 intrinsicHandled = 1;
             } else {
                 if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,

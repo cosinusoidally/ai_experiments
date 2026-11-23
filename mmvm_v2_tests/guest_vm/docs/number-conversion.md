@@ -1,6 +1,6 @@
 # Number conversion and decimal formatting
 
-This describes contracts 120–122 with the complete guest standard library
+This describes contracts 120–123 with the complete guest standard library
 installed. The implementation is ES3-source JavaScript; the language policy
 runs in guest frames, and the numeric kernels compile through the shared
 JS/i386 pipeline. No outer host Number method implements standalone semantics.
