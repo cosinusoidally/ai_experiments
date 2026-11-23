@@ -1,5 +1,19 @@
 # Test262 status
 
+2026-11-23, final bounded Array storage policy (`d5cac4c`, contract 122):
+
+- Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
+  3292 passed / zero failures / zero timeouts / zero unrun**. Source snapshot
+  absent; corpus, harness and limits unchanged.
+- Harness **358893.160 ms**, summed tests **339635.847 ms**; process
+  **359.58 s / 513840 KiB**. Pre-batch contract 119: 377.86 s / 512632 KiB.
+  These are individual observations (4.8% shorter), not a controlled speedup.
+- Full historical ECMA gains all 20 targeted Array/Number Node-passing files,
+  with zero lost passes: **1041 pass / 288 fail / four existing skips**.
+  Both large switch watchdog regressions from the intermediate image are
+  fixed under the original limits.
+- Receipts: ignored `artifacts/ecma-arrays-budget-test262.log` and `.time`.
+
 2026-11-23, array/number family (`794a89d`, contract 121):
 
 - Fresh optimized Linux executable, serial `TZ=UTC`: **3292 executed /
