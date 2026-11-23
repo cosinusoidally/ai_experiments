@@ -2010,22 +2010,15 @@
                                 heapBase, concatenationServices);
                             if (concatenationMalloc !== 0) {
                                 concatenationNative = callNativeI32(
-                                    concatenationMalloc, 128);
+                                    concatenationMalloc, NUMBER_FORMAT_SCRATCH_BYTES * 2);
                             }
                             if (concatenationNative === 0) {
                                 return unsupportedExitKernel(
                                     heapBase, state, frame, pc, opcode,
                                     (initialBudget - budget));
                             }
-                            var concatenationFormat = concatenationNative + 112;
-                            storeRaw8(concatenationFormat, 37);
-                            storeRaw8(concatenationFormat + 1, 46);
-                            storeRaw8(concatenationFormat + 2, 49);
-                            storeRaw8(concatenationFormat + 3, 53);
-                            storeRaw8(concatenationFormat + 4, 103);
-                            storeRaw8(concatenationFormat + 5, 0);
                             concatenationLeftNative = concatenationNative;
-                            concatenationRightNative = concatenationNative + 56;
+                            concatenationRightNative = concatenationNative + NUMBER_FORMAT_SCRATCH_BYTES;
                         }
                         var concatenationLeftLength = 0;
                         var concatenationLeftNumber = 0;
@@ -2034,10 +2027,9 @@
                             concatenationLeftLength = stringLength(
                                 heapBase, concatenationLeft);
                         } else if (concatenationLeftIsDouble === 1) {
-                            concatenationLeftLength = formatDoubleStringKernel(
+                            concatenationLeftLength = shortestDoubleAsciiKernel(
                                 heapBase, platformServices, arithmeticLeft,
-                                concatenationLeftNative,
-                                concatenationNative + 112);
+                                concatenationLeftNative);
                         } else {
                             concatenationLeftNumber =
                                 concatenationLeftInteger;
@@ -2065,10 +2057,9 @@
                             concatenationRightLength = stringLength(
                                 heapBase, concatenationRight);
                         } else if (concatenationRightIsDouble === 1) {
-                            concatenationRightLength = formatDoubleStringKernel(
+                            concatenationRightLength = shortestDoubleAsciiKernel(
                                 heapBase, platformServices, arithmeticRight,
-                                concatenationRightNative,
-                                concatenationNative + 112);
+                                concatenationRightNative);
                         } else {
                             concatenationRightNumber =
                                 concatenationRightInteger;
@@ -7008,8 +6999,35 @@
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
             } else {
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
                 return unsupportedDiagnosticExitKernel(
                     heapBase, state, frame, pc, opcode, instructions);
+            }
+        }
+        }
+        if (intrinsicHandled === 0) {
+        if (intrinsicId === NativeIntrinsics.NUMBER_VALUE_OF) {
+            var numberReceiver = 0;
+            if (callReceiverIndex >= 0) {
+                numberReceiver = valueCellAddress(0, registerAddress, callReceiverIndex);
+                if (valueCellTag(0, numberReceiver) === VALUE_TAG_REFERENCE) {
+                    numberReceiver = primitiveWrapperValueCellKernel(heapBase,
+                        valueCellReference(0, numberReceiver), stringSupport);
+                }
+            }
+            if (numberReceiver !== 0 && (valueCellTag(0, numberReceiver) === VALUE_TAG_INT32 ||
+                    valueCellTag(0, numberReceiver) === VALUE_TAG_DOUBLE)) {
+                copyValueCell(intrinsicTarget, numberReceiver);
+                intrinsicHandled = 1;
+            } else {
+                if (enterGuestBuiltinKernel(heapBase, state, frame, intrinsicFunction,
+                        callTargetIndex, currentContext, stringSupport, arrayPrototype,
+                        bytecodeAddress, registerAddress, pc, callReceiverIndex,
+                        intrinsicArgumentsVector) === 1) return INTRINSIC_RESULT_FRAME_ENTERED;
+                return unsupportedDiagnosticExitKernel(heapBase, state, frame, pc, opcode, instructions);
             }
         }
         }
@@ -7765,7 +7783,9 @@
                             heapBase, state))) === 1) {
                     stringConvertSignedDouble = 1;
                 } else {
-                    if ((stringConvertDoubleHigh &
+                    if (stringConvertDoubleHigh < 0) {
+                        stringConvertFormattedDouble = 1;
+                    } else if ((stringConvertDoubleHigh &
                          IEEE754_EXPONENT_MASK) !==
                         POSITIVE_2147483648_HIGH) {
                         stringConvertFormattedDouble = 1;
@@ -17143,14 +17163,21 @@
         if (prefix !== start || prefix + 2 === end) {
             setValueCellDoubleBits(target, 0, IEEE754_QUIET_NAN_HIGH); return 1;
         }
+        return powerOfTwoIntegerStringKernel(heapBase, source, prefix + 2, end,
+            target, HEX_DIGIT_BITS);
+    }
+
+    /* Shared exact integer conversion for radix 2/4/8/16/32. Keep the leading
+     * significand and guard/sticky bits, rounding only once at publication. */
+    function powerOfTwoIntegerStringKernel(heapBase, source, start, end, target, digitBits) {
         var high = 0, low = 0, significantBits = 0, guard = 0, sticky = 0;
-        var cursor = prefix + 2;
+        var cursor = start;
         while (cursor < end) {
-            var digit = uriHexValueKernel(stringCharacterCodeUnit(heapBase, source, cursor) & 65535);
-            if (digit < 0) {
+            var digit = integerDigitKernel(stringCharacterCodeUnit(heapBase, source, cursor) & 65535);
+            if (digit < 0 || digit >= (1 << digitBits)) {
                 setValueCellDoubleBits(target, 0, IEEE754_QUIET_NAN_HIGH); return 1;
             }
-            var bitIndex = HEX_DIGIT_BITS - 1;
+            var bitIndex = digitBits - 1;
             while (bitIndex >= 0) {
                 var bit = (digit >>> bitIndex) & 1;
                 if (significantBits !== 0 || bit !== 0) {
@@ -17186,6 +17213,37 @@
             setValueCellDoubleBits(target, low, (high & IEEE754_FRACTION_HIGH_MASK) |
                 ((exponent + IEEE754_EXPONENT_BIAS) << IEEE754_EXPONENT_SHIFT));
         }
+        return 1;
+    }
+
+    function integerDigitKernel(character) {
+        if (character >= ASCII_DIGIT_ZERO && character <= ASCII_DIGIT_NINE) return character - ASCII_DIGIT_ZERO;
+        if (character >= ASCII_UPPER_A && character <= ASCII_UPPER_Z) return character - ASCII_UPPER_A + DECIMAL_RADIX;
+        if (character >= ASCII_LOWER_A && character <= ASCII_LOWER_Z) return character - ASCII_LOWER_A + DECIMAL_RADIX;
+        return -1;
+    }
+
+    /* The caller has recognized the decimal prefix. libc supplies correctly
+     * rounded binary64 conversion, not JavaScript grammar or host VM state. */
+    function decimalPrefixNumberKernel(heapBase, source, start, end, negative, target, services) {
+        var mallocPointer = platformMallocPointer(heapBase, services);
+        var freePointer = platformFreePointer(heapBase, services);
+        var strtodPointer = platformStrtodPointer(heapBase, services);
+        if (mallocPointer === 0 || freePointer === 0 || strtodPointer === 0) return 0;
+        var size = end - start + negative;
+        var buffer = callNativeI32(mallocPointer, size + 1);
+        if (buffer === 0) return 0;
+        if (negative !== 0) storeRaw8(buffer, ASCII_MINUS);
+        var index = start;
+        while (index < end) {
+            storeRaw8(buffer + negative + index - start, stringCharacterCodeUnit(heapBase, source, index) & 65535);
+            index = index + 1;
+        }
+        storeRaw8(buffer + size, 0);
+        storeF64(valueCellPayloadAddress(0, target), callNativeF64(strtodPointer, buffer, 0));
+        var ignored = callNativeI32(freePointer, buffer);
+        store32(target, VALUE_TAG_DOUBLE);
+        store32(target + RecordLayout.VALUE_CELL_AUX, 0);
         return 1;
     }
 
@@ -18093,6 +18151,7 @@
             }
         }
 
+        var firstDigit = index;
         var limit = -2147483647;
         if (negative === 1) limit = MINIMUM_INT32;
         var multiplyLimit = divideI32(limit, radix);
@@ -18156,6 +18215,23 @@
             return 1;
         }
         if (wideResult !== 0) {
+            if (radix === DECIMAL_RADIX) {
+                return decimalPrefixNumberKernel(heapBase, source, firstDigit, index,
+                    negative, targetCell, platformServices);
+            }
+            var digitBits = 0;
+            if (radix === 2) digitBits = 1;
+            else if (radix === 4) digitBits = 2;
+            else if (radix === 8) digitBits = 3;
+            else if (radix === 16) digitBits = 4;
+            else if (radix === 32) digitBits = 5;
+            if (digitBits !== 0) {
+                var converted = powerOfTwoIntegerStringKernel(heapBase, source,
+                    firstDigit, index, targetCell, digitBits);
+                if (negative !== 0) store32(targetCell + RecordLayout.VALUE_CELL_HIGH,
+                    valueCellDoubleHigh(0, targetCell) | IEEE754_SIGN_BIT);
+                return converted;
+            }
             if (negative === 0) {
                 setEngineScratchLeft(heapBase, state, 0);
                 storeF64(targetCell + RecordLayout.VALUE_CELL_LOW, subtractF64(
@@ -18515,6 +18591,9 @@
             uriStringIntrinsicKernel: uriStringIntrinsicKernel,
             uriHexValueKernel: uriHexValueKernel,
             hexadecimalStringNumberKernel: hexadecimalStringNumberKernel,
+            powerOfTwoIntegerStringKernel: powerOfTwoIntegerStringKernel,
+            integerDigitKernel: integerDigitKernel,
+            decimalPrefixNumberKernel: decimalPrefixNumberKernel,
             infinityWordKernel: infinityWordKernel,
             specialStringNumericValueKernel: specialStringNumericValueKernel,
             uriComponentSafeKernel: uriComponentSafeKernel,

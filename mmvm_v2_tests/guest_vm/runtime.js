@@ -3774,7 +3774,8 @@
         }
         this.numberMethods = {};
         this.numberMethods.valueOf = this.makeNativeFunction("Number.valueOf",
-            function (receiver) { return runtime.numberValue(receiver); });
+            function (receiver) { return runtime.numberValue(receiver); },
+            "intrinsic", NativeIntrinsics.NUMBER_VALUE_OF);
         this.numberMethods.toString = this.makeNativeFunction("Number.toString",
             function (receiver, args) {
                 return runtime.numberValue(receiver).toString(

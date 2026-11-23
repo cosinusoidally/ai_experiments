@@ -1,5 +1,40 @@
 # ECMA parity work by feature family
 
+## Batch 2 in progress: arrays and number conversion, 2026-11-23
+
+The number checkpoint (contract 120) passes all 17 selected files, including
+all nine original number-family Node-only gaps, with no lost pass in that
+selection. Node core also passes. This is a focused checkpoint, not a new
+whole-suite claim; full language/demo/GC/self-build gates follow the array
+cutover. Receipts: ignored `artifacts/ecma-number-group2.log`,
+`ecma-number-core2.log`, `ecma-number-build2.log`.
+
+The fixes are shared algorithms, not expected-string substitutions:
+
+- Decimal parseInt prefixes use correctly rounded guest FFI conversion after
+  guest grammar recognition, instead of repeated multiply/add rounding.
+- Radix 2/4/8/16/32 integer parsing shares the existing hex converter's
+  significant/guard/sticky-bit algorithm. Other parseInt radices retain the
+  ES5-permitted approximate wide accumulation; they are not claimed exact.
+- String's unsigned-word fast path now excludes negative values.
+- ADD concatenation uses the same shortest-decimal formatter as explicit
+  number conversion, removing its separate hard-coded 15-digit printf path.
+- Number.valueOf has a native primitive and a complete portable guest
+  continuation. Number formatting checks branded receivers, ordered argument
+  conversion, integer precision and non-finite/range precedence.
+- toFixed, toPrecision and toExponential share guest exact decimal expansion
+  and round once, choosing the larger decimal coefficient at ties. Base-2^16
+  extraction and base-10^7 limbs keep intermediate arithmetic below 2^53.
+  Exponential/precision presentation preserves significant zeros and ES5
+  exponent thresholds. No host Number formatting implements standalone calls.
+
+Array work separates logical uint32 length from initialized dense storage,
+keeps high sparse indices in property descriptors, and truncates actual
+entries in descending index order (including partial non-configurable failure).
+Dense access remains fast. Prototype lookup must cover holes and inherited
+virtual length; GC must only scan initialized physical cells. No larger heap,
+corpus changes, new skips or demo edits are part of this approach.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts

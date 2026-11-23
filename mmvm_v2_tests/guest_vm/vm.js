@@ -389,7 +389,21 @@
         installBuiltin(jsonObject, "parse", "__guestJSONParse", "JSON.parse");
         installBuiltin(jsonObject, "stringify", "__guestJSONStringify", "JSON.stringify");
         if (runtime.regexpPrototype && runtime.numberPrototype) {
+            var numberToString = runtime.getProperty(runtime.numberPrototype, "toString");
+            context.installGlobal("__guestNumberToStringPrimitive",
+                runtime.makeNativeFunction("Number.toString", numberToString.callback,
+                    "intrinsic", numberToString.nativeIntrinsic));
+            var numberValueOf = runtime.getProperty(runtime.numberPrototype, "valueOf");
+            context.installGlobal("__guestNumberValueOfPrimitive",
+                runtime.makeNativeFunction("Number.valueOf", numberValueOf.callback,
+                    "intrinsic", numberValueOf.nativeIntrinsic));
             loadLibrary("guest_vm/number_runtime.js");
+            installFallback(runtime.numberPrototype, "valueOf", "__guestNumberValueOf");
+            installFallback(runtime.numberPrototype, "toString", "__guestNumberToString");
+            installBuiltin(runtime.numberPrototype, "toPrecision", "__guestNumberToPrecision", "Number.toPrecision");
+            installBuiltin(runtime.numberPrototype, "toExponential", "__guestNumberToExponential", "Number.toExponential");
+            runtime.deleteProperty(context.globalObject, "__guestNumberToStringPrimitive", false);
+            runtime.deleteProperty(context.globalObject, "__guestNumberValueOfPrimitive", false);
             var regexpConstructor = runtime.getGlobal(context, "RegExp");
             context.installGlobal("__guestRegExpPrimitive",
                 runtime.makeNativeFunction("RegExp", regexpConstructor.callback,
