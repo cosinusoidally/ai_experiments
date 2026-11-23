@@ -7,8 +7,10 @@ the code does, not the intended endpoint of the earlier plans. Update these
 documents alongside implementation changes.
 Source definitions remain the final authority for binary layouts and flags.
 
-The current native interpreter uses contract **121**, separating uint32 array
-length from initialized dense storage. See [data structures](data-structures.md)
+The current native interpreter uses contract **124**. Arrays have independent
+uint32 logical length, bounded dense storage and a named-index descriptor
+summary that avoids redundant linked scans without changing prototype lookup.
+See [data structures](data-structures.md)
 and [the feature-family inventory](../../ECMA_FEATURE_GROUPS.md). Contract 120
 adds [shared Number parsing/formatting policy](number-conversion.md);
 contract 119 introduced the shared

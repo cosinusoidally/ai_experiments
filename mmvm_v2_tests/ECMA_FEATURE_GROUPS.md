@@ -167,6 +167,27 @@ Correct hole/prototype lookup had introduced repeated linked-descriptor scans.
   `ecma-arrays-final123-stock-*`, `ecma-arrays-indexed-*`. Full validation and
   cross-host/self-build identity remain pending for contract 124.
 
+### Contract-124 build/application acceptance checkpoint
+
+- Complete Node, js_min and genuine self-build images compare byte-for-byte:
+  SHA-256 `fb8b5ee98587d939e77b44357ceac60f6df46b60f9e89d60fc551d96d338d91f`.
+  Snapshot **7845568 bytes**, native kernel **707932 bytes**. The scored
+  lookup probe and this acceptance image have identical native code.
+- Build observations: Node **4.76 s / 275700 KiB**, js_min **92.48 s /
+  374744 KiB**, self-build **83.05 s / 483848 KiB**. The pre-batch observations
+  were js_min 93.28 s / 304752 KiB and self-build 82.27 s / 483508 KiB.
+  Self-build time/RSS remain close; js_min bootstrap RSS is higher in these
+  observations and must not be described as memory parity.
+- All **seven standalone program gates and eleven demo/server gates pass**
+  with the source snapshot moved aside. No demo or corpus source changes.
+- Bounded GC: **30 audits / 141980 edges / 254 property-index audits /
+  84 embedding collections / one runtime-bound function**, maximum bump
+  **430056** under the **8 MiB** cap, no corruption. Workload/check 21.37 s.
+- All **fourteen non-Mandreel Octane quick correctness checks pass**. These
+  are not stock scores; the separate selected scored probes are listed above.
+  Final-image Test262/ECMA and the final Mandreel attempt are still pending.
+- Receipts: ignored `artifacts/ecma-arrays-accepted-*`.
+
 Baseline: `a80c661`, paired with the 2026-11-22 direct Node UTC control in
 [ECMA_TEST_RESULTS.tsv](ECMA_TEST_RESULTS.tsv). There are **248 Node-passing,
 guest-failing files**: 81 in Date directories and 167 outside them. Counts
