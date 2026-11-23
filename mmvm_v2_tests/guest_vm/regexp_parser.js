@@ -86,17 +86,33 @@
         else if (character === "v") code = 11;
         else if (character === "f") code = 12;
         else if (character === "c") {
-            if (this.index >= this.source.length) syntax("invalid control escape");
-            code = this.take().charCodeAt(0);
-            if (code >= 97 && code <= 122) code -= 32;
-            code &= 31;
+            var control = this.source.charCodeAt(this.index);
+            if ((control >= 65 && control <= 90) ||
+                (control >= 97 && control <= 122) ||
+                (inClass && (decimal(control) || control === 95))) {
+                this.index++;
+                code = control & 31;
+            } else {
+                /* Non-Unicode legacy grammar preserves the backslash when
+                 * c has no control-letter operand. Leave c for the next
+                 * atom/class term, including its own possible quantifier. */
+                this.index--;
+                code = 92;
+            }
         } else if (character === "x" || character === "u") {
+            var afterEscape = this.index;
             var count = character === "x" ? 2 : 4;
             var value = 0;
             while (count-- > 0) {
-                if (this.index >= this.source.length) syntax("invalid hexadecimal escape");
-                var digit = hex(this.source.charCodeAt(this.index++));
-                if (digit < 0) syntax("invalid hexadecimal escape");
+                var digit = hex(this.source.charCodeAt(this.index));
+                if (this.index >= this.source.length || digit < 0) {
+                    /* In the ES5 web grammar, an incomplete hexadecimal
+                     * escape is an identity escape. Speculation must not
+                     * consume any following pattern characters. */
+                    this.index = afterEscape;
+                    return {kind: "literal", code: code};
+                }
+                this.index++;
                 value = value * 16 + digit;
             }
             code = value;

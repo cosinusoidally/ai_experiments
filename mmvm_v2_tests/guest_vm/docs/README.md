@@ -7,8 +7,14 @@ the code does, not the intended endpoint of the earlier plans. Update these
 documents alongside implementation changes.
 Source definitions remain the final authority for binary layouts and flags.
 
-The current native interpreter uses contract **109**: compact external buffer
-descriptors, external-byte collection pressure and explicit snapshot payloads.
+The current native interpreter uses contract **119**, including the shared
+RegExp constructor entry and String semantic continuations described in
+[RegExp and String](regexp-and-string.md). Contract 118 adds standard live-key
+enumeration; contracts 116–117 add guarded property references and shared
+string-key comparisons. See [the ECMA parity work](ecma-node-parity-cleanup.md)
+and [feature-family inventory](../../ECMA_FEATURE_GROUPS.md).
+Contract 109 added compact external buffer descriptors, external-byte
+collection pressure and explicit snapshot payloads.
 Contract 108 added live heap selection before reservation. See
 [runtime memory reduction](MEMORY_REDUCTION.md).
 Contract 107's Uint8ClampedArray kind,

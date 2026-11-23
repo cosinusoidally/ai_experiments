@@ -37,6 +37,11 @@ Groups record the contiguous capture interval they contain. Brace-quantifier
 speculation owns its cursor and bounds: a failed parse restores both, and a
 valid quantifier without an atom is rejected. Character-class execution
 predicates and caches belong to lowering, not to grammar construction.
+Legacy non-Unicode identity escapes remain accepted: incomplete hexadecimal
+escapes rewind speculative digits, and an invalid control-letter escape
+preserves its backslash without consuming the next atom. Earlier constructor
+validation must not narrow the accepted literal grammar; the exhaustive
+Test262 escaped-code-unit case is part of the acceptance check.
 
 ## Constructor entry
 
