@@ -1,0 +1,359 @@
+/* Runtime-owned byte-addressed memory. Only this module may translate heap
+ * offsets into host-memory operations. Higher layers use Heap accessors. */
+(function (root) {
+    var HostMemory = root.GuestVMHostMemory;
+    var Binary64 = root.GuestVMBinary64;
+    if (typeof module !== "undefined" && module.exports) {
+        HostMemory = require("./host_memory.js");
+        Binary64 = require("./binary64.js");
+    }
+    var WORD_BYTES = HostMemory.WORD_BYTES;
+    LinearMemory.WORD_BYTES = WORD_BYTES;
+
+    function LinearMemory(byteLength) {
+        byteLength = Number(byteLength);
+        if (byteLength < 4096 || byteLength !== Math.floor(byteLength)) {
+            throw new RangeError("linear memory size must be an integer of at least 4096 bytes");
+        }
+        this.host = new HostMemory();
+        /* Node represents the large, sparsely touched guest heap as a zero-on-
+         * read dictionary. Ordinary Buffer allocations retain dense arrays. */
+        this.allocation = this.host.allocate(byteLength, true);
+        this.byteLength = byteLength;
+        this.destroyed = false;
+        this.nativeCaller = null;
+        this.nativeF64Caller = null;
+        if (this.allocation.isNative) selectNativeScalarAccess(this);
+    }
+
+    /* Select the storage implementation once, not at every field access.
+     * Both paths keep the same checked/trusted interface. Native operations
+     * read the current allocation pointer rather than closing over an address:
+     * allocation ownership and destruction remain with this memory instance.
+     * The sparse Node backend continues through HostMemory unchanged. */
+    function selectNativeScalarAccess(memory) {
+        memory.readU8 = nativeReadU8;
+        memory.writeU8 = nativeWriteU8;
+        memory.readU32 = nativeReadU32;
+        memory.writeU32 = nativeWriteU32;
+        memory.readU8Trusted = nativeReadU8Trusted;
+        memory.writeU8Trusted = nativeWriteU8Trusted;
+        memory.readU32Trusted = nativeReadU32Trusted;
+        memory.writeU32Trusted = nativeWriteU32Trusted;
+        memory.readRawU8Trusted = nativeReadU8Trusted;
+        memory.writeRawU8Trusted = nativeWriteU8Trusted;
+        memory.readRawU32Trusted = nativeReadU32Trusted;
+        memory.writeRawU32Trusted = nativeWriteU32Trusted;
+    }
+
+    function nativeReadU8(address) {
+        this.checkRange(address, 1);
+        return peek8(this.allocation.pointer + address);
+    }
+
+    function nativeWriteU8(address, value) {
+        this.checkRange(address, 1);
+        poke8(this.allocation.pointer + address, value & 255);
+    }
+
+    function nativeReadU32(address) {
+        this.checkRange(address, 4);
+        return peek32(this.allocation.pointer + address) >>> 0;
+    }
+
+    function nativeWriteU32(address, value) {
+        this.checkRange(address, 4);
+        /* Pass the low word through the signed range: the old shell's
+         * native-argument conversion can saturate an unsigned Number. */
+        poke32(this.allocation.pointer + address, value | 0);
+    }
+
+    function nativeReadU8Trusted(address) {
+        return peek8(this.allocation.pointer + address);
+    }
+
+    function nativeWriteU8Trusted(address, value) {
+        poke8(this.allocation.pointer + address, value & 255);
+    }
+
+    function nativeReadU32Trusted(address) {
+        return peek32(this.allocation.pointer + address) >>> 0;
+    }
+
+    function nativeWriteU32Trusted(address, value) {
+        poke32(this.allocation.pointer + address, value | 0);
+    }
+
+    LinearMemory.prototype.setNativeCaller = function (caller) {
+        this.nativeCaller = caller || null;
+    };
+
+    LinearMemory.prototype.setNativeF64Caller = function (caller) {
+        this.nativeF64Caller = caller || null;
+    };
+
+    LinearMemory.prototype.callNativeF64 = function (pointer, args) {
+        if (!this.nativeF64Caller) {
+            throw new Error("binary64 native calls are unavailable in this execution backend");
+        }
+        return Number(this.nativeF64Caller(pointer | 0, args));
+    };
+
+    LinearMemory.prototype.callNativeI32 = function (pointer, args) {
+        if (!this.nativeCaller) {
+            throw new Error("native calls are unavailable in this execution backend");
+        }
+        return this.nativeCaller(pointer | 0, args) | 0;
+    };
+
+    LinearMemory.prototype.checkRange = function (address, length) {
+        address = Number(address);
+        length = Number(length);
+        if (this.destroyed) throw new Error("linear memory is destroyed");
+        if (address !== Math.floor(address) || length !== Math.floor(length) ||
+            address < 0 || length < 0 || address + length > this.byteLength) {
+            throw new RangeError("linear memory access is out of bounds");
+        }
+    };
+
+    LinearMemory.prototype.readU8 = function (address) {
+        this.checkRange(address, 1);
+        return this.host.read8(this.allocation, address);
+    };
+
+    LinearMemory.prototype.writeU8 = function (address, value) {
+        this.checkRange(address, 1);
+        this.host.write8(this.allocation, address, value);
+    };
+
+    LinearMemory.prototype.readU16 = function (address) {
+        this.checkRange(address, 2);
+        return this.host.read8(this.allocation, address) |
+               (this.host.read8(this.allocation, address + 1) << 8);
+    };
+
+    LinearMemory.prototype.writeU16 = function (address, value) {
+        this.checkRange(address, 2);
+        this.host.write8(this.allocation, address, value);
+        this.host.write8(this.allocation, address + 1, Number(value) >>> 8);
+    };
+
+    /* Kernel "raw" operations mean that the i386 backend receives a native
+     * address rather than a guest record field. In the JavaScript backend the
+     * heap base is zero, so the same value is a checked linear-memory offset.
+     * Keep that translation here instead of teaching individual intrinsics
+     * about the Node memory representation. */
+    LinearMemory.prototype.readRawU8 = function (address) {
+        return this.readU8(address);
+    };
+
+    LinearMemory.prototype.writeRawU8 = function (address, value) {
+        this.writeU8(address, value);
+    };
+
+    LinearMemory.prototype.readRawU32 = function (address) {
+        return this.readU32(address);
+    };
+
+    LinearMemory.prototype.writeRawU32 = function (address, value) {
+        this.writeU32(address, value);
+    };
+
+    LinearMemory.prototype.readRawU8Trusted = function (address) {
+        return this.readU8Trusted(address);
+    };
+
+    LinearMemory.prototype.writeRawU8Trusted = function (address, value) {
+        this.writeU8Trusted(address, value);
+    };
+
+    LinearMemory.prototype.readRawU32Trusted = function (address) {
+        return this.readU32Trusted(address);
+    };
+
+    LinearMemory.prototype.writeRawU32Trusted = function (address, value) {
+        this.writeU32Trusted(address, value);
+    };
+
+    LinearMemory.prototype.readU32 = function (address) {
+        this.checkRange(address, 4);
+        return this.host.read32LE(this.allocation, address);
+    };
+
+    LinearMemory.prototype.writeU32 = function (address, value) {
+        this.checkRange(address, 4);
+        this.host.write32LE(this.allocation, address, value);
+    };
+
+    /* Validate the complete destination once. Storage backends preserve
+     * ordered ToInt32 stores when a source needs ordinary property reads. */
+    LinearMemory.prototype.writeWords32LE = function (address, words) {
+        var length = words.length;
+        if (length < 0 || length !== Math.floor(length)) {
+            throw new RangeError("invalid word-array length");
+        }
+        this.checkRange(address, length * WORD_BYTES);
+        this.host.writeWords32LETrusted(this.allocation, address, words, length);
+    };
+
+    LinearMemory.prototype.writeStringLatin1 = function (address, text) {
+        this.checkRange(address, text.length);
+        this.host.writeStringLatin1(this.allocation, address, text);
+    };
+
+    LinearMemory.prototype.writeStringUTF16LE = function (address, text) {
+        this.checkRange(address, text.length * 2);
+        this.host.writeStringUTF16LE(this.allocation, address, text);
+    };
+
+    LinearMemory.prototype.readU8Trusted = function (address) {
+        return this.host.read8Trusted(this.allocation, address);
+    };
+
+    LinearMemory.prototype.writeU8Trusted = function (address, value) {
+        this.host.write8Trusted(this.allocation, address, value);
+    };
+
+    LinearMemory.prototype.readU32Trusted = function (address) {
+        return this.host.read32LETrusted(this.allocation, address);
+    };
+
+    LinearMemory.prototype.writeU32Trusted = function (address, value) {
+        this.host.write32LETrusted(this.allocation, address, value);
+    };
+    /* Forward word copy, matching successive read/store operations (not
+     * memmove for partial overlap). Used by shared kernel block-copy IR. */
+    LinearMemory.prototype.copyWordsTrusted = function (target, source, count) {
+        var WORD_BYTES = 4;
+        var host = this.host, allocation = this.allocation, index = 0;
+        while (index < count) {
+            var offset = index++ * WORD_BYTES;
+            host.write32LETrusted(allocation, target + offset,
+                host.read32LETrusted(allocation, source + offset));
+        }
+    };
+
+    LinearMemory.prototype.readF64 = function (address) {
+        this.checkRange(address, 8);
+        return Binary64.decode(
+            this.host.read32LETrusted(this.allocation, address),
+            this.host.read32LETrusted(this.allocation, address + 4));
+    };
+
+    LinearMemory.prototype.readF64Trusted = function (address) {
+        return Binary64.decode(
+            this.host.read32LETrusted(this.allocation, address),
+            this.host.read32LETrusted(this.allocation, address + 4));
+    };
+
+    LinearMemory.prototype.readRawF32Trusted = function (address) {
+        return Binary64.decode32(this.readRawU32Trusted(address));
+    };
+
+    LinearMemory.prototype.writeRawF32Trusted = function (address, value) {
+        this.writeRawU32Trusted(address, Binary64.encode32(value));
+    };
+
+    LinearMemory.prototype.writeF64Trusted = function (address, value) {
+        var words = Binary64.encode(Number(value));
+        this.host.write32LETrusted(this.allocation, address, words.low);
+        this.host.write32LETrusted(this.allocation, address + 4, words.high);
+    };
+
+    LinearMemory.prototype.writeF64 = function (address, value) {
+        this.checkRange(address, 8);
+        var words = Binary64.encode(Number(value));
+        this.host.write32LE(this.allocation, address, words.low);
+        this.host.write32LE(this.allocation, address + 4, words.high);
+    };
+
+    LinearMemory.prototype.fill = function (address, length, value) {
+        this.checkRange(address, length);
+        this.host.fillAllocationRange(
+            this.allocation, address, length, value);
+    };
+
+    LinearMemory.prototype.findBytes = function (haystack, length, needle, needleLength) {
+        this.checkRange(haystack, length);
+        this.checkRange(needle, needleLength);
+        return this.host.findAllocationRange(this.allocation, haystack, length,
+            this.allocation, needle, needleLength);
+    };
+
+    LinearMemory.prototype.copy = function (destination, source, length) {
+        this.checkRange(destination, length);
+        this.checkRange(source, length);
+        this.host.moveAllocationRange(this.allocation, destination, source, length);
+    };
+
+    /* Newly allocated backing stores cannot overlap their live source. Keep
+     * that contract explicit so native memory can use a checked bulk copy. */
+    LinearMemory.prototype.copyDisjointRange = function (destination, source, length) {
+        this.checkRange(destination, length);
+        this.checkRange(source, length);
+        if (length && destination < source + length && source < destination + length) {
+            throw new RangeError("disjoint memory copy overlaps");
+        }
+        this.host.copyAllocationRange(this.allocation, destination,
+            this.allocation, source, length);
+    };
+
+    LinearMemory.prototype.nativeAddress = function (offset) {
+        this.checkRange(offset, 0);
+        return this.allocation.isNative ? this.allocation.pointer + offset : 0;
+    };
+
+    LinearMemory.prototype.createSnapshot = function (length) {
+        this.checkRange(0, length);
+        var snapshot = this.host.allocate(length, false);
+        this.host.copyAllocation(snapshot, this.allocation, length);
+        return snapshot;
+    };
+
+    LinearMemory.prototype.restoreSnapshot = function (snapshot, length) {
+        this.checkRange(0, length);
+        this.host.copyAllocation(this.allocation, snapshot, length);
+    };
+
+    LinearMemory.prototype.destroySnapshot = function (snapshot) {
+        this.host.free(snapshot);
+    };
+
+    LinearMemory.prototype.createRegionSnapshot = function (regions, extraBytes) {
+        var total = extraBytes || 0;
+        var index = 0;
+        while (index < regions.length) total += regions[index++].length;
+        var allocation = this.host.allocate(total, false);
+        var offset = 0;
+        index = 0;
+        while (index < regions.length) {
+            var region = regions[index++];
+            this.checkRange(region.address, region.length);
+            this.host.copyAllocationRange(allocation, offset,
+                this.allocation, region.address, region.length);
+            region.snapshotOffset = offset;
+            offset += region.length;
+        }
+        return allocation;
+    };
+
+    LinearMemory.prototype.restoreRegionSnapshot = function (
+            snapshot, regions) {
+        var index = 0;
+        while (index < regions.length) {
+            var region = regions[index++];
+            this.checkRange(region.address, region.length);
+            this.host.copyAllocationRange(this.allocation, region.address,
+                snapshot, region.snapshotOffset, region.length);
+        }
+    };
+
+    LinearMemory.prototype.destroy = function () {
+        if (this.destroyed) return;
+        this.host.free(this.allocation);
+        this.destroyed = true;
+    };
+
+    root.GuestVMLinearMemory = LinearMemory;
+    if (typeof module !== "undefined" && module.exports) module.exports = LinearMemory;
+}(this));

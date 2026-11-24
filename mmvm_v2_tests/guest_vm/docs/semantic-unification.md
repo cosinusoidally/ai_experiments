@@ -1,0 +1,279 @@
+# Ordinary property semantics and root ownership
+
+## Current continuation cutover (2026-11-06, acceptance in progress)
+
+Callback-bearing Object.defineProperty, getOwnPropertyDescriptor and
+hasOwnProperty conversions have guest-bytecode implementations attached to
+the public intrinsic's traced implementation
+closure. A supported native call avoids descriptor-normalization allocations.
+Otherwise intrinsic dispatch enters that implementation as an ordinary guest
+frame, preserving receiver, arguments, return destination and exception chain.
+There is no separate host callback state machine or host-owned progress object.
+
+The library captures a private native primitive before attaching the public
+continuation. Normalization checks the target, converts the key with a string
+hint, and reads descriptor fields in ES5.1 order. Field results live in a
+null-prototype guest object and activation locals, both traced across calls,
+reentrancy and collections. The normalized call uses the private primitive,
+so an unsupported exotic case cannot recursively restart normalization.
+Replacing the public method does not replace a composite built-in's captured
+primitive. Object.keys/getOwnPropertyNames also have guest target-validation
+continuations. propertyIsEnumerable is a guest builtin using the captured
+descriptor primitive. Exotic definition support is described below; this is
+not a claim of complete ES5.1 compliance or every extension edge case.
+
+Dynamic named getter reads now enter guest frames just like constant and
+indexed getter reads. These forms share enterPropertyGetterKernel; absent
+getters still produce undefined without entering a frame. Getter receiver is
+the original receiver, not the prototype that owns the descriptor.
+
+Object.getOwnPropertyNames now has a named native intrinsic and shares key
+collection with Object.keys/for-in through explicit EnumerationMode values.
+Own names include nonenumerable named entries and implicit true-array length;
+for-in retains nearest-owner shadowing and per-owner insertion order. The
+own-entry inclusion policy is shared with Runtime.collectOwnKeys. Dense and
+materialized array indices are counted/filled through the same predicate,
+in numeric order before length/named entries. String characters and view
+elements participate without storing shadow named entries. Contract 102 prevents
+stale embedded interpreter-code reuse after the intrinsic/dispatch change.
+
+Existing integration coverage is extended by object_operations_integration.js,
+which runs on stock Node and guest entrypoints. It covers conversion order,
+reentrant mutation, inherited getters, thrown-value identity and captured
+primitive lifetime. Complete acceptance remains pending; intermediate focused
+passes must not be confused with a full corpus/demo/performance sweep.
+
+### Exotic property adapters: intermediate working cutover
+
+VirtualPropertyKind and virtualPropertyAttributesKernel define array-length,
+string-length, string-index and indexed-element descriptor attributes once.
+Both the portable Runtime and native descriptor path use these rules. Named
+properties retain the owner/entry abstraction regardless of record kind.
+
+Native array indexed definitions materialize a dense cell through the common
+ordinary descriptor decision, preserve its value, check extensibility/length
+writability, extend the vector and clear the superseded dense cell. Arguments
+mapping remains live through data redefinition; freezing snapshots its current
+parameter value before detaching. The shared own-element probe recognizes both
+dense cells and materialized descriptors. Portable descriptor reads and freezing
+now also consult the live parameter mapping, rather than a stale stored mirror.
+
+Array-length definition has a separate storage adapter, using ordinary
+nonconfigurable descriptor policy, descending deletion and ES5 partial-shrink
+rollback. Callback-bearing numeric conversion runs twice in the guest
+continuation before the normalized primitive. Seven unchanged external ECMA
+array-length files pass at this checkpoint; complete acceptance is pending.
+
+Primitive wrappers carry the PRIMITIVE_WRAPPER object-class flag. Native
+Object boxing and portable wrapper construction establish it. A wrapper probe
+can therefore reject ordinary objects in constant time without scanning their
+properties. String characters are virtual immutable enumerable data properties;
+length is immutable/nonenumerable. Descriptor/read/write/delete paths respect
+these rules. A non-Latin-1 character result is an independent one-code-unit
+string, not a slice retaining its parent. Strict delete rejection now uses a
+named result protocol and a shared guest exception continuation for all three
+delete bytecodes.
+
+The indexed-view storage adapter validates descriptor restrictions before
+value conversion, converts callback-bearing values in the guest activation,
+and writes the backing element. A private branded-length intrinsic distinguishes
+views from lookalike ordinary objects without consulting public properties.
+The restriction policy is loaded from indexed_view_policy.js by the host and
+guest and compiled to native code through the same kernel graph. No generated
+source file or bootstrap-host Function.toString formatting is persisted.
+
+Internal callback invocation captures Call bound to itself during pristine
+library setup. It does not read a user's mutable Function.prototype.call
+property on each conversion. Native call forwarding can now enter a bytecode
+target reached after multiple call-forwarding steps, preserving the original
+receiver, argument descriptors, result destination and traced callee frame.
+The same broad integration checks this while replacing the public call method.
+
+The broad integration file covers these adapters on stock Node, portable
+guest and standalone execution, including aggressive GC during descriptor
+conversion. Node core and bounded structural GC pass at the frozen-source
+checkpoint. The final corpus/demo/performance acceptance is tracked in
+[the dated report](../../OBJECT_OPERATIONS_VALIDATION_2026-11-06.md).
+
+### Explicit remaining limits
+
+This cutover is property-operation consolidation, not a second complete JS
+implementation or a declaration of full ES5.1 compliance. General opcode
+coercion paths outside these builtins, large/sparse-array capacity limits,
+enumeration of nonempty dense-array prototypes, complete RegExp semantics and
+general private-slot isolation remain separate issues. Unsupported normalized
+primitive cases have no recursive conversion closure: standalone execution
+reports the unsupported case rather than secretly using host JS. Modern
+integer-indexed/typed-array semantics beyond the existing extension contract
+are not promised by an ES5.1 target. No C, application/demo or external corpus
+changes are part of this cutover.
+
+General accessor invocation still has separate unsupported native-callable
+cases outside these conversion continuations; enterPropertyGetterKernel is
+not claimed to implement every native intrinsic as a getter. Do not treat
+this working cutover as closure of all language/call-dispatch feature gaps.
+
+Follow-up to the storage/root cutover, starting from 77a2954.
+
+## Boundaries and sequence
+
+1. Share ordinary descriptor validation/attribute transitions. Runtime currently
+   validates ToPropertyDescriptor in observable ES5 order and roots getter
+   results. The native define-property path accepts callback-free descriptor
+   fields and otherwise declines to the existing continuation. Both separately
+   implement non-configurable/non-writable rules. Replace those duplicated
+   rules with a pure kernel-dialect decision function; keep coercion, callbacks,
+   SameValue computation, allocation and error construction with their callers.
+2. Share ordinary assignment decisions and prototype resolution, preserving
+   receiver identity, guarded owner/entry handles and explicit exotic handling.
+3. Audit remaining root categories and temporary lifetimes. Share enumeration
+   where ownership is shared, not permanent retention or moving collection.
+4. Delete superseded implementations at each working cutover and retain named
+   rejection reasons, rather than numeric diagnostics or silent new fallbacks.
+
+Arrays/arguments/string/typed-view special cases remain explicit. No parser,
+substring, source-sharing, C, demo or external corpus changes are in scope.
+The pure decision layer must run as ordinary ES3-compatible JS and compile
+through the existing shared kernel pipeline; no fake local constants or
+descriptor allocations per ordinary assignment are acceptable.
+
+## Validation
+
+Use existing embedding/descriptor/context integration checks and bounded GC
+audits at intermediate commits. Freeze the final source for one combined
+corpus, benchmark, self-host/cross-host build and graphical/HTTP audit.
+Compare exact ECMA pass sets. Preserve raw failures and timing/RSS observations
+in ignored artifacts, run heavy work serially and commit working checkpoints.
+
+## Remaining acceptance work
+
+The completed corpus audit for 4b24556 preserves all 3292 Test262 passes and
+the exact historical ECMA pass/fail sets (990/339), but does not gain ECMA
+passes. The injected-exception ownership correction fe35c1b is a later,
+separately tested change: a suspended execution owns its injected guest value
+until resume or abort, including the interval after failHostCall and before
+resume. The core suite passes on both hosts and bounded native GC structural
+stress passes. Broader standalone demo/HTTP, Octane and cross-host self-build
+acceptance remains open; do not treat the architectural cutovers as completed
+acceptance of those gates. See the dated semantic cleanup validation report.
+
+## Descriptor decision checkpoint
+
+property_semantics_kernel.js now owns ordinary descriptor rejection and flag
+transitions. Runtime calls the ordinary JS function; the native graph compiles
+that same function with explicit read-only field/attribute/rejection namespaces.
+Normalized input consists only of presence bits, requested attribute bits and
+SameValue mismatch bits. It retains no descriptor/heap references and allocates
+nothing. Both old validation/flag-update blocks have been removed. Observable
+getter order, callable validation, value rooting and exotic handling remain
+with the adapters, before entry resolution and publication.
+
+Node core passes (12 guest programs / 270 assertions plus internal checks),
+and i386 focused embedding/context integration passes. The latter entry point
+reuses the existing broad integration checks, not a new micro-feature suite.
+Four selected existing Object.defineProperty tests pass under standalone
+execution: define-over-method, function-length, miscellaneous, new-definition.
+They take 26.047 runner seconds versus 28.356 on the unchanged old debug image
+in an adjacent control. This is a focused observation, not full acceptance or
+a claimed general speedup. Node builds the candidate in 9.57 seconds /
+302840 KiB peak RSS. Broader build/corpus/performance gates remain pending.
+
+## Assignment and resolution checkpoint
+
+The shared ordinaryWriteActionKernel selects data write, setter invocation,
+missing setter or non-writable rejection. Runtime and native assignment use
+that function; strict/sloppy effects and guest call-frame entry stay with the
+execution adapter. Existing native rejection exits are not yet removed.
+
+createNamedPropertyOwnerResolver uses ordinary JS dependency injection to bind
+own-entry lookup and prototype access. Runtime binds its existing guarded own
+cache and checked records; native compilation binds the corresponding kernel
+helpers. The traversal source is identical. It returns a logical owner offset;
+the positive cache supplies the subsequent entry read, without allocating a
+descriptor pair or keeping a raw cell address. Prototype chains are not cached
+as a whole: mutations/shadowing retain their existing visibility rules.
+The native setter's duplicate prototype/type/list scan has been removed.
+
+Node core, i386 focused embedding/context checks and standalone JSON (12 files /
+908 assertions) pass. These are intermediate gates, not a completed full audit.
+
+## Root ownership cutover
+
+visitRuntimeRecordRoots now enumerates common heap owners for native root
+seeding and portable graph traversal: globals, registered contexts/callbacks,
+retained programs, live snapshots, engine services and in-progress function
+construction. visitEmbeddingRoots covers explicit retain tokens and active
+embedding register/environment stacks. visitExecutionRoots is the one frame
+and pending-call walk, used by both collectors through marking visitors.
+
+Constructor receivers are now explicit in the portable walk too; pending
+callables are explicit alongside their receiver/arguments. These references
+last only as long as the owning frame/request. No new permanent roots or
+moving collection are introduced. Frame/register diagnostic labels are built
+only when reporting an invalid root, rather than concatenating a string for
+every live register at each collection.
+
+Existing context integration now collects while a host call is suspended;
+existing automatic-GC coverage constructs an instance while its constructor
+allocates without reading this. Node embedding, automatic GC, full core and
+bounded structural stress pass during this cutover. i386 embedding/context and
+structural GC also pass (27 audits / 111888 edges / unchanged maximum bump).
+The combined acceptance audit is still pending. Immutable source sharing
+and substring policy remain unchanged.
+
+## Native rejection and descriptor reader checkpoint
+
+Ordinary named-write rejection no longer automatically leaves the native
+interpreter. Sloppy writes advance through the internal native continuation;
+strict writes construct TypeError and enter an available guest handler. Error
+construction/handler transition is shared with null-property access. Failure
+to allocate or an uncaught error retains the existing exit protocol; this is
+not a new claim of complete uncaught-exception handling. Named message slots
+are appended to runtime support and the native contract is bumped to 99.
+
+The descriptor reader now resolves the six canonical named fields, rather than
+recognising them using numeric character-code comparisons. Field indices derive
+from the existing descriptorFieldNames table. Nearest-owner resolution means
+a shadowed ancestor accessor no longer causes an unnecessary decline. An
+actual accessor field still returns DESCRIPTOR_FIELD_NEEDS_CALLBACK; its guest
+continuation remains future work, not a hidden host-language implementation.
+Cell views are temporary, with no callback/GC before consumption; target append
+still saves aliased descriptor values before moving its property backing.
+
+Node core passes. A focused standalone run preserves all seven baseline
+outcomes: six passes and the existing proto-property-change-writability-set
+failure. Its four descriptor tests report 88.619/4102.491/126.852/5049.005 ms,
+versus adjacent old-image 122.281/5457.150/149.149/6209.712 ms in the same
+selection order. These are observations, not an aggregate benchmark claim.
+There are no measured new ECMA passes yet. A candidate Node build takes 8.23
+seconds / 299908 KiB; the final source is now frozen for combined acceptance.
+## Standalone acceptance follow-up: conversion handoffs (2026-11-11)
+
+Native contract 103 fixes two missing transitions to existing guest semantic
+algorithms. A numeric Math leaf may decline conversions or special cases;
+the public callable now enters its guest-bytecode implementation rather than
+exiting to an unavailable host. Private numeric leaves have no semantic
+closure, so they still report unsupported input rather than recursively
+calling themselves. Normal numeric fast paths are unchanged.
+
+String's primitive conversion fast path similarly delegates an object input
+it cannot convert to the captured string-hint ToPrimitive algorithm in
+object_runtime.js. That algorithm reuses the same internal Call and primitive
+conversion ordering as property-key conversion. Its final String invocation
+receives a primitive, so it does not recurse on the original object. Allocation
+retry is kept separate from semantic decline and never enters the fallback.
+The successful primitive case does not need an additional fallback check.
+
+Error.prototype.toString is now a guest built-in. It validates its receiver,
+reads/converts name before message, and preserves ES5.1's default/empty-name
+and empty-message rules. This also lets self-hosted embedding checks stringify
+exceptions without an outer JavaScript Error implementation. The semantic
+runtime's isFinite callback completes its numeric check directly after guest
+ToNumber, instead of calling an unavailable outer global function.
+
+These gaps were exposed by executing the existing full embedding/core driver
+inside a standalone snapshot, not by changing its assertions. The preflight
+now completes all 12 language/Buffer programs (270 assertions), embedding,
+heap, native and predecoded interpreter, and structured compiler checks.
+The final two-launcher whole-corpus acceptance is recorded separately; this
+preflight alone is not a full Test262/ECMA/Octane result.

@@ -1,0 +1,795 @@
+/* Central guest-heap allocator and field accessor layer. No consumer may add
+ * a record offset to an address itself; layouts expose named accessors here. */
+(function (root) {
+    var LinearMemory = root.GuestVMLinearMemory;
+    if (typeof module !== "undefined" && module.exports) {
+        LinearMemory = require("./linear_memory.js");
+    }
+
+    var HEADER_SIZE = 16;
+    var HEADER_TYPE = 0;
+    var HEADER_SIZE_FIELD = 4;
+    var HEADER_MARK = 8;
+    var HEADER_FLAGS = 12;
+    var FIRST_RECORD = 64;
+    var RECORD_ALIGNMENT = 8;
+    var WORD_BYTES = LinearMemory.WORD_BYTES;
+    var SizePolicy = {MIB: 1024 * 1024, MINIMUM_MIB: 64, MAXIMUM_MIB: 1024,
+        MINIMUM_COLLECTOR_BYTES: 4096, COLLECTOR_RESERVATION_SHIFT: 2};
+
+    var Types = {
+        FREE: 0,
+        OBJECT: 1,
+        ARRAY: 2,
+        NATIVE_FUNCTION: 3,
+        BYTECODE_FUNCTION: 4,
+        ENVIRONMENT: 5,
+        PROPERTY: 6,
+        STRING: 7,
+        NUMBER: 8,
+        REGEXP: 9,
+        BUFFER_VIEW: 10,
+        BUFFER_BACKING: 11,
+        ROOT_SLOT: 12,
+        VALUE_VECTOR: 13,
+        FRAME: 14,
+        PROGRAM: 15,
+        BYTECODE: 16,
+        CONTEXT: 17,
+        HANDLER: 18,
+        ENGINE_STATE: 19,
+        PLATFORM_SERVICES: 20,
+        PROPERTY_INDEX: 21,
+        PROPERTY_STORAGE: 22,
+        INTEGER_VECTOR: 23,
+        CONSTANT_POOL: 24
+    };
+
+    function align8(value) {
+        return (value + RECORD_ALIGNMENT - 1) & ~(RECORD_ALIGNMENT - 1);
+    }
+
+    function Heap(options) {
+        options = options || {};
+        this.allocationLimit = options.heapBytes === undefined ?
+            64 * 1024 * 1024 : Number(options.heapBytes);
+        this.maximumAllocationLimit = options.maxHeapBytes === undefined ?
+            this.allocationLimit : Number(options.maxHeapBytes);
+        if (this.allocationLimit < 4096 ||
+            this.allocationLimit !== Math.floor(this.allocationLimit)) {
+            throw new RangeError(
+                "guest heap size must be an integer of at least 4096 bytes");
+        }
+        if (this.maximumAllocationLimit < this.allocationLimit ||
+            this.maximumAllocationLimit !==
+                Math.floor(this.maximumAllocationLimit) ||
+            this.maximumAllocationLimit > SizePolicy.MAXIMUM_MIB * SizePolicy.MIB) {
+            throw new RangeError("maximum guest heap size must be an integer " +
+                                 "between the initial size and 1 GiB");
+        }
+        /* Native marking needs one 32-bit work-list entry per possible heap
+         * record. A record is at least one 16-byte header. Reserve the maximum
+         * heap and its collector suffix up front so logical growth never moves
+         * the native base address: guest Buffer pointers and running native
+         * code may safely retain addresses within this allocation. */
+        this.collectorStackBytes = options.collectorWorkspace ?
+            Math.max(SizePolicy.MINIMUM_COLLECTOR_BYTES, align8(Math.ceil(
+                this.maximumAllocationLimit /
+                (1 << SizePolicy.COLLECTOR_RESERVATION_SHIFT)))) : 0;
+        this.collectorStackBase = this.maximumAllocationLimit;
+        this.byteLength = this.maximumAllocationLimit +
+                          this.collectorStackBytes;
+        this.memory = new LinearMemory(this.byteLength);
+        /* Zero is the null reference. Keep the first cache line inaccessible. */
+        this.bump = FIRST_RECORD;
+        this.freeBlocks = [];
+        this.freeBlocksAreMaxHeap = false;
+        this.allocationCount = 0;
+        this.allocationSearchProfile = options.profileAllocationSearch ?
+            {allocations: 0, candidates: 0, misses: 0, maximumCandidates: 0} : null;
+        this.growthCount = 0;
+        this.destroyed = false;
+        this.recordInitializer = null;
+        this.recordAllocationProvider = null;
+    }
+
+    Heap.Types = Types;
+    Heap.alignRecordBytes = align8;
+    Heap.SizePolicy = SizePolicy;
+    /* Large native byte backings are compact descriptors owning calloc data. */
+    Heap.BufferBackingPolicy = {EXTERNAL: 1, LARGE_BYTES: SizePolicy.MIB,
+        MAXIMUM_BYTES: SizePolicy.MAXIMUM_MIB * SizePolicy.MIB - 1};
+    /* Minimum useful allocation headroom after a complete collection. Both
+     * embedding and standalone collectors use the same policy constant. */
+    Heap.GCPolicy = {MINIMUM_HEADROOM_BYTES: 1024 * 1024};
+    Heap.LastRecordType = Types.CONSTANT_POOL;
+    Heap.WORD_BYTES = WORD_BYTES;
+    Heap.HEADER_SIZE = HEADER_SIZE;
+    Heap.FIRST_RECORD = FIRST_RECORD;
+    Heap.RECORD_ALIGNMENT = RECORD_ALIGNMENT;
+    Heap.HeaderFields = {
+        TYPE: HEADER_TYPE,
+        SIZE: HEADER_SIZE_FIELD,
+        MARK: HEADER_MARK,
+        FLAGS: HEADER_FLAGS
+    };
+
+    Heap.prototype.allocateRecord = function (type, payloadBytes) {
+        return this.allocateRecordWords(type, payloadBytes, 0, 0, 0, 0);
+    };
+
+    Heap.prototype.setRecordInitializer = function (initializer) {
+        this.recordInitializer = initializer;
+    };
+
+    Heap.prototype.setRecordAllocationProvider = function (provider) {
+        this.recordAllocationProvider = provider;
+    };
+
+    Heap.prototype.growToFit = function (requiredLimit) {
+        requiredLimit = Number(requiredLimit);
+        if (requiredLimit <= this.allocationLimit) return true;
+        if (requiredLimit > this.maximumAllocationLimit) return false;
+        var grownLimit = this.allocationLimit;
+        while (grownLimit < requiredLimit) {
+            var doubled = grownLimit * 2;
+            grownLimit = doubled > this.maximumAllocationLimit ?
+                         this.maximumAllocationLimit : doubled;
+        }
+        this.allocationLimit = grownLimit;
+        this.growthCount++;
+        return true;
+    };
+
+    Heap.prototype.allocateRecordWords = function (
+            type, payloadBytes, word0, word1, word2, word3) {
+        if (!Types || type <= Types.FREE || type > Heap.LastRecordType) {
+            throw new TypeError("invalid heap record type");
+        }
+        payloadBytes = Number(payloadBytes);
+        if (payloadBytes < 0 || payloadBytes !== Math.floor(payloadBytes)) {
+            throw new RangeError("invalid heap record payload size");
+        }
+        var size = align8(HEADER_SIZE + payloadBytes);
+        var candidates = this.freeBlocks.length ? 1 : 0;
+        var provider = this.recordAllocationProvider;
+        /* Initial words with observable coercions retain the general path.
+         * Ordinary typed constructors can reserve, clear and initialize in
+         * one allocator-owned transaction. */
+        if (typeof type === "number" && provider &&
+                provider.allocateRecordWords && size <= this.maximumAllocationLimit &&
+                (typeof word0 === "number" || word0 === undefined) &&
+                (typeof word1 === "number" || word1 === undefined) &&
+                (typeof word2 === "number" || word2 === undefined) &&
+                (typeof word3 === "number" || word3 === undefined)) {
+            var initialized = provider.allocateRecordWords(type, size,
+                word0 || 0, word1 || 0, word2 || 0, word3 || 0);
+            if (initialized) {
+                if (this.allocationSearchProfile) {
+                    this.allocationSearchProfile.allocations++;
+                    this.allocationSearchProfile.candidates += candidates;
+                    if (candidates > this.allocationSearchProfile.maximumCandidates) {
+                        this.allocationSearchProfile.maximumCandidates = candidates;
+                    }
+                }
+                this.allocationCount++;
+                return initialized;
+            }
+        }
+        var address = this.recordAllocationProvider ?
+            this.recordAllocationProvider.reserveRecordSpan(size) : 0;
+        if (!address) address = this.takeLargestFreeBlock(size, true);
+        if (address) size = this.freeRecordSize(address);
+        var searchProfile = this.allocationSearchProfile;
+        if (searchProfile) {
+            searchProfile.allocations++;
+            searchProfile.candidates += candidates;
+            if (!address) searchProfile.misses++;
+            if (candidates > searchProfile.maximumCandidates) {
+                searchProfile.maximumCandidates = candidates;
+            }
+        }
+        if (!address) {
+            address = this.bump;
+            if (!this.growToFit(address + size)) {
+                throw new RangeError("guest heap exhausted: " +
+                    this.exhaustionSummary(size));
+            }
+            this.bump += size;
+        }
+        /* A collection may lower the bump pointer over a dead tail, so even a
+         * bump allocation can cover previously used bytes. Clear every host
+         * allocation before publishing its header. */
+        this.memory.fill(address, size, 0);
+        if (this.recordInitializer && size >= HEADER_SIZE + 16) {
+            this.recordInitializer.initialize(address, type, size,
+                word0, word1, word2, word3);
+        } else {
+            this.memory.writeU32(address + HEADER_TYPE, type);
+            this.memory.writeU32(address + HEADER_SIZE_FIELD, size);
+            if (size >= HEADER_SIZE + 16) {
+                this.memory.writeU32(address + HEADER_SIZE, word0 || 0);
+                this.memory.writeU32(address + HEADER_SIZE + 4, word1 || 0);
+                this.memory.writeU32(address + HEADER_SIZE + 8, word2 || 0);
+                this.memory.writeU32(address + HEADER_SIZE + 12, word3 || 0);
+            }
+        }
+        this.allocationCount++;
+        return address;
+    };
+
+    Heap.prototype.exhaustionSummary = function (requested) {
+        var counts = [];
+        var bytes = [];
+        var flaggedFreeCounts = [];
+        var flaggedFreeBytes = [];
+        var address = FIRST_RECORD;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                return "corrupt record at " + address;
+            }
+            counts[type] = (counts[type] || 0) + 1;
+            bytes[type] = (bytes[type] || 0) + size;
+            if (type === Types.FREE) {
+                var flags = this.memory.readU32Trusted(address + HEADER_FLAGS);
+                if (flags) {
+                    flaggedFreeCounts[flags] =
+                        (flaggedFreeCounts[flags] || 0) + 1;
+                    flaggedFreeBytes[flags] =
+                        (flaggedFreeBytes[flags] || 0) + size;
+                }
+            }
+            address += size;
+        }
+        var parts = [];
+        var typeIndex = 0;
+        while (typeIndex < counts.length) {
+            if (counts[typeIndex]) {
+                parts.push(typeIndex + "=" + counts[typeIndex] + "/" +
+                           bytes[typeIndex]);
+            }
+            typeIndex++;
+        }
+        var flagParts = [];
+        var flagIndex = 0;
+        while (flagIndex < flaggedFreeCounts.length) {
+            if (flaggedFreeCounts[flagIndex]) {
+                flagParts.push(flagIndex + "=" + flaggedFreeCounts[flagIndex] +
+                    "/" + flaggedFreeBytes[flagIndex]);
+            }
+            flagIndex++;
+        }
+        return "requested=" + requested + " bump=" + this.bump +
+               " limit=" + this.allocationLimit +
+               " maximum=" + this.maximumAllocationLimit +
+               " freeBlocks=" + this.freeBlocks.length +
+               " flaggedFree(flag=count/bytes): " + flagParts.join(",") +
+               " records(type=count/bytes): " + parts.join(",");
+    };
+
+    Heap.prototype.recordStatistics = function () {
+        var counts = [];
+        var bytes = [];
+        var totalRecords = 0;
+        var totalBytes = 0;
+        var address = FIRST_RECORD;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
+            }
+            counts[type] = (counts[type] || 0) + 1;
+            bytes[type] = (bytes[type] || 0) + size;
+            totalRecords++;
+            totalBytes += size;
+            address += size;
+        }
+        return {counts: counts, bytes: bytes, records: totalRecords,
+                totalBytes: totalBytes};
+    };
+
+    Heap.prototype.freeRecord = function (address, source) {
+        address = Number(address);
+        if (!address || address !== Math.floor(address) ||
+            address < FIRST_RECORD ||
+            address + HEADER_SIZE > this.bump) {
+            throw new TypeError("invalid guest heap reference " + address +
+                                " (heap bump " + this.bump + ")");
+        }
+        if (this.memory.readU32Trusted(address + HEADER_TYPE) === Types.FREE) {
+            throw new Error("guest heap record " + address +
+                            " is already freed (size " +
+                            this.memory.readU32Trusted(
+                                address + HEADER_SIZE_FIELD) +
+                            (source ? ", released by " + source : "") + ")");
+        }
+        var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+        if (this.bufferBackingReleaser && this.recordType(address) === Types.BUFFER_BACKING) {
+            this.bufferBackingReleaser(address);
+        }
+        this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
+        this.memory.writeU32Trusted(address + HEADER_MARK, 0);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
+        this.addFreeBlock(address);
+    };
+
+    /* Narrow a private record without moving its address or other records.
+     * The caller has finished moving its live payload inside the new span. */
+    Heap.prototype.shrinkRecord = function (address, payloadBytes, type) {
+        this.requireRecord(address);
+        var size = align8(HEADER_SIZE + payloadBytes);
+        var previous = this.recordSize(address), remainder = previous - size;
+        if (size < HEADER_SIZE || remainder < HEADER_SIZE + RECORD_ALIGNMENT) {
+            throw new RangeError("record tail is too small to retire");
+        }
+        var tail = address + size;
+        this.memory.fill(tail, remainder, 0);
+        this.memory.writeU32Trusted(address + HEADER_TYPE, type);
+        this.memory.writeU32Trusted(address + HEADER_SIZE_FIELD, size);
+        this.memory.writeU32Trusted(tail + HEADER_TYPE, Types.FREE);
+        this.memory.writeU32Trusted(tail + HEADER_SIZE_FIELD, remainder);
+        this.addFreeBlock(tail);
+    };
+
+    /* Rebuild the free-block index from authoritative record headers.  The
+     * guest heap uses offsets rather than host objects, so this also lets a
+     * native bump allocator reclaim an entirely dead tail without moving any
+     * live record or rewriting references. */
+    Heap.prototype.rebuildFreeBlocks = function () {
+        var blocks = [];
+        var address = FIRST_RECORD;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
+            }
+            if (type === Types.FREE &&
+                this.memory.readU32Trusted(address + HEADER_FLAGS) === 0) {
+                if (blocks.length) {
+                    var previous = blocks[blocks.length - 1];
+                    var previousSize = this.memory.readU32Trusted(
+                        previous + HEADER_SIZE_FIELD);
+                    if (previous + previousSize === address) {
+                        this.memory.writeU32Trusted(previous + HEADER_SIZE_FIELD,
+                                                    previousSize + size);
+                    } else blocks.push(address);
+                } else blocks.push(address);
+            }
+            address += size;
+        }
+        while (blocks.length) {
+            var tail = blocks[blocks.length - 1];
+            var tailSize = this.memory.readU32Trusted(tail + HEADER_SIZE_FIELD);
+            if (tail + tailSize !== this.bump) break;
+            this.bump = tail;
+            blocks.pop();
+        }
+        this.freeBlocks = blocks;
+        this.freeBlocksAreMaxHeap = false;
+        return blocks.length;
+    };
+
+    Heap.prototype.buildFreeBlockMaxHeap = function () {
+        var blocks = this.freeBlocks;
+        var heap = this;
+        function sizeAt(index) {
+            return heap.memory.readU32Trusted(
+                blocks[index] + HEADER_SIZE_FIELD);
+        }
+        var parent = Math.floor(blocks.length / 2) - 1;
+        while (parent >= 0) {
+            var root = parent;
+            while (true) {
+                var left = root * 2 + 1;
+                if (left >= blocks.length) break;
+                var largest = left;
+                var right = left + 1;
+                if (right < blocks.length && sizeAt(right) > sizeAt(left)) {
+                    largest = right;
+                }
+                if (sizeAt(root) >= sizeAt(largest)) break;
+                var swap = blocks[root];
+                blocks[root] = blocks[largest];
+                blocks[largest] = swap;
+                root = largest;
+            }
+            parent--;
+        }
+        this.freeBlocksAreMaxHeap = true;
+    };
+
+    /* Maintain the priority index on ordinary frees and allocation splits.
+     * Bulk producers may still invalidate it and heapify once on demand. */
+    Heap.prototype.addFreeBlock = function (address) {
+        var blocks = this.freeBlocks;
+        blocks.push(address);
+        if (!this.freeBlocksAreMaxHeap) return;
+        var index = blocks.length - 1;
+        var size = this.freeRecordSize(address);
+        while (index > 0) {
+            var parent = Math.floor((index - 1) / 2);
+            if (this.freeRecordSize(blocks[parent]) >= size) break;
+            blocks[index] = blocks[parent];
+            index = parent;
+        }
+        blocks[index] = address;
+    };
+
+    Heap.prototype.takeLargestFreeBlock = function (minimumSize, split) {
+        if (!this.freeBlocks.length) return 0;
+        if (!this.freeBlocksAreMaxHeap) this.buildFreeBlockMaxHeap();
+        var claimedAddress = this.freeBlocks[0];
+        var bestSize = this.memory.readU32Trusted(
+            claimedAddress + HEADER_SIZE_FIELD);
+        if (bestSize < minimumSize) return 0;
+        var type = this.memory.readU32Trusted(claimedAddress + HEADER_TYPE);
+        var flags = this.memory.readU32Trusted(claimedAddress + HEADER_FLAGS);
+        if (type !== Types.FREE || flags !== 0) {
+            throw new Error("stale guest free-block maximum: address=" +
+                            claimedAddress + " type=" + type +
+                            " flags=" + flags);
+        }
+        var remainder = bestSize - minimumSize;
+        if (split && remainder >= HEADER_SIZE + RECORD_ALIGNMENT) {
+            var remainderAddress = claimedAddress + minimumSize;
+            this.publishFreeRegion(remainderAddress, remainder, 0);
+            this.memory.writeU32Trusted(claimedAddress + HEADER_SIZE_FIELD, minimumSize);
+            this.freeBlocks[0] = remainderAddress;
+        } else {
+            var last = this.freeBlocks.pop();
+            if (this.freeBlocks.length) this.freeBlocks[0] = last;
+        }
+        if (this.freeBlocks.length) {
+            var root = 0;
+            while (true) {
+                var left = root * 2 + 1;
+                if (left >= this.freeBlocks.length) break;
+                var largest = left;
+                var right = left + 1;
+                var leftSize = this.memory.readU32Trusted(
+                    this.freeBlocks[left] + HEADER_SIZE_FIELD);
+                if (right < this.freeBlocks.length) {
+                    var rightSize = this.memory.readU32Trusted(
+                        this.freeBlocks[right] + HEADER_SIZE_FIELD);
+                    if (rightSize > leftSize) largest = right;
+                }
+                var rootSize = this.memory.readU32Trusted(
+                    this.freeBlocks[root] + HEADER_SIZE_FIELD);
+                var largestSize = this.memory.readU32Trusted(
+                    this.freeBlocks[largest] + HEADER_SIZE_FIELD);
+                if (rootSize >= largestSize) break;
+                var swap = this.freeBlocks[root];
+                this.freeBlocks[root] = this.freeBlocks[largest];
+                this.freeBlocks[largest] = swap;
+                root = largest;
+            }
+        }
+        return claimedAddress;
+    };
+
+    Heap.prototype.claimLargestFreeBlock = function (minimumSize) {
+        var address = this.takeLargestFreeBlock(minimumSize);
+        return address ? {address: address, size: this.freeRecordSize(address)} : null;
+    };
+
+    Heap.prototype.largestFreeBlockSize = function () {
+        if (!this.freeBlocks.length) return 0;
+        if (!this.freeBlocksAreMaxHeap) this.buildFreeBlockMaxHeap();
+        return this.freeRecordSize(this.freeBlocks[0]);
+    };
+
+    Heap.prototype.freeBlockDistribution = function () {
+        var thresholds = [256, 4096, 16384, 65536];
+        var counts = [0, 0, 0, 0];
+        var bytes = [0, 0, 0, 0];
+        var index = 0;
+        while (index < this.freeBlocks.length) {
+            var size = this.memory.readU32Trusted(
+                this.freeBlocks[index++] + HEADER_SIZE_FIELD);
+            var thresholdIndex = 0;
+            while (thresholdIndex < thresholds.length) {
+                if (size >= thresholds[thresholdIndex]) {
+                    counts[thresholdIndex]++;
+                    bytes[thresholdIndex] += size;
+                }
+                thresholdIndex++;
+            }
+        }
+        var parts = [];
+        index = 0;
+        while (index < thresholds.length) {
+            parts.push(thresholds[index] + ":" + counts[index] + "/" +
+                       bytes[index]);
+            index++;
+        }
+        return parts.join(",");
+    };
+
+    Heap.prototype.publishFreeRegion = function (address, size, flags) {
+        if (address < FIRST_RECORD || address !== Math.floor(address) ||
+            size < HEADER_SIZE || size % 8 || address + size > this.bump) {
+            throw new Error("invalid published guest free region: address=" +
+                address + " size=" + size + " heapBump=" + this.bump);
+        }
+        this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
+        this.memory.writeU32Trusted(address + HEADER_SIZE_FIELD, size);
+        this.memory.writeU32Trusted(address + HEADER_MARK, 0);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, flags || 0);
+    };
+
+    Heap.prototype.setFreeRecordNext = function (address, next) {
+        this.requireRecord(address, Types.FREE);
+        if (this.memory.readU32Trusted(address + HEADER_FLAGS) !== 0) {
+            throw new Error("native free-region link requires an ordinary " +
+                            "free record at " + address);
+        }
+        this.memory.writeU32Trusted(address + HEADER_MARK, next || 0);
+    };
+
+    Heap.prototype.freeRecordSize = function (address) {
+        this.requireRecord(address, Types.FREE);
+        return this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+    };
+
+    Heap.prototype.freeRecordNext = function (address) {
+        this.requireRecord(address, Types.FREE);
+        return this.memory.readU32Trusted(address + HEADER_MARK);
+    };
+
+    Heap.prototype.clearFreeRecordPayloads = function () {
+        var address = FIRST_RECORD;
+        while (address < this.bump) {
+            var header = this.inspectRecordHeader(address);
+            if (header.type === Types.FREE) this.clearFreeRecordPayload(address);
+            address += header.size;
+        }
+    };
+
+    Heap.prototype.clearFreeRecordPayload = function (address) {
+        /* Free-list links/region flags live in the header and remain intact.
+         * Payload is dead storage, potentially containing producer-dependent
+         * old values. Canonical snapshots must not serialize that history. */
+        var size = this.freeRecordSize(address);
+        if (size > HEADER_SIZE) this.memory.fill(address + HEADER_SIZE,
+            size - HEADER_SIZE, 0);
+    };
+
+    Heap.prototype.sweepUnmarked = function (generation) {
+        var address = FIRST_RECORD;
+        var reclaimedRecords = 0;
+        var reclaimedBytes = 0;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
+            }
+            if (type !== Types.FREE &&
+                this.memory.readU32Trusted(address + HEADER_MARK) !== generation) {
+                if (type === Types.BUFFER_BACKING && this.bufferBackingReleaser) {
+                    this.bufferBackingReleaser(address);
+                }
+                this.memory.writeU32Trusted(address + HEADER_TYPE, Types.FREE);
+                this.memory.writeU32Trusted(address + HEADER_MARK, 0);
+                this.memory.writeU32Trusted(address + HEADER_FLAGS, 0);
+                reclaimedRecords++;
+                reclaimedBytes += size;
+            }
+            address += size;
+        }
+        this.rebuildFreeBlocks();
+        return {records: reclaimedRecords, bytes: reclaimedBytes};
+    };
+
+    Heap.prototype.visitRecords = function (visitor) {
+        var address = FIRST_RECORD;
+        while (address < this.bump) {
+            var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+            var size = this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+            if (!size || size % 8 || address + size > this.bump) {
+                throw new Error("corrupt guest heap record at " + address +
+                    " (type " + type + ", size " + size +
+                    ", heap bump " + this.bump + ")");
+            }
+            visitor(address, type, size,
+                    this.memory.readU32Trusted(address + HEADER_MARK));
+            address += size;
+        }
+    };
+
+    Heap.prototype.requireRecord = function (address, expectedType) {
+        if (typeof address !== "number") address = Number(address);
+        if (!address || (address !== (address | 0) && address !== Math.floor(address)) ||
+            address < FIRST_RECORD ||
+            address + HEADER_SIZE > this.bump) {
+            throw new TypeError("invalid guest heap reference " + address +
+                                " (heap bump " + this.bump + ")");
+        }
+        /* The complete header is in the live heap prefix. Do not repeat the
+         * linear-memory range/coercion checks for each validated header word. */
+        if (this.memory.destroyed) throw new Error("linear memory is destroyed");
+        if (address + HEADER_SIZE > this.memory.byteLength) {
+            throw new RangeError("linear memory access is out of bounds");
+        }
+        var type = this.memory.readU32Trusted(address + HEADER_TYPE);
+        if (type === Types.FREE && expectedType !== Types.FREE) {
+            throw new Error("guest heap reference " + address +
+                " is freed (size " +
+                this.memory.readU32Trusted(address + HEADER_SIZE_FIELD) +
+                ", flags " + this.memory.readU32Trusted(address + HEADER_FLAGS) + ")");
+        }
+        if (expectedType !== undefined && type !== expectedType) {
+            throw new TypeError("unexpected guest heap record type at " + address +
+                ": expected " + expectedType + ", found " + type);
+        }
+        return address;
+    };
+
+    Heap.prototype.recordType = function (address) {
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_TYPE);
+    };
+
+    /* Diagnostic record walks also inspect free storage. Return the common
+     * header through one accessor so tools do not duplicate its layout. */
+    Heap.prototype.inspectRecordHeader = function (address) {
+        if (address < FIRST_RECORD || address % 8 !== 0 ||
+                address + HEADER_SIZE > this.bump) {
+            throw new RangeError("invalid record header address " + address);
+        }
+        var size = this.memory.readU32(address + HEADER_SIZE_FIELD);
+        if (size < HEADER_SIZE || size % 8 !== 0 ||
+                size > this.bump - address) {
+            throw new RangeError("invalid record size at " + address);
+        }
+        return {type: this.memory.readU32(address + HEADER_TYPE),
+                size: size, mark: this.memory.readU32(address + HEADER_MARK),
+                flags: this.memory.readU32(address + HEADER_FLAGS)};
+    };
+
+    Heap.prototype.isFreeRecord = function (address) {
+        address = Number(address);
+        if (!address || address < FIRST_RECORD || address >= this.bump) {
+            return false;
+        }
+        return this.memory.readU32Trusted(address + HEADER_TYPE) === Types.FREE;
+    };
+
+    Heap.prototype.recordSize = function (address) {
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_SIZE_FIELD);
+    };
+
+    Heap.prototype.mark = function (address) {
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_MARK);
+    };
+
+    /* Collector-side weak tables are filtered before sweeping, while every
+     * cached address is still a record boundary. Unlike mark(), this accessor
+     * deliberately permits an already-free record: free headers have a zero
+     * mark and therefore fail every live-generation test. This avoids a
+     * separate type read for every weak entry without exposing layout offsets
+     * to Runtime. */
+    Heap.prototype.collectorMark = function (address) {
+        address = Number(address);
+        if (!address || address < FIRST_RECORD ||
+            address + HEADER_SIZE > this.bump) {
+            return 0;
+        }
+        return this.memory.readU32Trusted(address + HEADER_MARK);
+    };
+
+    Heap.prototype.setMark = function (address, generation) {
+        address = this.requireRecord(address);
+        this.memory.writeU32Trusted(address + HEADER_MARK, generation);
+    };
+
+    Heap.prototype.flags = function (address) {
+        address = this.requireRecord(address);
+        return this.memory.readU32Trusted(address + HEADER_FLAGS);
+    };
+
+    Heap.prototype.setFlags = function (address, flags) {
+        address = this.requireRecord(address);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, flags);
+    };
+
+    Heap.prototype.setFreeRecordFlags = function (address, flags) {
+        address = this.requireRecord(address, Types.FREE);
+        this.memory.writeU32Trusted(address + HEADER_FLAGS, flags);
+    };
+
+    Heap.prototype.checkPayload = function (address, offset, width, expectedType) {
+        address = this.requireRecord(address, expectedType);
+        offset = Number(offset);
+        if (offset < 0 || offset !== Math.floor(offset) ||
+            HEADER_SIZE + offset + width > this.memory.readU32Trusted(address + HEADER_SIZE_FIELD)) {
+            throw new RangeError("guest heap field is outside its record");
+        }
+        return address + HEADER_SIZE + offset;
+    };
+
+    Heap.prototype.readFieldU8 = function (address, offset, expectedType) {
+        return this.memory.readU8(this.checkPayload(address, offset, 1, expectedType));
+    };
+
+    Heap.prototype.writeFieldU8 = function (address, offset, value, expectedType) {
+        this.memory.writeU8(this.checkPayload(address, offset, 1, expectedType), value);
+    };
+
+    Heap.prototype.readFieldU32 = function (address, offset, expectedType) {
+        return this.memory.readU32(this.checkPayload(address, offset, 4, expectedType));
+    };
+
+    Heap.prototype.writeFieldU32 = function (address, offset, value, expectedType) {
+        this.memory.writeU32(this.checkPayload(address, offset, 4, expectedType), value);
+    };
+
+    Heap.prototype.writeStringFieldLatin1 = function (address, offset, text,
+                                                      expectedType) {
+        var payload = this.checkPayload(address, offset, text.length, expectedType);
+        this.memory.writeStringLatin1(payload, text);
+    };
+
+    Heap.prototype.writeStringFieldUTF16LE = function (address, offset, text,
+                                                       expectedType) {
+        var payload = this.checkPayload(address, offset, text.length * 2,
+                                        expectedType);
+        this.memory.writeStringUTF16LE(payload, text);
+    };
+
+    /* Fixed-layout record accessors use these only after their public method
+     * has established the record/index invariant. Keeping the unchecked
+     * address arithmetic here preserves the layering boundary while avoiding
+     * repeated type/size header reads for every field in one semantic access. */
+    Heap.prototype.readTrustedFieldU8 = function (address, offset) {
+        return this.memory.readU8Trusted(address + HEADER_SIZE + offset);
+    };
+
+    Heap.prototype.writeTrustedFieldU8 = function (address, offset, value) {
+        this.memory.writeU8Trusted(address + HEADER_SIZE + offset, value);
+    };
+
+    Heap.prototype.readTrustedFieldU32 = function (address, offset) {
+        return this.memory.readU32Trusted(address + HEADER_SIZE + offset);
+    };
+
+    Heap.prototype.writeTrustedFieldU32 = function (address, offset, value) {
+        this.memory.writeU32Trusted(address + HEADER_SIZE + offset, value);
+    };
+
+    Heap.prototype.trustedPayloadAddress = function (address, offset) {
+        return address + HEADER_SIZE + offset;
+    };
+
+    Heap.prototype.payloadAddress = function (address, offset, length, expectedType) {
+        return this.checkPayload(address, offset, length, expectedType);
+    };
+
+    Heap.prototype.destroy = function () {
+        if (this.destroyed) return;
+        if (this.bufferBackingReleaser) {
+            var heap = this;
+            this.visitRecords(function (address, type) {
+                if (type === Types.BUFFER_BACKING) heap.bufferBackingReleaser(address);
+            });
+        }
+        this.memory.destroy();
+        this.destroyed = true;
+        this.bump = 0;
+    };
+
+    root.GuestVMHeap = Heap;
+    if (typeof module !== "undefined" && module.exports) module.exports = Heap;
+}(this));

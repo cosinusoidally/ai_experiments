@@ -1,0 +1,495 @@
+/* Host memory boundary. Node uses an ordinary-array emulation with the same API. */
+(function (root) {
+    var HostFFI = root.GuestVMHostFFI;
+    var ByteSearch = root.GuestVMByteSearchKernel;
+    if (typeof module !== "undefined" && module.exports) {
+        HostFFI = require("./host_ffi.js");
+        ByteSearch = require("./byte_search_kernel.js");
+    }
+
+    function HostMemory() {
+        this.ffi = new HostFFI();
+        this.isMMVM = this.ffi.isMMVM;
+        this.callocPointer = this.isMMVM ? this.ffi.resolve("calloc") : 0;
+        this.freePointer = this.isMMVM ? this.ffi.resolve("free") : 0;
+        this.memcpyPointer = this.isMMVM ? this.ffi.resolve("memcpy") : 0;
+        this.memsetPointer = this.isMMVM ? this.ffi.resolve("memset") : 0;
+        this.allocations = 0;
+        this.frees = 0;
+        this.byteSearchScratch = 0;
+        this.byteSearchScratchBusy = false;
+    }
+
+    var WORD_BYTES = 4;
+    HostMemory.WORD_BYTES = WORD_BYTES;
+    var NODE_PAGE_SHIFT = 16;
+    var NODE_PAGE_SIZE = 1 << NODE_PAGE_SHIFT;
+    var NODE_PAGE_MASK = NODE_PAGE_SIZE - 1;
+    var byteSearchEntries = {};
+
+    function byteSearchEntry(nativeStorage) {
+        var key = nativeStorage ? "native" : "js";
+        if (byteSearchEntries[key]) return byteSearchEntries[key];
+        var Compiler = root.GuestVMKernelCompiler;
+        var Backend = nativeStorage ? root.GuestVMKernelX86Backend : root.GuestVMKernelJSBackend;
+        if (typeof module !== "undefined" && module.exports) {
+            Compiler = require("./aot/kernel_compiler.js");
+            Backend = nativeStorage ? require("./aot/backend_x86.js") : require("./aot/backend_js.js");
+        }
+        var ir = new Compiler().compileGraph(ByteSearch.findBytesKernel, ByteSearch.functions,
+            {constantBindings: ByteSearch.constants});
+        var compiled = new Backend().compile(ir);
+        /* One process-owned code entry per backend, as for property kernels.
+         * No runtime, allocation or transient haystack is retained in it. */
+        byteSearchEntries[key] = compiled.fn;
+        return compiled.fn;
+    }
+
+    function releaseIdleSearchScratch(memory) {
+        if (memory.byteSearchScratch && !memory.byteSearchScratchBusy &&
+                memory.allocations === memory.frees) {
+            var pointer = memory.byteSearchScratch;
+            memory.byteSearchScratch = 0;
+            memory.ffi.call(memory.freePointer, [pointer]);
+        }
+    }
+
+    function allocateNodePage() {
+        if (typeof Buffer !== "undefined") {
+            if (Buffer.alloc) return Buffer.alloc(NODE_PAGE_SIZE);
+            var buffer = new Buffer(NODE_PAGE_SIZE);
+            if (buffer.fill) buffer.fill(0);
+            else {
+                var bufferIndex = 0;
+                while (bufferIndex < NODE_PAGE_SIZE) buffer[bufferIndex++] = 0;
+            }
+            return buffer;
+        }
+        var bytes = [];
+        var index = 0;
+        while (index < NODE_PAGE_SIZE) bytes[index++] = 0;
+        return bytes;
+    }
+
+    function readPagedByte(allocation, offset) {
+        var page = allocation.pages[offset >>> NODE_PAGE_SHIFT];
+        return page ? page[offset & NODE_PAGE_MASK] : 0;
+    }
+
+    function writePagedByte(allocation, offset, value) {
+        value = Number(value) & 255;
+        var pageIndex = offset >>> NODE_PAGE_SHIFT;
+        var page = allocation.pages[pageIndex];
+        /* Record initialization writes many zeroes. Preserve sparse pages
+         * until a non-zero byte actually needs storage. */
+        if (!page) {
+            if (value === 0) return;
+            page = allocation.pages[pageIndex] = allocateNodePage();
+        }
+        page[offset & NODE_PAGE_MASK] = value;
+    }
+
+    function readPagedWordLE(allocation, offset) {
+        var pageOffset = offset & NODE_PAGE_MASK;
+        if (pageOffset <= NODE_PAGE_SIZE - 4) {
+            var page = allocation.pages[offset >>> NODE_PAGE_SHIFT];
+            if (!page) return 0;
+            return (page[pageOffset] |
+                    (page[pageOffset + 1] << 8) |
+                    (page[pageOffset + 2] << 16) |
+                    (page[pageOffset + 3] << 24)) >>> 0;
+        }
+        return (readPagedByte(allocation, offset) |
+                (readPagedByte(allocation, offset + 1) << 8) |
+                (readPagedByte(allocation, offset + 2) << 16) |
+                (readPagedByte(allocation, offset + 3) << 24)) >>> 0;
+    }
+
+    function writePagedWordLE(allocation, offset, value) {
+        var pageOffset = offset & NODE_PAGE_MASK;
+        if (pageOffset <= NODE_PAGE_SIZE - 4) {
+            var pageIndex = offset >>> NODE_PAGE_SHIFT;
+            var page = allocation.pages[pageIndex];
+            if (!page) {
+                if (value === 0) return;
+                page = allocation.pages[pageIndex] = allocateNodePage();
+            }
+            page[pageOffset] = value & 255;
+            page[pageOffset + 1] = (value >>> 8) & 255;
+            page[pageOffset + 2] = (value >>> 16) & 255;
+            page[pageOffset + 3] = (value >>> 24) & 255;
+            return;
+        }
+        writePagedByte(allocation, offset, value);
+        writePagedByte(allocation, offset + 1, value >>> 8);
+        writePagedByte(allocation, offset + 2, value >>> 16);
+        writePagedByte(allocation, offset + 3, value >>> 24);
+    }
+
+    HostMemory.prototype.allocate = function (length, sparse) {
+        var actualLength = length > 0 ? length : 1;
+        if (this.isMMVM) {
+            var pointer = this.ffi.call(this.callocPointer, [actualLength, 1]);
+            if (!pointer) throw new Error("native buffer allocation failed");
+            this.allocations++;
+            return {isNative: true, pointer: pointer, length: length, freed: false};
+        }
+        this.allocations++;
+        return {isNative: false, pages: {}, length: length, freed: false,
+                sparse: true};
+    };
+
+    HostMemory.prototype.check = function (allocation, offset) {
+        if (!allocation || allocation.freed) throw new Error("backing store is freed");
+        if (offset < 0 || offset >= allocation.length) {
+            throw new RangeError("native memory access is out of bounds");
+        }
+    };
+
+    HostMemory.prototype.read8 = function (allocation, offset) {
+        this.check(allocation, offset);
+        if (allocation.isNative) return peek8(allocation.pointer + offset);
+        return readPagedByte(allocation, offset);
+    };
+
+    HostMemory.prototype.write8 = function (allocation, offset, value) {
+        this.check(allocation, offset);
+        value = Number(value) & 255;
+        if (allocation.isNative) poke8(allocation.pointer + offset, value);
+        else writePagedByte(allocation, offset, value);
+    };
+
+    HostMemory.prototype.read8Trusted = function (allocation, offset) {
+        if (allocation.isNative) return peek8(allocation.pointer + offset);
+        return readPagedByte(allocation, offset);
+    };
+
+    HostMemory.prototype.write8Trusted = function (allocation, offset, value) {
+        value = Number(value) & 255;
+        if (allocation.isNative) poke8(allocation.pointer + offset, value);
+        else writePagedByte(allocation, offset, value);
+    };
+
+    /* Bulk host-string ingress. UTF-16 code units (including lone surrogates)
+     * are preserved verbatim. Check the complete range before the first write.
+     * Pair stores never overwrite a trailing field or record padding. */
+    HostMemory.prototype.writeStringLatin1 = function (allocation, offset, text) {
+        if (!allocation || allocation.freed) throw new Error("backing store is freed");
+        if (typeof text !== "string") throw new TypeError("expected a string");
+        var BYTE_BITS = 8, LATIN1_MAX = 255;
+        var length = text.length, index = 0, first, second, third, fourth, word;
+        if (offset < 0 || offset !== Math.floor(offset) || offset + length > allocation.length) {
+            throw new RangeError("Latin-1 write is out of bounds");
+        }
+        var nativeBacking = allocation.isNative;
+        var pointer = nativeBacking ? allocation.pointer + offset : 0;
+        var packed = !nativeBacking || (pointer & (WORD_BYTES - 1)) === 0;
+        /* Write only complete words. The tail never overwrites record padding
+         * or an adjacent field. Node and native memory use the same LE packing. */
+        while (packed && index + WORD_BYTES <= length) {
+            first = text.charCodeAt(index);
+            second = text.charCodeAt(index + 1);
+            third = text.charCodeAt(index + 2);
+            fourth = text.charCodeAt(index + 3);
+            if ((first | second | third | fourth) > LATIN1_MAX) {
+                throw new RangeError("Latin-1 write contains a wide code unit");
+            }
+            word = first | (second << BYTE_BITS) | (third << (BYTE_BITS * 2)) |
+                (fourth << (BYTE_BITS * 3));
+            if (nativeBacking) poke32(pointer + index, word);
+            else writePagedWordLE(allocation, offset + index, word >>> 0);
+            index += WORD_BYTES;
+        }
+        while (index < length) {
+            first = text.charCodeAt(index);
+            if (first > LATIN1_MAX) throw new RangeError("Latin-1 write contains a wide code unit");
+            if (nativeBacking) poke8(pointer + index, first);
+            else writePagedByte(allocation, offset + index, first);
+            index++;
+        }
+    };
+
+    HostMemory.prototype.writeStringUTF16LE = function (allocation, offset, text) {
+        if (!allocation || allocation.freed) throw new Error("backing store is freed");
+        if (typeof text !== "string") throw new TypeError("expected a string");
+        var CODE_UNIT_BYTES = 2, PAIR_BYTES = 4, HIGH_CODE_UNIT_SHIFT = 16;
+        var length = text.length, index = 0, code, word;
+        if (offset < 0 || offset !== Math.floor(offset) ||
+            offset + length * CODE_UNIT_BYTES > allocation.length) {
+            throw new RangeError("UTF-16 write is out of bounds");
+        }
+        if (allocation.isNative && ((allocation.pointer + offset) & 3) === 0) {
+            var pointer = allocation.pointer + offset;
+            while (index + 1 < length) {
+                word = text.charCodeAt(index) |
+                    (text.charCodeAt(index + 1) << HIGH_CODE_UNIT_SHIFT);
+                poke32(pointer, word);
+                pointer += PAIR_BYTES;
+                index += 2;
+            }
+            if (index < length) {
+                code = text.charCodeAt(index);
+                poke8(pointer, code & 255);
+                poke8(pointer + 1, code >>> 8);
+            }
+        } else if (!allocation.isNative) {
+            while (index + 1 < length) {
+                word = text.charCodeAt(index) |
+                    (text.charCodeAt(index + 1) << HIGH_CODE_UNIT_SHIFT);
+                writePagedWordLE(allocation, offset, word >>> 0);
+                offset += PAIR_BYTES;
+                index += 2;
+            }
+            if (index < length) {
+                code = text.charCodeAt(index);
+                writePagedByte(allocation, offset, code & 255);
+                writePagedByte(allocation, offset + 1, code >>> 8);
+            }
+        } else {
+            /* Keep the general API valid for unaligned payloads too. */
+            while (index < length) {
+                code = text.charCodeAt(index++);
+                poke8(allocation.pointer + offset, code & 255);
+                poke8(allocation.pointer + offset + 1, code >>> 8);
+                offset += CODE_UNIT_BYTES;
+            }
+        }
+    };
+
+    HostMemory.prototype.read32LE = function (allocation, offset) {
+        if (offset < 0 || offset + 4 > allocation.length) {
+            throw new RangeError("32-bit read is out of bounds");
+        }
+        if (allocation.isNative) {
+            if (((allocation.pointer + offset) & 3) === 0) {
+                return peek32(allocation.pointer + offset) >>> 0;
+            }
+            return (this.read8(allocation, offset) |
+                    (this.read8(allocation, offset + 1) << 8) |
+                    (this.read8(allocation, offset + 2) << 16) |
+                    (this.read8(allocation, offset + 3) << 24)) >>> 0;
+        }
+        return readPagedWordLE(allocation, offset);
+    };
+
+    HostMemory.prototype.write32LE = function (allocation, offset, value) {
+        if (offset < 0 || offset + 4 > allocation.length) {
+            throw new RangeError("32-bit write is out of bounds");
+        }
+        value = value | 0;
+        if (allocation.isNative) {
+            if (((allocation.pointer + offset) & 3) === 0) {
+                /* Old SpiderMonkey saturates some uint32-to-native-int argument
+                 * conversions. Pass the identical bits through the signed range. */
+                poke32(allocation.pointer + offset, value);
+                return;
+            }
+            this.write8(allocation, offset, value);
+            this.write8(allocation, offset + 1, value >>> 8);
+            this.write8(allocation, offset + 2, value >>> 16);
+            this.write8(allocation, offset + 3, value >>> 24);
+            return;
+        }
+        writePagedWordLE(allocation, offset, value);
+    };
+
+    HostMemory.prototype.read32LETrusted = function (allocation, offset) {
+        if (allocation.isNative) {
+            return peek32(allocation.pointer + offset) >>> 0;
+        }
+        return readPagedWordLE(allocation, offset);
+    };
+
+    HostMemory.prototype.write32LETrusted = function (allocation, offset, value) {
+        /* Word stores use ToInt32's low bits on both backends. Normalizing
+         * negative fractions by adding 2^32 before truncation loses one bit
+         * of value; signed normalization also avoids old-shell saturation. */
+        value = value | 0;
+        if (allocation.isNative) {
+            poke32(allocation.pointer + offset, value);
+            return;
+        }
+        writePagedWordLE(allocation, offset, value);
+    };
+
+    HostMemory.prototype.writeWords32LETrusted = function (allocation, offset, words, length) {
+        var index = 0;
+        if (allocation.isNative) {
+            var pointer = allocation.pointer + offset;
+            if (typeof __guestVMTryCopyInt32Array === "function" &&
+                __guestVMTryCopyInt32Array(pointer | 0, words)) return;
+            while (index < length) {
+                poke32(pointer + index * WORD_BYTES, words[index] | 0);
+                index++;
+            }
+        } else {
+            while (index < length) {
+                writePagedWordLE(allocation, offset + index * WORD_BYTES, words[index] | 0);
+                index++;
+            }
+        }
+    };
+
+    HostMemory.prototype.free = function (allocation) {
+        if (!allocation || allocation.freed) return;
+        if (allocation.isNative) this.ffi.call(this.freePointer, [allocation.pointer]);
+        allocation.freed = true;
+        allocation.pointer = 0;
+        allocation.pages = null;
+        this.frees++;
+        releaseIdleSearchScratch(this);
+    };
+
+    HostMemory.prototype.copyAllocation = function (
+            destination, source, length) {
+        return this.copyAllocationRange(destination, 0, source, 0, length);
+    };
+
+    HostMemory.prototype.moveAllocationRange = function (allocation, destination, source, length) {
+        if (!allocation || allocation.freed || destination < 0 || source < 0 || length < 0 ||
+                destination !== Math.floor(destination) || source !== Math.floor(source) ||
+                length !== Math.floor(length) || destination + length > allocation.length ||
+                source + length > allocation.length) throw new RangeError("invalid memory move");
+        if (allocation.isNative) {
+            if (!this.memmovePointer) this.memmovePointer = this.ffi.resolve("memmove");
+            this.ffi.call(this.memmovePointer, [allocation.pointer + destination,
+                allocation.pointer + source, length]);
+            return;
+        }
+        var backwards = destination > source && destination < source + length;
+        var words = ((destination | source | length) & 3) === 0;
+        var stride = words ? 4 : 1;
+        var index = backwards ? length - stride : 0;
+        while (backwards ? index >= 0 : index < length) {
+            if (words) writePagedWordLE(allocation, destination + index,
+                readPagedWordLE(allocation, source + index));
+            else writePagedByte(allocation, destination + index,
+                readPagedByte(allocation, source + index));
+            index += backwards ? -stride : stride;
+        }
+    };
+
+    HostMemory.prototype.copyAllocationRange = function (
+            destination, destinationOffset, source, sourceOffset, length) {
+        length = Number(length);
+        if (!destination || destination.freed || !source || source.freed ||
+            length < 0 || length !== Math.floor(length) ||
+            destinationOffset < 0 || sourceOffset < 0 ||
+            destinationOffset + length > destination.length ||
+            sourceOffset + length > source.length) {
+            throw new RangeError("invalid host-memory allocation copy");
+        }
+        if (destination.isNative && source.isNative) {
+            this.ffi.call(this.memcpyPointer,
+                          [destination.pointer + destinationOffset,
+                           source.pointer + sourceOffset, length]);
+            return;
+        }
+        var byteIndex = 0;
+        while (byteIndex < length) {
+            writePagedByte(destination, destinationOffset + byteIndex,
+                readPagedByte(source, sourceOffset + byteIndex));
+            byteIndex++;
+        }
+    };
+
+    HostMemory.prototype.fillAllocationRange = function (
+            allocation, offset, length, value) {
+        length = Number(length);
+        value = Number(value) & 255;
+        if (!allocation || allocation.freed || offset < 0 || length < 0 ||
+            offset !== Math.floor(offset) || length !== Math.floor(length) ||
+            offset + length > allocation.length) {
+            throw new RangeError("invalid host-memory allocation fill");
+        }
+        if (allocation.isNative) {
+            this.ffi.call(this.memsetPointer,
+                          [allocation.pointer + offset, value, length]);
+            return;
+        }
+        var index = 0;
+        while (index < length) {
+            writePagedByte(allocation, offset + index, value);
+            index++;
+        }
+    };
+
+    /* One compiled search algorithm for native and emulated allocations.
+     * No optional GNU libc symbol or byte-at-a-time native/JS fallback. */
+    HostMemory.prototype.findAllocationRange = function (
+            haystack, haystackOffset, haystackLength,
+            needle, needleOffset, needleLength) {
+        if (!haystack || haystack.freed || !needle || needle.freed ||
+                haystackOffset < 0 || haystackOffset !== Math.floor(haystackOffset) ||
+                needleOffset < 0 || needleOffset !== Math.floor(needleOffset) ||
+                haystackLength < 0 || haystackLength !== Math.floor(haystackLength) ||
+                needleLength < 0 || needleLength !== Math.floor(needleLength) ||
+                haystackOffset + haystackLength > haystack.length ||
+                needleOffset + needleLength > needle.length) {
+            throw new RangeError("invalid host-memory allocation search");
+        }
+        if (needleLength === 0) return 0;
+        if (needleLength > haystackLength) return -1;
+        if (haystack.isNative && needle.isNative) {
+            if (this.memchrPointer === undefined) this.memchrPointer = this.ffi.resolve("memchr");
+            var entry = byteSearchEntry(true), scratch = 0, borrowedScratch = false;
+            if (needleLength > 1 && needleLength <= ByteSearch.constants.SEARCH_SHORT_MAX_BYTES) {
+                /* A synchronous service borrows one instance-owned table.
+                 * Nested calls get a private table, never another runtime's
+                 * mutable scratch. Release the retained table with the last
+                 * regular allocation; no process-lifetime native data leak. */
+                if (!this.byteSearchScratchBusy) {
+                    if (!this.byteSearchScratch) this.byteSearchScratch = this.ffi.call(this.callocPointer,
+                        [ByteSearch.constants.SEARCH_TABLE_ENTRIES, 1]);
+                    scratch = this.byteSearchScratch;
+                    borrowedScratch = true;
+                } else scratch = this.ffi.call(this.callocPointer,
+                    [ByteSearch.constants.SEARCH_TABLE_ENTRIES, 1]);
+                if (!scratch) throw new Error("cannot allocate byte-search scratch");
+                if (borrowedScratch) this.byteSearchScratchBusy = true;
+            }
+            try {
+                return entry(haystack.pointer + haystackOffset, haystackLength,
+                    needle.pointer + needleOffset, needleLength, this.memchrPointer, scratch, this.memsetPointer);
+            } finally {
+                if (borrowedScratch) {
+                    this.byteSearchScratchBusy = false;
+                    releaseIdleSearchScratch(this);
+                } else if (scratch) this.ffi.call(this.freePointer, [scratch]);
+            }
+        }
+        var host = this, table = [], scratchBase = haystackLength + needleLength;
+        /* Present two read-only allocations as disjoint virtual ranges. The
+         * same kernel then runs through the ordinary JavaScript backend. */
+        var reader = {readRawU8Trusted: function (address) {
+            if (address >= scratchBase) return table[address - scratchBase] & 255;
+            return address < haystackLength ? host.read8(haystack, haystackOffset + address) :
+                host.read8(needle, needleOffset + address - haystackLength);
+        }};
+        reader.readRawU32Trusted = function (address) {
+            return (reader.readRawU8Trusted(address) |
+                reader.readRawU8Trusted(address + 1) << 8 |
+                reader.readRawU8Trusted(address + 2) << 16 |
+                reader.readRawU8Trusted(address + 3) << 24) >>> 0;
+        };
+        reader.writeRawU8Trusted = function (address, value) { table[address - scratchBase] = value & 255; };
+        return byteSearchEntry(false)(reader, 0, haystackLength, haystackLength, needleLength, 0, scratchBase, 0);
+    };
+
+    HostMemory.prototype.hostName = function () {
+        return this.isMMVM ? "mmvm-native" : "node-array-emulation";
+    };
+
+    /* Select the WSH provider at module initialization. Existing Node/native
+     * scalar functions have no new per-access condition or indirection. */
+    if (root.GuestVMWSHMemory) {
+        readPagedByte = root.GuestVMWSHMemory.readByte;
+        writePagedByte = root.GuestVMWSHMemory.writeByte;
+        readPagedWordLE = root.GuestVMWSHMemory.readWord;
+        writePagedWordLE = root.GuestVMWSHMemory.writeWord;
+        HostMemory.prototype.copyAllocationRange = root.GuestVMWSHMemory.copy;
+        HostMemory.prototype.fillAllocationRange = root.GuestVMWSHMemory.fill;
+    }
+    root.GuestVMHostMemory = HostMemory;
+    if (typeof module !== "undefined" && module.exports) module.exports = HostMemory;
+}(this));

@@ -1,0 +1,922 @@
+(function (root) {
+    var Tokenizer = root.GuestVMTokenizer;
+    if (typeof module !== "undefined" && module.exports) {
+        Tokenizer = require("./tokenizer.js");
+    }
+
+    var strictFutureReserved = {
+        "$implements": 1, "$interface": 1, "$let": 1, "$package": 1,
+        "$private": 1, "$protected": 1, "$public": 1, "$static": 1,
+        "$yield": 1
+    };
+
+    function Parser(source, filename, options) {
+        /* Token.raw is not part of the AST and the parser never consumes it.
+         * Raw function source is obtained once from token offsets below. */
+        this.tokenizer = new Tokenizer(source, filename,
+            !!options && options.captureRaw === true,
+            !!options && options.compactLiterals === true);
+        this.allowIn = true;
+        this.strict = !!options && options.strict === true;
+        this.functionDepth = 0;
+        this.finallySerial = 0;
+        this.compactLiterals = !!options && options.compactLiterals === true;
+        /* Only compiler-owned ASTs may share leaves. Public ASTs retain
+         * independent, mutable nodes at every source occurrence. Identifier
+         * leaves contain no location or binding state: resolution belongs to
+         * the compiler scope, not to this descriptor. */
+        this.identifierNodes = options && options.shareIdentifiers === true ?
+            {} : null;
+        this.captureLocations = !options || options.captureLocations !== false;
+        this.captureFunctionSource = !options ||
+            options.captureFunctionSource !== false;
+        this.current = this.tokenizer.next(true);
+        this.lookahead = null;
+        this.spareToken = {};
+    }
+
+    Parser.prototype.error = function (message) {
+        this.tokenizer.error(message, this.current.line, this.current.column);
+    };
+
+    Parser.prototype.makeIdentifier = function (name) {
+        if (!this.identifierNodes) return {type: "Identifier", name: name};
+        var key = "$" + name;
+        var node = this.identifierNodes[key];
+        if (!node) {
+            node = {type: "Identifier", name: name};
+            this.identifierNodes[key] = node;
+        }
+        return node;
+    };
+
+    Parser.prototype.makeLiteral = function (value, token) {
+        /* null is also the parser's optional-expression sentinel, so retain
+         * an explicit node for a null literal even in the compact form. */
+        if (this.compactLiterals && value !== null &&
+            !(token && token.hasEscapeSequence)) return value;
+        var literal = {type: "Literal", value: value};
+        if (token && token.hasEscapeSequence) {
+            literal.hasEscapeSequence = true;
+            literal.legacyOctalEscape = token.legacyOctalEscape;
+        }
+        return literal;
+    };
+
+    Parser.prototype.rejectStrictOctal = function (token) {
+        if (this.strict &&
+            (token.kind === "number" && token.legacyOctal ||
+             token.kind === "string" && token.legacyOctalEscape)) {
+            this.error("legacy octal syntax is not permitted in strict code");
+        }
+    };
+
+    Parser.prototype.advance = function (allowRegexp) {
+        var previous = this.current;
+        if (this.lookahead) {
+            this.current = this.lookahead;
+            this.lookahead = null;
+        } else {
+            this.current = this.tokenizer.next(!!allowRegexp, this.spareToken);
+        }
+        this.spareToken = previous;
+        return previous;
+    };
+
+    Parser.prototype.peek = function (allowRegexp) {
+        if (!this.lookahead) {
+            this.lookahead = this.tokenizer.next(!!allowRegexp, {});
+        }
+        return this.lookahead;
+    };
+
+    Parser.prototype.isPunctuator = function (value) {
+        return this.current.kind === "punctuator" && this.current.value === value;
+    };
+
+    Parser.prototype.isKeyword = function (value) {
+        return this.current.kind === "keyword" && this.current.value === value;
+    };
+
+    Parser.prototype.expectPunctuator = function (value, allowRegexp) {
+        if (!this.isPunctuator(value)) this.error("expected '" + value + "'");
+        return this.advance(allowRegexp);
+    };
+
+    Parser.prototype.expectIdentifier = function () {
+        if (this.current.kind !== "identifier") this.error("expected identifier");
+        if (this.strict &&
+            strictFutureReserved["$" + this.current.value] === 1) {
+            this.error("reserved word is not an identifier in strict code");
+        }
+        return this.advance(false);
+    };
+
+    Parser.prototype.expectIdentifierName = function () {
+        if (this.current.kind !== "identifier" &&
+            this.current.kind !== "keyword") {
+            this.error("expected identifier name");
+        }
+        return this.advance(false);
+    };
+
+    Parser.prototype.parseProgram = function () {
+        var body = [];
+        var directivePrologue = true;
+        var directiveHadOctalEscape = false;
+        while (this.current.kind !== "eof") {
+            var statement = this.parseStatement();
+            body.push(statement);
+            if (directivePrologue) {
+                if (statement.type === "ExpressionStatement" &&
+                    ((statement.expression &&
+                      statement.expression.type === "Literal" &&
+                      typeof statement.expression.value === "string") ||
+                     typeof statement.expression === "string")) {
+                    var directiveValue = typeof statement.expression === "string" ?
+                        statement.expression : statement.expression.value;
+                    var directiveHasEscape = statement.expression &&
+                        statement.expression.hasEscapeSequence;
+                    if (statement.expression &&
+                        statement.expression.legacyOctalEscape) {
+                        directiveHadOctalEscape = true;
+                    }
+                    if (directiveValue === "use strict" &&
+                        !directiveHasEscape) {
+                        if (directiveHadOctalEscape) {
+                            this.error("legacy octal escape in strict directive prologue");
+                        }
+                        this.strict = true;
+                    }
+                } else {
+                    directivePrologue = false;
+                }
+            }
+        }
+        var program = {type: "Program", body: body,
+                       filename: this.tokenizer.filename,
+                       strict: this.strict};
+        if (this.captureLocations) {
+            program.location = body.length ? body[0].location :
+                {filename: this.tokenizer.filename, line: 1, column: 1};
+        }
+        return program;
+    };
+
+    Parser.prototype.parseStatement = function () {
+        var startLine = this.current.line;
+        var startColumn = this.current.column;
+        var statement = this.parseStatementWithoutLocation();
+        if (this.captureLocations && !statement.location) {
+            statement.location = {filename: this.tokenizer.filename,
+                                  line: startLine, column: startColumn + 1};
+        }
+        return statement;
+    };
+
+    Parser.prototype.parseStatementWithoutLocation = function () {
+        if (this.isPunctuator(";")) {
+            this.advance(true);
+            return {type: "EmptyStatement"};
+        }
+        if (this.isPunctuator("{")) return this.parseBlock();
+        if (this.isKeyword("var")) return this.parseVariableStatement(true);
+        if (this.isKeyword("for")) return this.parseForStatement();
+        if (this.isKeyword("while")) return this.parseWhileStatement();
+        if (this.isKeyword("if")) return this.parseIfStatement();
+        if (this.isKeyword("return")) return this.parseReturnStatement();
+        if (this.isKeyword("function")) return this.parseFunction(true);
+        if (this.isKeyword("break")) return this.parseBreakStatement();
+        if (this.isKeyword("continue")) return this.parseContinueStatement();
+        if (this.isKeyword("do")) return this.parseDoWhileStatement();
+        if (this.isKeyword("throw")) return this.parseThrowStatement();
+        if (this.isKeyword("try")) return this.parseTryStatement();
+        if (this.isKeyword("switch")) return this.parseSwitchStatement();
+        if (this.isKeyword("with")) return this.parseWithStatement();
+        if (this.current.kind === "identifier" &&
+            this.peek(false).kind === "punctuator" &&
+            this.lookahead.value === ":") {
+            var label = this.advance(false).value;
+            this.expectPunctuator(":", true);
+            return {type: "LabeledStatement", label: label,
+                    body: this.parseStatement()};
+        }
+        var expression = this.parseExpression();
+        if (this.isPunctuator(";")) this.advance(true);
+        else if (!this.current.lineBefore && !this.isPunctuator("}") &&
+                 this.current.kind !== "eof") this.error("expected ';'");
+        return {type: "ExpressionStatement", expression: expression};
+    };
+
+    Parser.prototype.parseBlock = function () {
+        this.expectPunctuator("{", true);
+        var body = [];
+        while (!this.isPunctuator("}")) {
+            if (this.current.kind === "eof") this.error("unterminated block");
+            body.push(this.parseStatement());
+        }
+        var close = this.expectPunctuator("}", true);
+        return {type: "BlockStatement", body: body, sourceEnd: close.end};
+    };
+
+    Parser.prototype.parseVariableStatement = function (consumeSemicolon) {
+        this.advance(false);
+        var declarations = [];
+        while (true) {
+            var name = this.expectIdentifier().value;
+            if (this.strict && (name === "eval" || name === "arguments")) {
+                this.error("invalid variable binding in strict code");
+            }
+            var initial = null;
+            if (this.isPunctuator("=")) {
+                this.advance(true);
+                initial = this.parseAssignment();
+            }
+            declarations.push({name: name, initial: initial});
+            if (!this.isPunctuator(",")) break;
+            this.advance(false);
+        }
+        if (consumeSemicolon) {
+            if (this.isPunctuator(";")) this.advance(true);
+            else if (!this.current.lineBefore && !this.isPunctuator("}") &&
+                     this.current.kind !== "eof") this.error("expected ';'");
+        }
+        return {type: "VariableStatement", declarations: declarations};
+    };
+
+    Parser.prototype.parseForStatement = function () {
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var initial = null;
+        var savedAllowIn = this.allowIn;
+        this.allowIn = false;
+        if (this.isKeyword("var")) initial = this.parseVariableStatement(false);
+        else if (!this.isPunctuator(";")) initial = this.parseExpression();
+        this.allowIn = savedAllowIn;
+        if (this.isKeyword("in")) {
+            this.advance(true);
+            var right = this.parseExpression();
+            this.expectPunctuator(")", true);
+            return {type: "ForInStatement", left: initial, right: right,
+                    body: this.parseStatement()};
+        }
+        this.expectPunctuator(";", true);
+        var test = null;
+        if (!this.isPunctuator(";")) test = this.parseExpression();
+        this.expectPunctuator(";", true);
+        var update = null;
+        if (!this.isPunctuator(")")) update = this.parseExpression();
+        this.expectPunctuator(")", true);
+        return {type: "ForStatement", initial: initial, test: test,
+                update: update, body: this.parseStatement()};
+    };
+
+    Parser.prototype.parseWhileStatement = function () {
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var test = this.parseExpression();
+        this.expectPunctuator(")", true);
+        return {type: "WhileStatement", test: test, body: this.parseStatement()};
+    };
+
+    Parser.prototype.parseWithStatement = function () {
+        if (this.strict) this.error("with is not allowed in strict code");
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var object = this.parseExpression();
+        this.expectPunctuator(")", true);
+        return {type: "WithStatement", object: object,
+                body: this.parseStatement()};
+    };
+
+    Parser.prototype.parseIfStatement = function () {
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var test = this.parseExpression();
+        this.expectPunctuator(")", true);
+        var consequent = this.parseStatement();
+        var alternate = null;
+        if (this.isKeyword("else")) {
+            this.advance(true);
+            alternate = this.parseStatement();
+        }
+        return {type: "IfStatement", test: test, consequent: consequent,
+                alternate: alternate};
+    };
+
+    Parser.prototype.parseReturnStatement = function () {
+        if (this.functionDepth === 0) this.error("return outside function");
+        this.advance(true);
+        var argument = null;
+        if (!this.current.lineBefore && !this.isPunctuator(";") &&
+            !this.isPunctuator("}") && this.current.kind !== "eof") {
+            argument = this.parseExpression();
+        }
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "ReturnStatement", argument: argument};
+    };
+
+    Parser.prototype.parseBreakStatement = function () {
+        this.advance(false);
+        var label = null;
+        if (this.current.kind === "identifier" && !this.current.lineBefore) {
+            label = this.advance(false).value;
+        }
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "BreakStatement", label: label};
+    };
+
+    Parser.prototype.parseContinueStatement = function () {
+        this.advance(false);
+        var label = null;
+        if (this.current.kind === "identifier" && !this.current.lineBefore) {
+            label = this.advance(false).value;
+        }
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "ContinueStatement", label: label};
+    };
+
+    Parser.prototype.parseDoWhileStatement = function () {
+        this.advance(true);
+        var body = this.parseStatement();
+        if (!this.isKeyword("while")) this.error("do statement requires while");
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var test = this.parseExpression();
+        this.expectPunctuator(")", false);
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "DoWhileStatement", body: body, test: test};
+    };
+
+    Parser.prototype.parseThrowStatement = function () {
+        this.advance(true);
+        if (this.current.lineBefore) this.error("line terminator after throw");
+        var argument = this.parseExpression();
+        if (this.isPunctuator(";")) this.advance(true);
+        return {type: "ThrowStatement", argument: argument};
+    };
+
+    Parser.prototype.parseTryStatement = function () {
+        this.advance(true);
+        var block = this.parseBlock();
+        var parameter = null;
+        var handler = null;
+        if (this.isKeyword("catch")) {
+            this.advance(false);
+            this.expectPunctuator("(", false);
+            parameter = this.expectIdentifier().value;
+            if (this.strict && (parameter === "eval" || parameter === "arguments")) {
+                this.error("invalid catch binding in strict code");
+            }
+            this.expectPunctuator(")", true);
+            handler = this.parseBlock();
+        }
+        var finalizer = null;
+        if (this.isKeyword("finally")) {
+            this.advance(true);
+            finalizer = this.parseBlock();
+        }
+        if (!handler && !finalizer) this.error("try requires catch or finally");
+        var finallyParameter = null;
+        if (finalizer) {
+            do {
+                finallyParameter = "$guestFinally" + this.finallySerial++;
+            } while (this.tokenizer.source.indexOf(finallyParameter) >= 0);
+        }
+        return {type: "TryStatement", block: block, parameter: parameter,
+                handler: handler, finalizer: finalizer,
+                finallyParameter: finallyParameter};
+    };
+
+    Parser.prototype.parseSwitchStatement = function () {
+        this.advance(false);
+        this.expectPunctuator("(", true);
+        var discriminant = this.parseExpression();
+        this.expectPunctuator(")", false);
+        this.expectPunctuator("{", true);
+        var cases = [];
+        var sawDefault = false;
+        while (!this.isPunctuator("}")) {
+            var test = null;
+            if (this.isKeyword("case")) {
+                this.advance(true);
+                test = this.parseExpression();
+            } else if (this.isKeyword("default")) {
+                if (sawDefault) this.error("duplicate default clause");
+                sawDefault = true;
+                this.advance(false);
+            } else {
+                this.error("expected case or default");
+            }
+            this.expectPunctuator(":", true);
+            var consequent = [];
+            while (!this.isKeyword("case") &&
+                   !this.isKeyword("default") &&
+                   !this.isPunctuator("}")) {
+                consequent.push(this.parseStatement());
+            }
+            cases.push({type: "SwitchCase", test: test,
+                        consequent: consequent});
+        }
+        this.expectPunctuator("}", true);
+        return {type: "SwitchStatement", discriminant: discriminant,
+                cases: cases};
+    };
+
+    Parser.prototype.parseFunction = function (declaration) {
+        var startOffset = this.current.start;
+        var startLine = this.current.line;
+        var startColumn = this.current.column;
+        this.advance(false);
+        var name = null;
+        if (this.current.kind === "identifier") name = this.expectIdentifier().value;
+        else if (declaration) this.error("function declaration requires a name");
+        this.expectPunctuator("(", false);
+        var parameters = [];
+        if (!this.isPunctuator(")")) {
+            while (true) {
+                parameters.push(this.expectIdentifier().value);
+                if (!this.isPunctuator(",")) break;
+                this.advance(false);
+            }
+        }
+        this.expectPunctuator(")", true);
+        var outerStrict = this.strict;
+        var body = this.parseFunctionBody(declaration);
+        var functionStrict = this.strict;
+        this.strict = outerStrict;
+        if (functionStrict) {
+            var seenParameters = {};
+            var parameterIndex = 0;
+            while (parameterIndex < parameters.length) {
+                var parameterName = parameters[parameterIndex++];
+                if (parameterName === "eval" || parameterName === "arguments" ||
+                    strictFutureReserved["$" + parameterName] === 1 ||
+                    seenParameters["$" + parameterName]) {
+                    this.error("invalid function parameter in strict code");
+                }
+                seenParameters["$" + parameterName] = 1;
+            }
+            if (name === "eval" || name === "arguments" ||
+                strictFutureReserved["$" + name] === 1) {
+                this.error("invalid function name in strict code");
+            }
+        }
+        var result = {
+            type: declaration ? "FunctionDeclaration" : "FunctionExpression",
+            name: name, parameters: parameters, body: body,
+            strict: functionStrict
+        };
+        if (this.captureFunctionSource) {
+            result.source = this.tokenizer.source.substring(
+                startOffset, body.sourceEnd);
+        }
+        if (this.captureLocations) {
+            result.location = {filename: this.tokenizer.filename,
+                               line: startLine, column: startColumn + 1};
+        }
+        return result;
+    };
+
+    Parser.prototype.parseFunctionBody = function (allowRegexpAfterClose) {
+        this.expectPunctuator("{", true);
+        this.functionDepth++;
+        var body = [];
+        var directivePrologue = true;
+        var directiveHadOctalEscape = false;
+        while (!this.isPunctuator("}")) {
+            if (this.current.kind === "eof") this.error("unterminated block");
+            var statement = this.parseStatement();
+            body.push(statement);
+            if (directivePrologue) {
+                if (statement.type === "ExpressionStatement" &&
+                    ((statement.expression &&
+                      statement.expression.type === "Literal" &&
+                      typeof statement.expression.value === "string") ||
+                     typeof statement.expression === "string")) {
+                    var directiveValue = typeof statement.expression === "string" ?
+                        statement.expression : statement.expression.value;
+                    var directiveHasEscape = statement.expression &&
+                        statement.expression.hasEscapeSequence;
+                    if (statement.expression &&
+                        statement.expression.legacyOctalEscape) {
+                        directiveHadOctalEscape = true;
+                    }
+                    if (directiveValue === "use strict" &&
+                        !directiveHasEscape) {
+                        if (directiveHadOctalEscape) {
+                            this.error("legacy octal escape in strict directive prologue");
+                        }
+                        this.strict = true;
+                    }
+                } else {
+                    directivePrologue = false;
+                }
+            }
+        }
+        var close = this.expectPunctuator("}", !!allowRegexpAfterClose);
+        this.functionDepth--;
+        return {type: "BlockStatement", body: body, sourceEnd: close.end};
+    };
+
+    Parser.prototype.parseExpression = function () {
+        var expression = this.parseAssignment();
+        while (this.isPunctuator(",")) {
+            this.advance(true);
+            expression = {type: "SequenceExpression", left: expression,
+                          right: this.parseAssignment()};
+        }
+        return expression;
+    };
+
+    Parser.prototype.parseAssignment = function () {
+        var left = this.parseConditional();
+        if (this.current.kind === "punctuator" &&
+            (this.current.value === "=" || this.current.value === "+=" ||
+             this.current.value === "-=" || this.current.value === "*=" ||
+             this.current.value === "/=" || this.current.value === "%=" ||
+             this.current.value === "|=" || this.current.value === "&=" ||
+             this.current.value === "^=" || this.current.value === "<<=" ||
+             this.current.value === ">>=" || this.current.value === ">>>=")) {
+            if (this.strict && left.type === "Identifier" &&
+                (left.name === "eval" || left.name === "arguments")) {
+                this.error("invalid assignment target in strict code");
+            }
+            var operator = this.advance(true).value;
+            return {type: "AssignmentExpression", operator: operator,
+                    left: left, right: this.parseAssignment()};
+        }
+        return left;
+    };
+
+    Parser.prototype.parseConditional = function () {
+        var test = this.parseLogicalOr();
+        if (!this.isPunctuator("?")) return test;
+        this.advance(true);
+        var consequent = this.parseAssignment();
+        this.expectPunctuator(":", true);
+        return {type: "ConditionalExpression", test: test,
+                consequent: consequent, alternate: this.parseAssignment()};
+    };
+
+    Parser.prototype.binaryPrecedence = function () {
+        var value = this.current.value;
+        var kind = this.current.kind;
+        if (kind === "keyword") {
+            if (value === "instanceof") return 7;
+            if (value === "in" && this.allowIn) return 7;
+            return 0;
+        }
+        if (kind !== "punctuator") return 0;
+        if (value === "||") return 1;
+        if (value === "&&") return 2;
+        if (value === "|") return 3;
+        if (value === "^") return 4;
+        if (value === "&") return 5;
+        if (value === "==" || value === "!=" || value === "===" ||
+            value === "!==") return 6;
+        if (value === "<" || value === "<=" || value === ">" ||
+            value === ">=") return 7;
+        if (value === "<<" || value === ">>" || value === ">>>") return 8;
+        if (value === "+" || value === "-") return 9;
+        if (value === "*" || value === "/" || value === "%") return 10;
+        return 0;
+    };
+
+    /* Precedence climbing avoids sending every primary expression through ten
+     * mutually recursive functions.  Passing precedence + 1 on the right
+     * preserves ECMAScript's left associativity for all binary operators. */
+    Parser.prototype.parseBinaryExpression = function (minimumPrecedence) {
+        var left = this.parseUnary();
+        var precedence = this.binaryPrecedence();
+        while (precedence >= minimumPrecedence) {
+            var operator = this.advance(true).value;
+            var right = this.parseBinaryExpression(precedence + 1);
+            left = {type: "BinaryExpression", operator: operator,
+                    left: left, right: right};
+            precedence = this.binaryPrecedence();
+        }
+        return left;
+    };
+
+    Parser.prototype.parseLogicalOr = function () {
+        return this.parseBinaryExpression(1);
+    };
+
+    Parser.prototype.parseUnary = function () {
+        if (this.current.kind === "punctuator" &&
+            (this.current.value === "++" || this.current.value === "--")) {
+            var updateOperator = this.advance(true).value;
+            var updateArgument = this.parseUnary();
+            if (this.strict && updateArgument.type === "Identifier" &&
+                (updateArgument.name === "eval" ||
+                 updateArgument.name === "arguments")) {
+                this.error("invalid update target in strict code");
+            }
+            return {type: "UpdateExpression", operator: updateOperator,
+                    argument: updateArgument, prefix: true};
+        }
+        if (this.isKeyword("new")) return this.parseNewExpression();
+        if ((this.current.kind === "punctuator" &&
+             (this.current.value === "!" || this.current.value === "+" ||
+              this.current.value === "-" || this.current.value === "~")) ||
+            (this.current.kind === "keyword" &&
+             (this.current.value === "typeof" || this.current.value === "void" ||
+              this.current.value === "delete"))) {
+            var operator = this.advance(true).value;
+            var unaryArgument = this.parseUnary();
+            if (this.strict && operator === "delete" &&
+                unaryArgument.type === "Identifier") {
+                this.error("cannot delete an identifier in strict code");
+            }
+            return {type: "UnaryExpression", operator: operator,
+                    argument: unaryArgument};
+        }
+        return this.parsePostfix();
+    };
+
+    Parser.prototype.parseNewExpression = function () {
+        this.advance(true);
+        var callee = this.isKeyword("new") ?
+            this.parseNewExpression() : this.parsePrimary();
+        while (this.isPunctuator(".")) {
+            this.advance(false);
+            callee = {type: "MemberExpression", object: callee,
+                      property: this.makeLiteral(
+                          this.expectIdentifierName().value),
+                      computed: false};
+        }
+        while (this.isPunctuator("[")) {
+            this.advance(true);
+            var calleeKey = this.parseExpression();
+            this.expectPunctuator("]", false);
+            callee = {type: "MemberExpression", object: callee,
+                      property: calleeKey, computed: true};
+        }
+        var args = [];
+        if (this.isPunctuator("(")) {
+            this.advance(true);
+            if (!this.isPunctuator(")")) {
+                while (true) {
+                    args.push(this.parseAssignment());
+                    if (!this.isPunctuator(",")) break;
+                    this.advance(true);
+                }
+            }
+            this.expectPunctuator(")", false);
+        }
+        var expression = {type: "NewExpression", callee: callee, arguments: args};
+        while (true) {
+            if (this.isPunctuator(".")) {
+                this.advance(false);
+                expression = {type: "MemberExpression", object: expression,
+                              property: this.makeLiteral(
+                                  this.expectIdentifierName().value),
+                              computed: false};
+            } else if (this.isPunctuator("[")) {
+                this.advance(true);
+                var expressionKey = this.parseExpression();
+                this.expectPunctuator("]", false);
+                expression = {type: "MemberExpression", object: expression,
+                              property: expressionKey, computed: true};
+            } else if (this.isPunctuator("(")) {
+                this.advance(true);
+                var callArgs = [];
+                if (!this.isPunctuator(")")) {
+                    while (true) {
+                        callArgs.push(this.parseAssignment());
+                        if (!this.isPunctuator(",")) break;
+                        this.advance(true);
+                    }
+                }
+                this.expectPunctuator(")", false);
+                expression = {type: "CallExpression", callee: expression,
+                              arguments: callArgs};
+            } else break;
+        }
+        return expression;
+    };
+
+    Parser.prototype.parsePostfix = function () {
+        var expression = this.parseLeftHandSide();
+        if (!this.current.lineBefore && this.current.kind === "punctuator" &&
+            (this.current.value === "++" || this.current.value === "--")) {
+            if (this.strict && expression.type === "Identifier" &&
+                (expression.name === "eval" || expression.name === "arguments")) {
+                this.error("invalid update target in strict code");
+            }
+            return {type: "UpdateExpression", operator: this.advance(false).value,
+                    argument: expression, prefix: false};
+        }
+        return expression;
+    };
+
+    Parser.prototype.parseLeftHandSide = function () {
+        var expression = this.parsePrimary();
+        while (true) {
+            if (this.isPunctuator(".")) {
+                this.advance(false);
+                var property = this.expectIdentifierName().value;
+                expression = {type: "MemberExpression", object: expression,
+                              property: this.makeLiteral(property),
+                              computed: false};
+            } else if (this.isPunctuator("[")) {
+                this.advance(true);
+                var key = this.parseExpression();
+                this.expectPunctuator("]", false);
+                expression = {type: "MemberExpression", object: expression,
+                              property: key, computed: true};
+            } else if (this.isPunctuator("(")) {
+                this.advance(true);
+                var args = [];
+                if (!this.isPunctuator(")")) {
+                    while (true) {
+                        args.push(this.parseAssignment());
+                        if (!this.isPunctuator(",")) break;
+                        this.advance(true);
+                    }
+                }
+                this.expectPunctuator(")", false);
+                expression = {type: "CallExpression", callee: expression,
+                              arguments: args};
+            } else {
+                break;
+            }
+        }
+        return expression;
+    };
+
+    Parser.prototype.noteObjectProperty = function (
+            definitions, key, kind, strict) {
+        var mapKey = "$" + key;
+        var previous = definitions[mapKey];
+        if (previous) {
+            if (previous === "accessorPair") {
+                this.error("invalid duplicate object literal property");
+            }
+            var previousData = previous === "init";
+            var currentData = kind === "init";
+            if ((strict && previousData && currentData) ||
+                previousData !== currentData ||
+                (!currentData && previous === kind)) {
+                this.error("invalid duplicate object literal property");
+            }
+            definitions[mapKey] = "accessorPair";
+        } else definitions[mapKey] = kind;
+    };
+
+    Parser.prototype.parsePrimary = function () {
+        var token = this.current;
+        if (this.isKeyword("function")) return this.parseFunction(false);
+        if (token.kind === "regexp") {
+            this.advance(false);
+            return {type: "RegExpLiteral", pattern: token.value.pattern,
+                    flags: token.value.flags};
+        }
+        if (token.kind === "number" || token.kind === "string") {
+            this.rejectStrictOctal(token);
+            this.advance(false);
+            return this.makeLiteral(token.value, token);
+        }
+        if (token.kind === "keyword" &&
+            (token.value === "true" || token.value === "false" ||
+             token.value === "null")) {
+            this.advance(false);
+            return this.makeLiteral(token.value === "true" ? true :
+                token.value === "false" ? false : null);
+        }
+        if (token.kind === "identifier") {
+            if (this.strict &&
+                strictFutureReserved["$" + token.value] === 1) {
+                this.error("reserved word is not an identifier in strict code");
+            }
+            this.advance(false);
+            return this.identifierNodes ? this.makeIdentifier(token.value) :
+                {type: "Identifier", name: token.value};
+        }
+        if (this.isKeyword("this")) {
+            this.advance(false);
+            return {type: "ThisExpression"};
+        }
+        if (this.isPunctuator("[")) {
+            this.advance(true);
+            var elements = [];
+            while (!this.isPunctuator("]")) {
+                if (this.isPunctuator(",")) {
+                    elements.push(null);
+                    this.advance(true);
+                    continue;
+                }
+                elements.push(this.parseAssignment());
+                if (!this.isPunctuator(",")) break;
+                this.advance(true);
+            }
+            this.expectPunctuator("]", false);
+            return {type: "ArrayExpression", elements: elements};
+        }
+        if (this.isPunctuator("{")) {
+            this.advance(true);
+            var properties = [];
+            var propertyDefinitions = {};
+            while (!this.isPunctuator("}")) {
+                var keyToken = this.current;
+                var keyValue = keyToken.value;
+                var keyStart = keyToken.start;
+                var keyLine = keyToken.line;
+                var keyColumn = keyToken.column;
+                if (keyToken.kind !== "identifier" && keyToken.kind !== "keyword" &&
+                    keyToken.kind !== "string" && keyToken.kind !== "number") {
+                    this.error("expected object property name");
+                }
+                this.rejectStrictOctal(keyToken);
+                this.advance(false);
+                if ((keyValue === "get" || keyValue === "set") &&
+                    !this.isPunctuator(":")) {
+                    var accessorKind = keyValue;
+                    var objectStrict = this.strict;
+                    var accessorKey = this.current;
+                    var accessorKeyValue = accessorKey.value;
+                    if (accessorKey.kind !== "identifier" &&
+                        accessorKey.kind !== "keyword" &&
+                        accessorKey.kind !== "string" &&
+                        accessorKey.kind !== "number") {
+                        this.error("expected accessor property name");
+                    }
+                    this.rejectStrictOctal(accessorKey);
+                    this.advance(false);
+                    this.expectPunctuator("(", false);
+                    var accessorParameters = [];
+                    if (!this.isPunctuator(")")) {
+                        accessorParameters.push(this.expectIdentifier().value);
+                        if (this.isPunctuator(",")) {
+                            this.error("accessor has too many parameters");
+                        }
+                    }
+                    if (accessorKind === "get" &&
+                        accessorParameters.length !== 0) {
+                        this.error("getter must not have parameters");
+                    }
+                    if (accessorKind === "set" &&
+                        accessorParameters.length !== 1) {
+                        this.error("setter must have one parameter");
+                    }
+                    this.expectPunctuator(")", true);
+                    var outerStrict = this.strict;
+                    var accessorBody = this.parseFunctionBody(false);
+                    var accessorStrict = this.strict;
+                    this.strict = outerStrict;
+                    if (accessorStrict && accessorParameters.length &&
+                        (accessorParameters[0] === "eval" ||
+                         accessorParameters[0] === "arguments" ||
+                         strictFutureReserved["$" + accessorParameters[0]] === 1)) {
+                        this.error("invalid setter parameter in strict code");
+                    }
+                    this.noteObjectProperty(propertyDefinitions,
+                        String(accessorKeyValue), accessorKind, objectStrict);
+                    properties.push({key: String(accessorKeyValue),
+                        kind: accessorKind,
+                        value: {type: "FunctionExpression",
+                            name: String(accessorKeyValue),
+                            parameters: accessorParameters,
+                            body: accessorBody,
+                            strict: accessorStrict,
+                            source: this.tokenizer.source.substring(
+                                keyStart, accessorBody.sourceEnd),
+                            location: {filename: this.tokenizer.filename,
+                                line: keyLine,
+                                column: keyColumn + 1}}});
+                } else {
+                    this.expectPunctuator(":", true);
+                    this.noteObjectProperty(propertyDefinitions,
+                        String(keyValue), "init", this.strict);
+                    properties.push({key: String(keyValue), kind: "init",
+                                     value: this.parseAssignment()});
+                }
+                if (!this.isPunctuator(",")) break;
+                this.advance(true);
+            }
+            this.expectPunctuator("}", false);
+            return {type: "ObjectExpression", properties: properties};
+        }
+        if (this.isPunctuator("(")) {
+            this.advance(true);
+            var expression = this.parseExpression();
+            this.expectPunctuator(")", false);
+            return expression;
+        }
+        this.error("expected expression");
+    };
+
+    /* Shared AST accessors for consumers of either literal representation. */
+    Parser.isLiteralExpression = function (expression) {
+        return expression === null || typeof expression !== "object" ||
+               expression.type === "Literal";
+    };
+    Parser.literalExpressionValue = function (expression) {
+        return expression !== null && typeof expression === "object" ?
+            expression.value : expression;
+    };
+
+    root.GuestVMParser = Parser;
+    if (typeof module !== "undefined" && module.exports) module.exports = Parser;
+}(this));

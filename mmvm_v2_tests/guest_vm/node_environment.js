@@ -1,0 +1,1265 @@
+/* Portable embedding adapters for guest programs. Normally these execute in
+ * the js_min/Node host. The standalone Test262 adapter reuses the realm
+ * scheduler as guest-executed code; it does not construct the Node adapters
+ * or require an external JavaScript engine. The compatibility stack owns I/O. */
+(function (root) {
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    if (typeof module !== "undefined" && module.exports) {
+        NativeIntrinsics = require("./native_intrinsics.js");
+    }
+
+    function own(object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
+    }
+
+    /* Reporting an exception must not invoke arbitrary conversion methods on
+     * it, or coerce a wrapper belonging to another runtime. In particular a
+     * primitive throw may have been wrapped in a diagnostic Error already. */
+    function diagnosticThrownText(value) {
+        var kind = typeof value;
+        if (value !== null && (kind === "object" || kind === "function")) {
+            if (typeof value.message === "string") return value.message;
+            return "<thrown " + (typeof value.guestType === "string" ?
+                value.guestType : kind) + ">";
+        }
+        return String(value);
+    }
+
+    function normalizePosixPath(path) {
+        path = String(path);
+        var absolute = path.charAt(0) === "/";
+        var parts = path.split("/");
+        var normalized = [];
+        var index = 0;
+        while (index < parts.length) {
+            var part = parts[index++];
+            if (!part || part === ".") continue;
+            if (part === "..") {
+                if (normalized.length &&
+                    normalized[normalized.length - 1] !== "..") {
+                    normalized.pop();
+                } else if (!absolute) normalized.push(part);
+            } else normalized.push(part);
+        }
+        var result = normalized.join("/");
+        if (absolute) result = "/" + result;
+        return result || (absolute ? "/" : ".");
+    }
+
+    function GuestNodeEnvironment(vm, runnerArguments, snapshotBootstrap) {
+        this.vm = vm;
+        this.runtime = vm.runtime;
+        this.context = vm.context;
+        this.retained = [];
+        this.timers = {};
+        this.nextTimerId = 1;
+        this.servers = [];
+        this.moduleCache = {};
+        this.moduleContexts = [];
+        this.test262ProgramCache = {};
+        this.test262HarnessTemplate = null;
+        this.test262Timings = {variants: 0, compile: 0, execute: 0,
+                               context: 0, contextCreate: 0,
+                               harnessExecute: 0, destroy: 0};
+        this.runnerArguments = runnerArguments;
+        this.snapshotBootstrap = !!snapshotBootstrap;
+        this.nodeHost = typeof module !== "undefined" && module.exports &&
+                        typeof require === "function";
+        this.wshHost = root.GuestVMWSHHost || null;
+        this.serviceHost = this.nodeHost || !!this.wshHost;
+        this.exitCode = 0;
+        this.exiting = false;
+        this.exitMarker = {guestNodeExit: true};
+
+        if (this.nodeHost) {
+            this.hostFs = require("fs");
+            this.hostNet = require("net");
+            this.hostHttp = require("http");
+            this.HostBuffer = require("buffer").Buffer;
+            this.hostProcess = process;
+        } else if (this.wshHost) {
+            this.hostFs = this.wshHost.fs;
+            this.hostNet = this.wshHost.net;
+            this.hostHttp = this.wshHost.http;
+            this.HostBuffer = this.wshHost.buffer;
+            this.hostProcess = this.wshHost.process;
+        } else {
+            if (typeof NodeLibc === "undefined") {
+                load("node_compat/libc.js");
+                load("node_compat/events.js");
+                load("node_compat/process.js");
+                load("node_compat/net.js");
+                load("node_compat/fs.js");
+                load("node_compat/http.js");
+            }
+            NodeProcess.install(runnerArguments);
+            var guestEnvironment = this;
+            NodeProcess.exceptionFormatter = function (error) {
+                var visible = guestEnvironment.hostVisibleError(error);
+                return visible && visible.stack ? visible.stack : String(visible);
+            };
+            this.hostFs = NodeFs;
+            this.hostNet = NodeNet;
+            this.hostHttp = NodeHttp;
+            this.HostBuffer = Buffer;
+            if (this.runtime.threadedCompiler) {
+                this.runtime.threadedCompiler.setNativeMemmove(
+                    function (destination, source, length) {
+                        return NodeLibc.memmove(destination, source, length);
+                    });
+            }
+        }
+        this.installGlobals();
+        this.installGuestRuntimeLibraries();
+    }
+
+    GuestNodeEnvironment.prototype.installGuestRuntimeLibraries = function () {
+        var environment = this;
+        this.vm.installStandardLibrary(function (filename) {
+            return environment.hostFs.readFileSync(filename).toString("utf8");
+        });
+    };
+
+    GuestNodeEnvironment.prototype.prepareStandaloneRuntimeSnapshot = function () {
+        this.context.installGlobal("__guestVMStandaloneArgc", 0);
+        this.context.installGlobal("__guestVMStandaloneArgv", 0);
+        this.context.installGlobal("__guestVMStandaloneImageBase", 0);
+        this.context.installGlobal("__guestVMStandaloneImageLength", 0);
+        this.context.installGlobal(
+            "__guestVMStandaloneRunGuestRunner", undefined);
+        this.context.run([
+            "load(\"guest_vm/guest_vm.js\");",
+            "load(\"guest_vm/node_environment.js\");",
+            "load(\"node_compat/libc.js\");",
+            "load(\"node_compat/events.js\");",
+            "load(\"node_compat/process.js\");",
+            "load(\"node_compat/net.js\");",
+            "load(\"node_compat/fs.js\");",
+            "load(\"node_compat/http.js\");",
+            "load(\"guest_vm/shell_ctypes.js\");",
+            "load(\"guest_vm/shell_command_line.js\");",
+            "var GuestStandaloneFrontend = require(" +
+                "\"./guest_vm/self_hosted_frontend.js\");",
+            "GuestStandaloneFrontend.installEvalCompiler(GuestVM.Frontend);",
+            "var GuestStandaloneJSON = GuestVMJSONSupport.forValues();",
+            "JSON.parse = function (text, reviver) { return GuestStandaloneJSON.parse(text, reviver); };",
+            "JSON.stringify = function (value, replacer, space) { return GuestStandaloneJSON.stringify(value, replacer, space); };"
+        ].join("\n"), "<standalone-runtime-bootstrap>");
+    };
+
+    GuestNodeEnvironment.prototype.environmentValue = function (name) {
+        if (this.snapshotBootstrap) return undefined;
+        if (this.serviceHost) return this.hostProcess.env[name];
+        return NodeMemory.cString(NodeLibc.getenv(name));
+    };
+
+    GuestNodeEnvironment.prototype.writeOutput = function (fd, args) {
+        var parts = [];
+        var index = 0;
+        while (index < args.length) parts.push(String(args[index++]));
+        var text = parts.join(" ") + "\n";
+        if (this.serviceHost) {
+            if (fd === 2) this.hostProcess.stderr.write(text);
+            else this.hostProcess.stdout.write(text);
+        } else NodeMemory.writeAll(fd, text);
+    };
+
+    GuestNodeEnvironment.prototype.enqueueHost = function (callback) {
+        if (this.wshHost) { this.wshHost.enqueue(callback); return; }
+        if (this.nodeHost) setTimeout(callback, 0);
+        else NodeRuntime.enqueue(callback);
+    };
+
+    GuestNodeEnvironment.prototype.setHostTimeout = function (callback, delay) {
+        if (this.wshHost) return this.wshHost.setTimeout(callback, delay);
+        return this.nodeHost ? setTimeout(callback, delay) :
+                               NodeRuntime.setTimeout(callback, delay);
+    };
+
+    GuestNodeEnvironment.prototype.clearHostTimeout = function (id) {
+        if (this.wshHost) { this.wshHost.clearTimeout(id); return; }
+        if (this.nodeHost) clearTimeout(id);
+        else NodeRuntime.clearTimeout(id);
+    };
+
+    /* Host timer objects are platform resources, never guest heap values.
+     * A callback root belongs to exactly one active timer entry and is
+     * released on firing, cancellation, scheduling failure or teardown. */
+    GuestNodeEnvironment.prototype.scheduleGuestTimeout = function (
+            callback, delay, animationFrame) {
+        var environment = this;
+        var id = this.nextTimerId++;
+        var key = "$" + id;
+        var timer = {handle: null, root: this.vm.retain(callback)};
+        this.timers[key] = timer;
+        try {
+            timer.handle = this.setHostTimeout(function () {
+                if (environment.timers[key] !== timer) return;
+                delete environment.timers[key];
+                try {
+                    environment.invoke(callback, undefined,
+                        animationFrame ? [environment.hostNow()] : []);
+                } finally { environment.vm.release(timer.root); }
+            }, delay);
+        } catch (error) {
+            delete this.timers[key];
+            this.vm.release(timer.root);
+            throw error;
+        }
+        return id;
+    };
+
+    GuestNodeEnvironment.prototype.cancelGuestTimeout = function (id) {
+        if (typeof id !== "number") return;
+        var key = "$" + id;
+        var timer = this.timers[key];
+        if (!timer) return;
+        delete this.timers[key];
+        try { this.clearHostTimeout(timer.handle); }
+        finally { this.vm.release(timer.root); }
+    };
+
+    GuestNodeEnvironment.prototype.hostNow = function () {
+        return this.serviceHost ? new Date().getTime() : NodeRuntime.now();
+    };
+
+    GuestNodeEnvironment.prototype.isExit = function (value) {
+        return value === this.exitMarker ||
+               (!this.serviceHost && NodeProcess.isExit(value));
+    };
+
+    GuestNodeEnvironment.prototype.keep = function (value) {
+        this.retained.push(this.vm.retain(value));
+        return value;
+    };
+
+    GuestNodeEnvironment.prototype.makeFunction = function (
+            name, callback, intrinsic, intrinsicId) {
+        return intrinsic ? this.runtime.makeNativeFunction(
+            name, callback, "intrinsic", intrinsicId) :
+                           this.runtime.makeHostFunction(name, callback);
+    };
+
+    GuestNodeEnvironment.prototype.object = function (values) {
+        var result = this.runtime.makeObject();
+        var key;
+        for (key in values) {
+            if (own(values, key)) this.runtime.setProperty(result, key, values[key]);
+        }
+        return result;
+    };
+
+    GuestNodeEnvironment.prototype.error = function (error) {
+        if (!error) return null;
+        return this.object({
+            message: error.message === undefined ? String(error) : String(error.message),
+            code: error.code,
+            errno: error.errno,
+            path: error.path,
+            syscall: error.syscall
+        });
+    };
+
+    GuestNodeEnvironment.prototype.hostVisibleError = function (error) {
+        if (!error || error instanceof Error) return error;
+        var runtime = this.runtime;
+        function property(name) {
+            try { return runtime.getProperty(error, name); }
+            catch (ignored) { return undefined; }
+        }
+        var direct = error.properties || {};
+        var filename = error.guestFilename || direct.$fileName ||
+                       property("fileName") || "<guest>";
+        var line = error.guestLine || direct.$lineNumber ||
+                   property("lineNumber") || 1;
+        var column = error.guestColumn || direct.$columnNumber ||
+                     property("columnNumber") || 1;
+        var name = direct.$name || property("name") || error.name || "Error";
+        var message = direct.$message || property("message") ||
+                      error.message || diagnosticThrownText(error);
+        var description = filename + ":" + line + ":" + column + ": " +
+            name + (message ? ": " + message : "");
+        var visible = new Error(description);
+        visible.stack = description;
+        return visible;
+    };
+
+    GuestNodeEnvironment.prototype.hostHeaders = function (headers) {
+        var result = {};
+        if (!headers || !headers.properties) return result;
+        var key;
+        for (key in headers.properties) {
+            if (own(headers.properties, key) && key.charAt(0) === "$") {
+                result[key.substring(1)] = String(headers.properties[key]);
+            }
+        }
+        return result;
+    };
+
+    GuestNodeEnvironment.prototype.guestBuffer = function (hostBuffer) {
+        if (this.wshHost) hostBuffer = this.wshHost.bytes(hostBuffer);
+        var bytes = hostBuffer && hostBuffer._nodeBytes ? hostBuffer._nodeBytes : hostBuffer;
+        if (!bytes) bytes = [];
+        var result = this.runtime.bufferSupport.allocate(bytes.length);
+        var index = 0;
+        while (index < bytes.length) {
+            this.runtime.bufferSupport.write(result, index, bytes[index]);
+            index++;
+        }
+        return result;
+    };
+
+    GuestNodeEnvironment.prototype.hostBody = function (value) {
+        if (!value || value.guestType !== "buffer") return value;
+        var bytes = [];
+        var index = 0;
+        var length = this.runtime.bufferSupport.viewLength(value);
+        while (index < length) {
+            bytes.push(this.runtime.bufferSupport.read(value, index));
+            index++;
+        }
+        return this.serviceHost ? this.HostBuffer.from(bytes) : new this.HostBuffer(bytes);
+    };
+
+    GuestNodeEnvironment.prototype.invoke = function (callable, receiver, args) {
+        var callbackContext = callable && callable.homeContext ?
+                              callable.homeContext : this.context;
+        var execution = callbackContext.startFunction(callable, receiver, args || []);
+        while (true) {
+            var result = execution.resume(
+                this.runtime.synchronousExecutionBudget());
+            if (result.status === "budget") continue;
+            if (result.status === "hostCall") {
+                execution.serviceHostCall();
+                continue;
+            }
+            if (result.status === "completed") return result.value;
+            if (result.status === "threw") {
+                if (this.isExit(result.exception)) throw result.exception;
+                throw this.hostVisibleError(result.exception);
+            }
+            throw new Error("unknown guest callback status: " + result.status);
+        }
+    };
+
+    GuestNodeEnvironment.prototype.enqueueGuest = function (callable, receiver, args,
+                                                              source) {
+        var environment = this;
+        var roots = [this.vm.retain(callable)];
+        if (receiver && receiver.guestType) roots.push(this.vm.retain(receiver));
+        var index = 0;
+        args = args || [];
+        while (index < args.length) {
+            if (args[index] && args[index].guestType) {
+                roots.push(this.vm.retain(args[index]));
+            }
+            index++;
+        }
+        this.enqueueHost(function () {
+            try {
+                if (!callable || callable.guestType !== "bytecodeFunction") {
+                    throw new TypeError("invalid queued guest callback from " +
+                        (source || "host service") + ": type " +
+                        (callable && callable.guestType || typeof callable) +
+                        ", address " + (callable && callable.heapAddress || 0));
+                }
+                environment.invoke(callable, receiver, args);
+            } finally {
+                var rootIndex = 0;
+                while (rootIndex < roots.length) {
+                    environment.vm.release(roots[rootIndex++]);
+                }
+            }
+        });
+    };
+
+    GuestNodeEnvironment.prototype.makeStats = function (stats) {
+        var environment = this;
+        var result = this.object({size: Number(stats.size) || 0});
+        this.runtime.setProperty(result, "isDirectory",
+            this.makeFunction("Stats.isDirectory", function () {
+                return stats.isDirectory();
+            }, true));
+        this.runtime.setProperty(result, "isFile",
+            this.makeFunction("Stats.isFile", function () {
+                return stats.isFile();
+            }, true));
+        return result;
+    };
+
+    GuestNodeEnvironment.prototype.makeFs = function () {
+        var environment = this;
+        var fs = this.object({});
+        this.runtime.setProperty(fs, "statSync", this.makeFunction("fs.statSync",
+            function (receiver, args) {
+                return environment.makeStats(
+                    environment.hostFs.statSync(String(args[0])));
+            }));
+        this.runtime.setProperty(fs, "readdirSync", this.makeFunction("fs.readdirSync",
+            function (receiver, args) {
+                return environment.runtime.arrayFrom(
+                    environment.hostFs.readdirSync(String(args[0])));
+            }));
+        this.runtime.setProperty(fs, "stat", this.makeFunction("fs.stat",
+            function (receiver, args) {
+                var path = String(args[0]);
+                var callback = args[1];
+                var callbackRoot = environment.vm.retain(callback);
+                environment.hostFs.stat(path, function (error, stats) {
+                    environment.enqueueGuest(callback, undefined,
+                        [environment.error(error), error ? undefined : environment.makeStats(stats)]);
+                    environment.vm.release(callbackRoot);
+                });
+                return undefined;
+            }));
+        this.runtime.setProperty(fs, "readdir", this.makeFunction("fs.readdir",
+            function (receiver, args) {
+                var path = String(args[0]);
+                var callback = args[1];
+                var callbackRoot = environment.vm.retain(callback);
+                environment.hostFs.readdir(path, function (error, names) {
+                    environment.enqueueGuest(callback, undefined,
+                        [environment.error(error), error ? undefined :
+                         environment.runtime.arrayFrom(names)]);
+                    environment.vm.release(callbackRoot);
+                });
+                return undefined;
+            }));
+        this.runtime.setProperty(fs, "readFile", this.makeFunction("fs.readFile",
+            function (receiver, args) {
+                var path = String(args[0]);
+                var callback = args[1];
+                var callbackRoot = environment.vm.retain(callback);
+                environment.hostFs.readFile(path, function (error, data) {
+                    environment.enqueueGuest(callback, undefined,
+                        [environment.error(error), error ? undefined :
+                         environment.guestBuffer(data)]);
+                    environment.vm.release(callbackRoot);
+                });
+                return undefined;
+            }));
+        this.runtime.setProperty(fs, "readFileSync", this.makeFunction("fs.readFileSync",
+            function (receiver, args) {
+                var data = environment.hostFs.readFileSync(String(args[0]));
+                if (args.length > 1 && args[1] !== undefined &&
+                    args[1] !== null) {
+                    return data.toString(String(args[1]));
+                }
+                return environment.guestBuffer(data);
+            }));
+        return fs;
+    };
+
+    GuestNodeEnvironment.prototype.test262ErrorResult = function (
+            status, phase, error, instructions) {
+        var visible = this.hostVisibleError(error);
+        var runtime = this.runtime;
+        function property(name) {
+            if (!error || !error.guestType) return undefined;
+            try { return runtime.getProperty(error, name); }
+            catch (ignored) { return undefined; }
+        }
+        return this.object({
+            status: status,
+            phase: phase,
+            name: property("name") || error && error.name || "Error",
+            message: property("message") || error && error.message ||
+                diagnosticThrownText(visible || error),
+            filename: property("fileName") || error &&
+                (error.guestFilename || error.fileName) || "",
+            line: Number(property("lineNumber") || error &&
+                (error.guestLine || error.lineNumber) || 0),
+            column: Number(property("columnNumber") || error &&
+                (error.guestColumn || error.columnNumber) || 0),
+            instructions: instructions || 0
+        });
+    };
+
+    GuestNodeEnvironment.prototype.runTest262Source = function (
+            globalContext, source, filename, instructionLimit, cacheKey) {
+        var context = globalContext;
+        var program;
+        var profile = this.runtime.profileOpcodeCounts ?
+            this.test262Timings : null;
+        try {
+            try {
+                var compileStarted = profile ? new Date().getTime() : 0;
+                program = cacheKey ? this.test262ProgramCache[cacheKey] : null;
+                if (!program) {
+                    program = context.compile(source, filename);
+                    if (cacheKey) this.test262ProgramCache[cacheKey] = program;
+                }
+                if (profile) {
+                    profile.compile += new Date().getTime() - compileStarted;
+                }
+            } catch (compileError) {
+                return this.test262ErrorResult(
+                    "threw", "compile", compileError, 0);
+            }
+
+            var execution = context.startProgram(program);
+            var executeStarted = profile ? new Date().getTime() : 0;
+            var used = 0;
+            var slice = 100000;
+            var progressStarted = this.test262Progress ? new Date().getTime() : 0;
+            var progressReported = progressStarted;
+            while (true) {
+                var remaining = instructionLimit - used;
+                if (remaining <= 0) {
+                    execution.abort();
+                    return this.object({status: "timeout", phase: "runtime",
+                        name: "TimeoutError",
+                        message: "instruction limit exhausted",
+                        filename: filename, line: 0, column: 0,
+                        instructions: used});
+                }
+                var result = execution.resume(remaining < slice ? remaining : slice);
+                used += result.instructions || 0;
+                if (result.status === "budget") {
+                    this.runtime.gcSafePoint();
+                    if (this.test262Sample) this.test262Sample(execution);
+                    if (this.test262Progress) {
+                        var progressNow = new Date().getTime();
+                        if (progressNow - progressReported >= 5000) {
+                            this.test262Progress("instructions " + used + "/" + instructionLimit +
+                                ", elapsed " + (progressNow - progressStarted) +
+                                " ms, test heap bump " + this.runtime.linearHeap.bump +
+                                ", limit " + this.runtime.linearHeap.allocationLimit +
+                                ", max " + this.runtime.linearHeap.maximumAllocationLimit +
+                                ", pressure " + this.runtime.gcHeapPressureBump +
+                                ", collections " + this.runtime.collectionCount +
+                                ", record allocations " + this.runtime.linearHeap.allocationCount +
+                                ", checkpoint " + this.runtime.gcRecordAllocationCheckpoint +
+                                ", last indexed free " + this.runtime.heapSweeper.reusableBytes);
+                            progressReported = progressNow;
+                        }
+                    }
+                } else if (result.status === "hostCall") {
+                    execution.serviceHostCall();
+                } else if (result.status === "completed") {
+                    if (profile) {
+                        profile.execute += new Date().getTime() - executeStarted;
+                    }
+                    return this.object({status: "completed", phase: "runtime",
+                        name: "", message: "", filename: filename,
+                        line: 0, column: 0, instructions: used});
+                } else if (result.status === "threw") {
+                    if (profile) {
+                        profile.execute += new Date().getTime() - executeStarted;
+                    }
+                    return this.test262ErrorResult(
+                        "threw", "runtime", result.exception, used);
+                } else {
+                    return this.object({status: "threw", phase: "runtime",
+                        name: "InternalError",
+                        message: "unknown execution status " + result.status,
+                        filename: filename, line: 0, column: 0,
+                        instructions: used});
+                }
+            }
+        } finally {
+            if (context.execution &&
+                context.execution.status !== "completed" &&
+                context.execution.status !== "threw") {
+                context.execution.abort();
+            }
+            context.execution = null;
+            this.runtime.heapRecords.setContextActiveFrame(
+                context.heapAddress, 0);
+        }
+    };
+
+    GuestNodeEnvironment.prototype.cloneTest262HarnessValue = function (
+            value, templateGlobal, targetContext, clones) {
+        var runtime = this.runtime;
+        if (value === templateGlobal) return targetContext.globalObject;
+        if (!value || !value.guestType) return value;
+        var identity = "$" + value.heapAddress;
+        if (clones[identity]) return clones[identity];
+        var clone;
+        if (value.guestType === "bytecodeFunction") {
+            var closure = runtime.functionClosure(value);
+            var clonedClosure = closure ? this.cloneTest262HarnessEnvironment(
+                closure, templateGlobal, targetContext, clones) : null;
+            clone = runtime.makeGuestFunction(
+                value.program, clonedClosure, targetContext);
+            clones[identity] = clone;
+            return clone;
+        }
+        if (value.guestType === "array") {
+            clone = runtime.makeArray(runtime.arrayLength(value));
+            clones[identity] = clone;
+            var arrayIndex = 0;
+            while (arrayIndex < runtime.arrayLength(value)) {
+                if (runtime.arrayHas(value, arrayIndex)) {
+                    runtime.arraySet(clone, arrayIndex,
+                        this.cloneTest262HarnessValue(runtime.arrayGet(
+                            value, arrayIndex), templateGlobal,
+                            targetContext, clones));
+                }
+                arrayIndex++;
+            }
+            return clone;
+        }
+        if (value.guestType === "object") {
+            clone = runtime.makeObject();
+            clones[identity] = clone;
+            var keys = runtime.keys(value);
+            var keyIndex = 0;
+            while (keyIndex < runtime.arrayLength(keys)) {
+                var key = runtime.arrayGet(keys, keyIndex++);
+                runtime.setProperty(clone, key,
+                    this.cloneTest262HarnessValue(runtime.getProperty(
+                        value, key), templateGlobal, targetContext, clones));
+            }
+            return clone;
+        }
+        /* Harness globals currently contain no mutable values of the other
+         * guest kinds. Preserve identity for native built-ins if one is
+         * deliberately exported by a future harness revision. */
+        return value;
+    };
+
+    GuestNodeEnvironment.prototype.cloneTest262HarnessEnvironment = function (
+            environment, templateGlobal, targetContext, clones) {
+        var runtime = this.runtime;
+        var identity = "$environment:" + environment.heapAddress;
+        if (clones[identity]) return clones[identity];
+        var parent = runtime.environmentParent(environment);
+        var clonedParent = parent ? this.cloneTest262HarnessEnvironment(
+            parent, templateGlobal, targetContext, clones) : null;
+        var slotCount = runtime.heapRecords.environmentSlotCount(
+            environment.heapAddress);
+        var clone = {heapAddress: runtime.heapRecords.allocateEnvironment(
+                         clonedParent ? clonedParent.heapAddress : 0, slotCount,
+                         runtime.heapRecords.environmentProgram(
+                             environment.heapAddress)),
+                     ownerRuntime: runtime};
+        clones[identity] = clone;
+        var metadata = runtime.environmentMetadata["$" +
+                                                   environment.heapAddress];
+        runtime.environmentMetadata["$" + clone.heapAddress] = {
+            handle: clone, bindingSlots: metadata.bindingSlots
+        };
+        var slot = 0;
+        while (slot < slotCount) {
+            runtime.writeHeapValue(runtime.heapRecords.environmentCell(
+                clone.heapAddress, slot), this.cloneTest262HarnessValue(
+                    runtime.readHeapValue(runtime.heapRecords.environmentCell(
+                        environment.heapAddress, slot)), templateGlobal,
+                    targetContext, clones));
+            slot++;
+        }
+        return clone;
+    };
+
+    GuestNodeEnvironment.prototype.prepareTest262Harness = function (
+            harnessFiles, instructionLimit) {
+        if (this.test262HarnessTemplate) return null;
+        var context = this.vm.jsRuntime.createContext();
+        var programs = [];
+        var harnessIndex = 0;
+        try {
+            while (harnessIndex < harnessFiles.length) {
+                var harnessFilename = String(harnessFiles[harnessIndex++]);
+                var harnessSource = this.hostFs.readFileSync(
+                    harnessFilename).toString("utf8");
+                if (harnessFilename ===
+                        "../../js_tests/tests/test262/shell.js") {
+                    harnessSource = harnessSource.
+                        split("'\"first\"'").join("\"first\"").
+                        split("'\"last\"'").join("\"last\"");
+                }
+                var program = context.compile(harnessSource, harnessFilename);
+                this.runtime.retainProgram(program);
+                this.test262ProgramCache["$" + harnessFilename] = program;
+                programs.push(program);
+            }
+            harnessIndex = 0;
+            while (harnessIndex < programs.length) {
+                context.evaluateProgram(programs[harnessIndex++]);
+            }
+        } catch (compileError) {
+            context.destroy();
+            return this.test262ErrorResult(
+                "threw", "harness", compileError, 0);
+        }
+        this.runtime.deleteProperty(context.globalObject, "Test262VM");
+        this.test262HarnessTemplate = {
+            context: context,
+            programs: programs,
+            snapshot: context.createSnapshot()
+        };
+        return null;
+    };
+
+    GuestNodeEnvironment.prototype.instantiateTest262Harness = function (
+            freshContext) {
+        var template = this.test262HarnessTemplate;
+        var profile = this.runtime.profileOpcodeCounts ?
+            this.test262Timings : null;
+        var phaseStarted = profile ? new Date().getTime() : 0;
+        var target;
+        if (freshContext) {
+            target = this.vm.jsRuntime.createContext();
+        } else {
+            target = template.context.restoreSnapshot(template.snapshot);
+        }
+        if (profile) {
+            profile.contextCreate += new Date().getTime() - phaseStarted;
+            phaseStarted = new Date().getTime();
+        }
+        if (freshContext) {
+            this.runtime.deleteProperty(target.globalObject, "Test262VM");
+            var programIndex = 0;
+            while (programIndex < template.programs.length) {
+                target.evaluateProgram(template.programs[programIndex++]);
+            }
+        }
+        if (profile) {
+            profile.harnessExecute += new Date().getTime() - phaseStarted;
+        }
+        return target;
+    };
+
+    GuestNodeEnvironment.prototype.makeTest262Service = function () {
+        var environment = this;
+        var service = this.object({});
+        this.runtime.setProperty(service, "kernelOptimization",
+            this.runtime.kernelOptimization);
+        this.runtime.setProperty(service, "runVariant",
+            this.makeFunction("Test262VM.runVariant", function (receiver, args) {
+                var filename = String(args[0]);
+                var source = String(args[1]);
+                var strict = !!args[2];
+                var harnessFiles = environment.runtime.arrayToHost(args[3]);
+                var instructionLimit = Number(args[4]);
+                var freshContext = !!args[5];
+                return environment.runTest262Variant(filename, source, strict,
+                    harnessFiles, instructionLimit, freshContext);
+            }));
+        return service;
+    };
+
+    /* The scheduler is ordinary portable JS. The hosted adapter above only
+     * converts the calling realm's arguments; a standalone guest embedding
+     * can invoke this same implementation without a host-service callback. */
+    GuestNodeEnvironment.prototype.runTest262Variant = function (
+            filename, source, strict, harnessFiles, instructionLimit, freshContext) {
+        var environment = this;
+        if (!(instructionLimit > 0)) instructionLimit = 20000000;
+        var harnessFailure = environment.prepareTest262Harness(
+            harnessFiles, instructionLimit);
+        if (harnessFailure) return harnessFailure;
+        var profile = environment.runtime.profileOpcodeCounts ?
+            environment.test262Timings : null;
+        var contextStarted = profile ? new Date().getTime() : 0;
+        var globalContext = environment.instantiateTest262Harness(
+            freshContext);
+        if (profile) {
+            profile.context += new Date().getTime() - contextStarted;
+        }
+        try {
+            if (strict) source = "\"use strict\";\n" + source;
+            return environment.runTest262Source(
+                globalContext, source, filename, instructionLimit);
+        } catch (serviceError) {
+            return environment.test262ErrorResult(
+                "threw", "service", serviceError, 0);
+        } finally {
+            var destroyStarted = profile ? new Date().getTime() : 0;
+            if (freshContext) globalContext.destroy();
+            else {
+                globalContext.execution = null;
+                environment.runtime.heapRecords.setContextActiveFrame(
+                    globalContext.heapAddress, 0);
+            }
+            if (profile) {
+                profile.destroy += new Date().getTime() - destroyStarted;
+                profile.variants++;
+                if (profile.variants % 100 === 0) {
+                    print("Test262 host phases: variants=" +
+                        profile.variants + " context=" +
+                        profile.context + "ms (create=" +
+                        profile.contextCreate + "ms harness=" +
+                        profile.harnessExecute + "ms) compile=" +
+                        profile.compile + "ms execute=" +
+                        profile.execute + "ms destroy=" +
+                        profile.destroy + "ms");
+                }
+            }
+        }
+    };
+
+    GuestNodeEnvironment.prototype.makeSocket = function (hostSocket) {
+        var environment = this;
+        var socket = this.object({});
+        this.keep(socket);
+        this.runtime.setProperty(socket, "on", this.makeFunction("Socket.on",
+            function (receiver, args) {
+                var name = String(args[0]);
+                var callback = args[1];
+                environment.keep(callback);
+                hostSocket.on(name, function (value) {
+                    var callbackArgs = [];
+                    if (name === "data") callbackArgs.push(environment.guestBuffer(value));
+                    else if (value !== undefined) callbackArgs.push(environment.error(value));
+                    environment.enqueueGuest(callback, socket, callbackArgs,
+                                             "Socket." + name);
+                });
+                return socket;
+            }));
+        this.runtime.setProperty(socket, "write", this.makeFunction("Socket.write",
+            function (receiver, args) {
+                var value = args[0];
+                var callback = args.length > 1 ? args[1] : undefined;
+                var valueRoot = value && value.guestType ? environment.vm.retain(value) : 0;
+                var callbackRoot = callback ? environment.vm.retain(callback) : 0;
+                var hostValue;
+                if (value && value.guestType === "buffer") {
+                    var valueBacking = environment.runtime.bufferSupport.
+                        viewBacking(value);
+                    var valuePointer = environment.runtime.heapRecords.
+                        bufferBackingPointer(valueBacking);
+                    if (valuePointer) {
+                    hostValue = {_nodePointer: valuePointer +
+                            environment.runtime.bufferSupport.viewOffset(value),
+                        length: environment.runtime.bufferSupport.viewLength(value)};
+                    } else hostValue = environment.hostBody(value);
+                } else hostValue = environment.hostBody(value);
+                return hostSocket.write(hostValue, function () {
+                    if (callback) environment.enqueueGuest(
+                        callback, socket, [], "Socket.write");
+                    if (callbackRoot) environment.vm.release(callbackRoot);
+                    if (valueRoot) environment.vm.release(valueRoot);
+                });
+            }));
+        this.runtime.setProperty(socket, "end", this.makeFunction("Socket.end",
+            function (receiver, args) {
+                hostSocket.end(args.length ? environment.hostBody(args[0]) : undefined);
+                return socket;
+            }));
+        this.runtime.setProperty(socket, "close", this.makeFunction("Socket.close",
+            function () { hostSocket.destroy(); return socket; }));
+        return socket;
+    };
+
+    GuestNodeEnvironment.prototype.makeNet = function () {
+        var environment = this;
+        var net = this.object({});
+        this.runtime.setProperty(net, "createConnection",
+            this.makeFunction("net.createConnection", function (receiver, args) {
+                return environment.makeSocket(
+                    environment.hostNet.createConnection(String(args[0])));
+            }));
+        return net;
+    };
+
+    GuestNodeEnvironment.prototype.dirname = function (path) {
+        var slash = path.lastIndexOf("/");
+        return slash < 0 ? "." : slash === 0 ? "/" : path.substring(0, slash);
+    };
+
+    GuestNodeEnvironment.prototype.normalizeModulePath = function (path) {
+        var parts = path.split("/");
+        var normalized = [];
+        var index = 0;
+        while (index < parts.length) {
+            var part = parts[index++];
+            if (!part || part === ".") continue;
+            if (part === "..") {
+                if (!normalized.length) throw new Error("module path escapes test directory");
+                normalized.pop();
+            } else normalized.push(part);
+        }
+        path = normalized.join("/");
+        if (path.substring(path.length - 3) !== ".js") path += ".js";
+        return path;
+    };
+
+    GuestNodeEnvironment.prototype.loadModule = function (request, parentFilename) {
+        if (own(this.builtinModules, request)) return this.builtinModules[request];
+        if (request.substring(0, 2) !== "./" && request.substring(0, 3) !== "../") {
+            throw new Error("unsupported guest module: " + request);
+        }
+        var filename = this.normalizeModulePath(
+            this.dirname(parentFilename) + "/" + request);
+        if (own(this.moduleCache, filename)) return this.moduleCache[filename].exports;
+
+        var source = this.hostFs.readFileSync(filename).toString("utf8");
+        var context = this.vm.jsRuntime.createContext();
+        this.moduleContexts.push(context);
+        var moduleRecord = {exports: this.object({}), context: context};
+        this.moduleCache[filename] = moduleRecord;
+        var moduleObject = this.object({exports: moduleRecord.exports,
+                                        filename: filename});
+        var environment = this;
+        context.installGlobal("module", moduleObject);
+        context.installGlobal("exports", moduleRecord.exports);
+        context.installGlobal("__filename", filename);
+        context.installGlobal("__dirname", this.dirname(filename));
+        context.installGlobal("require", this.makeFunction("require", function (receiver, args) {
+            return environment.loadModule(String(args[0]), filename);
+        }));
+        try {
+            context.run(source, filename);
+            moduleRecord.exports = this.runtime.getProperty(moduleObject, "exports");
+            return moduleRecord.exports;
+        } catch (error) {
+            delete this.moduleCache[filename];
+            context.destroy();
+            throw error;
+        }
+    };
+
+    GuestNodeEnvironment.prototype.makeResponse = function (hostResponse) {
+        var environment = this;
+        var response = this.object({});
+        this.runtime.setProperty(response, "writeHead",
+            this.makeFunction("ServerResponse.writeHead", function (receiver, args) {
+                hostResponse.writeHead(Number(args[0]), environment.hostHeaders(args[1]));
+                return response;
+            }));
+        this.runtime.setProperty(response, "end",
+            this.makeFunction("ServerResponse.end", function (receiver, args) {
+                hostResponse.end(args.length ? environment.hostBody(args[0]) : undefined);
+                return response;
+            }));
+        return response;
+    };
+
+    GuestNodeEnvironment.prototype.makeRequest = function (hostRequest) {
+        return this.object({
+            method: hostRequest.method,
+            url: hostRequest.url,
+            httpVersion: hostRequest.httpVersion,
+            socket: this.object({
+                remoteAddress: hostRequest.socket.remoteAddress,
+                remotePort: hostRequest.socket.remotePort
+            })
+        });
+    };
+
+    GuestNodeEnvironment.prototype.makeServer = function (listener) {
+        var environment = this;
+        var server = this.object({});
+        var listeners = {};
+        var hostServer = this.hostHttp.createServer(function (request, response) {
+            environment.enqueueGuest(listener, server,
+                [environment.makeRequest(request), environment.makeResponse(response)]);
+        });
+        this.keep(listener);
+        this.keep(server);
+        this.servers.push(hostServer);
+
+        this.runtime.setProperty(server, "on", this.makeFunction("Server.on",
+            function (receiver, args) {
+                var name = String(args[0]);
+                var callback = args[1];
+                listeners[name] = callback;
+                environment.keep(callback);
+                hostServer.on(name, function (error) {
+                    environment.enqueueGuest(callback, server,
+                        error ? [environment.error(error)] : []);
+                });
+                return server;
+            }));
+        this.runtime.setProperty(server, "listen", this.makeFunction("Server.listen",
+            function (receiver, args) {
+                var callback = args.length > 2 ? args[2] : undefined;
+                var callbackRoot = callback ? environment.vm.retain(callback) : 0;
+                hostServer.listen(Number(args[0]), String(args[1]), callback ? function () {
+                    environment.enqueueGuest(callback, server, []);
+                    environment.vm.release(callbackRoot);
+                } : undefined);
+                return server;
+            }));
+        this.runtime.setProperty(server, "address", this.makeFunction("Server.address",
+            function () {
+                var address = hostServer.address();
+                return address ? environment.object({address: address.address,
+                    family: address.family, port: address.port}) : null;
+            }));
+        return server;
+    };
+
+    GuestNodeEnvironment.prototype.makeHttp = function () {
+        var environment = this;
+        var http = this.object({});
+        this.runtime.setProperty(http, "createServer",
+            this.makeFunction("http.createServer", function (receiver, args) {
+                return environment.makeServer(args[0]);
+            }));
+        return http;
+    };
+
+    GuestNodeEnvironment.prototype.makePath = function () {
+        var environment = this;
+        var path = this.object({sep: "/", delimiter: ":"});
+        this.runtime.setProperty(path, "normalize",
+            this.makeFunction("path.normalize", function (receiver, args) {
+                return normalizePosixPath(args.length ? args[0] : ".");
+            }));
+        this.runtime.setProperty(path, "join",
+            this.makeFunction("path.join", function (receiver, args) {
+                var joined = "";
+                var index = 0;
+                while (index < args.length) {
+                    if (String(args[index])) {
+                        if (joined) joined += "/";
+                        joined += String(args[index]);
+                    }
+                    index++;
+                }
+                return normalizePosixPath(joined || ".");
+            }));
+        this.runtime.setProperty(path, "resolve",
+            this.makeFunction("path.resolve", function (receiver, args) {
+                var resolved = "";
+                var index = args.length - 1;
+                while (index >= 0) {
+                    var part = String(args[index--]);
+                    if (!part) continue;
+                    resolved = resolved ? part + "/" + resolved : part;
+                    if (part.charAt(0) === "/") {
+                        return normalizePosixPath(resolved);
+                    }
+                }
+                var cwd = environment.serviceHost ?
+                    environment.hostProcess.cwd() :
+                    environment.environmentValue("PWD") || ".";
+                return normalizePosixPath(String(cwd) + "/" + resolved);
+            }));
+        return path;
+    };
+
+    GuestNodeEnvironment.prototype.makeModule = function () {
+        var environment = this;
+        var moduleApi = this.object({});
+        this.runtime.setProperty(moduleApi, "_nodeModulePaths",
+            this.makeFunction("module._nodeModulePaths", function (receiver, args) {
+                if (typeof args[0] !== "string") {
+                    throw new TypeError("module search directory must be a string");
+                }
+                var cwd = environment.serviceHost ? environment.hostProcess.cwd() :
+                    environment.environmentValue("PWD") || ".";
+                var directory = String(args[0]);
+                var current = normalizePosixPath(directory.charAt(0) === "/" ?
+                    directory : cwd + "/" + directory);
+                var paths = [];
+                while (true) {
+                    var slash = current.lastIndexOf("/");
+                    if (current.substring(slash + 1) !== "node_modules") {
+                        paths.push((current === "/" ? "" : current) +
+                                   "/node_modules");
+                    }
+                    if (current === "/") break;
+                    current = environment.dirname(current);
+                }
+                var result = environment.runtime.makeArray(paths.length);
+                var index = 0;
+                while (index < paths.length) {
+                    environment.runtime.arraySet(result, index, paths[index]);
+                    index++;
+                }
+                return result;
+            }));
+        return moduleApi;
+    };
+
+    GuestNodeEnvironment.prototype.installGlobals = function () {
+        var environment = this;
+        var fs = this.makeFs();
+        var http = this.makeHttp();
+        var net = this.makeNet();
+        var path = this.makePath();
+        var moduleApi = this.makeModule();
+        this.builtinModules = {fs: fs, http: http, net: net, path: path,
+                              module: moduleApi};
+        /* The module cache is embedder-owned. Its exports must remain roots
+         * even before the guest first requires them. Bootstrap services are
+         * replaced by guest services before snapshotting: retaining their
+         * host objects would leave stale root slots in the standalone image. */
+        if (!this.snapshotBootstrap) {
+            this.keep(fs);
+            this.keep(http);
+            this.keep(net);
+            this.keep(path);
+            this.keep(moduleApi);
+        }
+
+        function publish(name, value) {
+            environment.runtime.setGlobal(name, value);
+            environment.context.installGlobal(name, value);
+        }
+
+        publish("require", this.makeFunction("require",
+            function (receiver, args) {
+                var name = String(args[0]);
+                return environment.loadModule(name, environment.runnerArguments[0]);
+            }));
+
+        publish("load", this.makeFunction("load", function (receiver, args) {
+            if (!args.length) throw new TypeError("load requires a filename");
+            var filename = String(args[0]);
+            var sourceBuffer = environment.hostFs.readFileSync(filename);
+            var source = sourceBuffer.toString("utf8");
+            var loadContext = environment.vm.jsRuntime.createContext();
+            /* SpiderMonkey shell load() executes against the caller's global
+             * object. Sharing this binding table preserves that observable
+             * behavior while retaining an independent active execution slot
+             * for nested guest evaluation. This path is intentionally the
+             * same on both supported hosts. */
+            loadContext.shareGlobalObject(environment.context);
+            environment.moduleContexts.push(loadContext);
+            loadContext.run(source, filename);
+            return undefined;
+        }));
+
+        /* Bootstrap implementation for the checked-in Test262 runner.  The
+         * stable guest-facing interface deliberately contains only isolated
+         * variant execution.  TEST262.md specifies its migration from this
+         * host-call implementation to the self-hosted MMVM execution service. */
+        publish("Test262VM", this.makeTest262Service());
+
+        var argv = ["artifacts/js_min.exe", this.runnerArguments[0]];
+        var index = 1;
+        while (index < this.runnerArguments.length) argv.push(this.runnerArguments[index++]);
+        var processValues = {
+            argv: this.runtime.arrayFrom(argv),
+            exitCode: 0
+        };
+        if (!this.snapshotBootstrap) {
+            processValues.env = this.object({
+                DISPLAY: this.environmentValue("DISPLAY"),
+                XAUTHORITY: this.environmentValue("XAUTHORITY"),
+                HOME: this.environmentValue("HOME")
+            });
+        }
+        var processObject = this.object(processValues);
+        this.runtime.setProperty(processObject, "exit", this.makeFunction("process.exit",
+            function (receiver, args) {
+                environment.exitCode = args.length ? Number(args[0]) | 0 : 0;
+                environment.exiting = true;
+                if (environment.serviceHost) environment.hostProcess.exitCode = environment.exitCode;
+                else {
+                    NodeProcess.exitCode = environment.exitCode;
+                    NodeProcess.exiting = true;
+                }
+                throw environment.exitMarker;
+            }));
+        publish("process", processObject);
+
+        var consoleObject = this.object({});
+        this.runtime.setProperty(consoleObject, "log", this.makeFunction("console.log",
+            function (receiver, args) {
+                environment.writeOutput(1, args);
+            }));
+        this.runtime.setProperty(consoleObject, "error", this.makeFunction("console.error",
+            function (receiver, args) {
+                environment.writeOutput(2, args);
+            }));
+        publish("console", consoleObject);
+
+        /* MMVM's Node compatibility layer exposes this internal helper to
+         * renderers which batch native framebuffer writes.  Keep it an
+         * intrinsic: like peek/poke, copying already-validated native memory
+         * must not turn every raster span into a guest/host suspension.  A
+         * Node-hosted guest never takes this path because its Buffer backing
+         * stores have no native pointer. */
+        var libcObject = this.object({});
+        this.runtime.setProperty(libcObject, "memmove",
+            this.makeFunction("NodeLibc.memmove", function (receiver, args) {
+                if (environment.serviceHost) {
+                    throw new Error("NodeLibc.memmove requires native MMVM buffers");
+                }
+                NodeLibc.memmove(Number(args[0]), Number(args[1]), Number(args[2]));
+                return args[0];
+            }, true));
+        publish("NodeLibc", libcObject);
+
+        /* The ES runtime owns the URI codecs. Older compatibility snapshots
+         * lacked them, so retain the adapter only as a fallback rather than
+         * replacing the guest implementation with host callbacks. */
+        if (!this.runtime.hasOwnProperty(this.context.globalObject,
+                                         "encodeURIComponent")) {
+            publish("encodeURIComponent",
+                this.makeFunction("encodeURIComponent", function (receiver, args) {
+                    return encodeURIComponent(String(args[0]));
+                }, true));
+        }
+        if (!this.runtime.hasOwnProperty(this.context.globalObject,
+                                         "decodeURIComponent")) {
+            publish("decodeURIComponent",
+                this.makeFunction("decodeURIComponent", function (receiver, args) {
+                    return decodeURIComponent(String(args[0]));
+                }, true));
+        }
+
+        this.runtime.nowMilliseconds = function () {
+            return environment.hostNow();
+        };
+
+        publish("setTimeout", this.makeFunction("setTimeout", function (receiver, args) {
+            return environment.scheduleGuestTimeout(args[0], Number(args[1]) || 0, false);
+        }));
+        publish("clearTimeout", this.makeFunction("clearTimeout", function (receiver, args) {
+            environment.cancelGuestTimeout(args[0]);
+        }));
+        publish("requestAnimationFrame", this.makeFunction("requestAnimationFrame",
+            function (receiver, args) {
+                return environment.scheduleGuestTimeout(args[0], 16, true);
+            }));
+    };
+
+    GuestNodeEnvironment.prototype.setRunnerArguments = function (
+            runnerArguments) {
+        this.runnerArguments = runnerArguments;
+        this.snapshotBootstrap = false;
+        if (!this.serviceHost) NodeProcess.install(runnerArguments);
+        var argv = ["artifacts/js_min.exe", runnerArguments[0]];
+        var index = 1;
+        while (index < runnerArguments.length) {
+            argv.push(runnerArguments[index++]);
+        }
+        var processObject = this.runtime.getGlobal(this.context, "process");
+        this.runtime.setProperty(processObject, "argv",
+                                 this.runtime.arrayFrom(argv));
+        this.runtime.setProperty(processObject, "env", this.object({
+            DISPLAY: this.environmentValue("DISPLAY"),
+            XAUTHORITY: this.environmentValue("XAUTHORITY"),
+            HOME: this.environmentValue("HOME")
+        }));
+        this.runtime.setProperty(processObject, "exitCode", 0);
+        this.exitCode = 0;
+        this.exiting = false;
+    };
+
+    GuestNodeEnvironment.prototype.run = function () {
+        if (this.wshHost) this.wshHost.run();
+        else if (!this.serviceHost) {
+            NodeRuntime.run();
+            this.exitCode = NodeProcess.exitCode;
+        }
+        return this.exitCode;
+    };
+
+    GuestNodeEnvironment.prototype.destroy = function () {
+        var timerKey, timerIds = [];
+        for (timerKey in this.timers) {
+            if (own(this.timers, timerKey)) timerIds.push(Number(timerKey.substring(1)));
+        }
+        while (timerIds.length) this.cancelGuestTimeout(timerIds.pop());
+        var index = 0;
+        while (index < this.retained.length) {
+            try { this.vm.release(this.retained[index]); } catch (ignored) {}
+            index++;
+        }
+        this.retained = [];
+    };
+
+    root.GuestNodeEnvironment = GuestNodeEnvironment;
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = GuestNodeEnvironment;
+    }
+}(this));

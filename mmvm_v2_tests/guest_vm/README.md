@@ -1,0 +1,592 @@
+# Guest VM bootstrap
+
+The authoritative current implementation documentation is now in
+[`docs/README.md`](docs/README.md). Start with its architecture/source map,
+heap data structures, execution/GC, compiler, self-hosting and API chapters.
+It distinguishes completed implementation from the historical plans and
+bring-up notes retained in this directory. For embedding, use the
+[current API reference](docs/api.md), not an older example's implied contract.
+
+The ECMA composite-builtin and binding-name lifetime checkpoint is described in
+[`../ECMA_HEAP_LIFETIME.md`](../ECMA_HEAP_LIFETIME.md), with whole-corpus parity
+and validation results in [`../ECMA_TESTS_STATUS.md`](../ECMA_TESTS_STATUS.md).
+
+Composite standard-library algorithms are ordinary guest bytecode, installed
+once in a private context. Public builtin functions retain native-shaped
+metadata (including their specified `length` and non-constructor behaviour).
+Their traced closure vector holds the bytecode implementation. The native
+dispatcher enters that implementation using an ordinary guest call frame,
+not a host-language callback. Existing Array intrinsics retain their fast
+paths and delegate descriptor-sensitive cases to the same guest algorithms.
+The portable backend uses one runtime-owned callback factory for this
+delegation; context installation does not create its own escaping callbacks.
+
+Program binding-name vectors must publish their live length after their cells
+are populated. Capacity alone does not make cells visible to GC or lexical
+lookup. `verifyProgramBindingNames` checks that invariant during the existing
+bounded structural GC stress test.
+
+This directory contains the interpreter-first JavaScript guest VM described in
+[`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md). It is intentionally a bootstrap,
+not yet a complete ECMAScript 5.1 implementation. ECMAScript 5.1 is the fixed
+guest-language target; the currently implemented
+language and Buffer features are always exercised by checked-in tests under
+both Node.js and `js_min.exe`.
+
+Stock Node can also cross-build the same standalone i386/Linux snapshot as
+js_min and the self-hosted builder. See [Node snapshot construction](NODE_SNAPSHOT_BUILD.md)
+for commands, the build-host/target boundary and byte-identity validation.
+For the read/parse/compile work performed while a self-hosted build loads its
+implementation, see [source-loading costs and diagnostics](SOURCE_LOADING.md)
+and [compiler-owned function analysis](FUNCTION_ANALYSIS.md).
+
+Guest garbage collection is automatic at allocation-triggered interpreter safe
+points. `VM.collect()` remains available for deterministic tests and explicit
+memory-pressure handling, but applications do not need to call it.
+
+`guest_runner.js` enables the opt-in raw-FFI compatibility binding so the
+existing unchanged `hello.js` example works. Direct embedders are FFI-disabled
+by default; see the embedding guide before enabling that trusted capability.
+
+Read these documents before changing or embedding the VM:
+
+- [`DESIGN.md`](DESIGN.md) defines the architecture, internal representations,
+  invariants, bytecode ABI, collector, Buffer ownership, and extension rules.
+- [`EMBEDDING.md`](EMBEDDING.md) documents the public bootstrap API, host loading,
+  native functions, explicit roots, execution, errors, and shutdown.
+- [`LINEAR_HEAP.md`](LINEAR_HEAP.md) defines the mandatory runtime-owned heap,
+  record layouts, accessor boundary, and host-independent memory model.
+- [`UNICODE_IDENTIFIERS.md`](UNICODE_IDENTIFIERS.md) documents the pinned
+  Unicode 3.0.0 lexical data, its necessity, compact lookup, and deterministic
+  `js_min.exe` regeneration procedure.
+- [`../GUEST_VM_PLAN.md`](../GUEST_VM_PLAN.md) records the intended route from
+  this bootstrap to a conforming ES5.1 interpreter and later optional kernel AOT.
+
+The primary embedder model is `JSRuntime` -> `JSContext` -> resumable
+`Execution`. An execution yields on finite budget exhaustion and before every
+external host call. The legacy `VM` facade retains one default context and
+auto-services host callbacks for existing tests and examples.
+
+Use `guest_runner.js --vm-no-host-calls program.js` to turn an attempted
+embedder callback into a source-located `HostCallError`. The enforcement is in
+the execution engine, so it also covers nested execution rather than merely
+refusing calls in the command-line loop. Direct guest/native intrinsics are
+not host calls. This mode is currently opt-in because output, timers,
+transitional `load()`, and compatibility services still cross the embedding
+boundary. It becomes the default only after those services have moved into
+MMVM platform code.
+
+Use `guest_runner.js --vm-log-host-calls program.js` when auditing that
+boundary.  It writes one line for every native-to-semantic call fallback and
+every actual embedder call or constructor.  Each line contains a monotonically
+increasing sequence number, transition kind, callable name, guest source
+location, receiver kind, and argument kinds.  It deliberately does not print
+argument values, so tracing does not invoke guest coercion or expose application
+data.  Combine it with `--vm-native --vm-profile` to distinguish a missing
+native semantic implementation from an intentional embedder service:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --vm-native --vm-profile --vm-log-host-calls program.js
+```
+
+`native-fallback-call` and `native-fallback-construct` mean the compiled
+interpreter returned to the JavaScript semantic engine.  `embedder-call` and
+`embedder-construct` mean execution is about to yield an externally registered
+callback to the command runner.  One operation can therefore produce both a
+fallback line and an embedder line.  Direct guest intrinsics and standalone
+libc FFI do not cross the host-JavaScript boundary and are not logged.  A
+`js_runner` snapshot has no host JavaScript VM to call, so unsupported native
+semantics terminate with the opcode/PC/reason diagnostic instead of producing
+this hosted trace.
+
+The native interpreter also completes the common ES5 `parseInt` path entirely
+against guest string and value-cell records. Its native case includes ES
+whitespace, sign and prefix processing, radices 2 through 36, NaN, negative
+zero, and signed-int32 results. Wider results and coercions that are not yet
+self-hosted yield to the semantic implementation so the optimization never
+changes observable numeric results.
+
+Native `Math.min` and `Math.max` operate on guest number cells and preserve the
+ES5 signed-zero rule without an embedder call: minimum selects `-0` when either
+equal-zero operand is negative, while maximum selects `+0` when either is
+positive. NaN continues to propagate through the selected guest value cell.
+
+Native operations measure compound record sizes independently of the current
+allocation arena. In particular, `Array.join` first validates that the result
+fits a guest string record and then calls the shared native allocator; an
+exhausted arena can therefore be replaced by another reclaimed region or by
+tail space without entering the host implementation.
+
+The shared parser captures source locations and function source text by
+default. Kernel AOT disables those two metadata products: kernel validation and
+lowering use the parsed structure but never source locations or copied function
+text. Guest program parsing retains both, including the filename/line/column
+information used for observable errors and diagnostics.
+
+Kernel parsing also uses the parser's compact-literal representation. Integer
+literals therefore reach constant validation and the IR lowerer as primitive
+numbers instead of one-property AST leaves. The kernel compiler treats `null`
+as an absent initializer/expression and zero as a real value; normal guest ASTs
+continue to use explicit `Literal` nodes by default.
+
+Kernel graph discovery records ordered local-variable names during the same
+AST walk that discovers constants and called helper functions. Graph lowering
+installs those precollected locals instead of traversing every function again.
+The standalone `KernelCompiler.compile` path continues to discover locals
+itself, so its API does not require callers to manufacture graph metadata.
+
+Kernel locals now retain ordinary `var` semantics regardless of capitalization.
+The interpreter's old uppercase-constant/initializer-override convention is
+temporarily retained only through explicit `legacyConstantLocals` options.
+New kernels use real external bindings and named field accessors. See
+[KERNEL_READABILITY.md](../KERNEL_READABILITY.md) for the migration boundary,
+supported loop syntax, verification, and remaining semantic/architecture debt.
+
+The native numeric intrinsic set includes both `Math.atan2(y, x)` and
+`Math.atan(x)`. The latter materializes the constant denominator in a named
+engine scratch cell before invoking the same binary64 x87 operation. Kernel
+typed-load operations such as `loadI32F64` always take a memory address; they
+must never be used as immediate numeric-conversion operators.
+
+Each context provides the ES5.1 global `eval` function. Indirect eval executes
+against that context's global object, and non-string arguments are returned
+unchanged. At the current migration checkpoint eval deliberately yields as a
+host call: source is compiled by the bootstrap front end and the resulting
+bytecode executes in a nested context on the same `JSRuntime`. Direct eval's
+access to the caller's lexical environment and a fully native/self-hosted eval
+front end remain implementation work; embedders must not mistake this bootstrap
+boundary for the intended final engine architecture.
+
+Load the complete VM into the minimal shell with one call:
+
+```js
+load("guest_vm/guest_vm.js");
+```
+
+The bootstrap owns all internal module ordering. Node code can use the same
+entry point with `require("./guest_vm/guest_vm.js")`; direct `vm.js` requires
+remain compatible.
+
+Guest-written standard-library algorithms can also be installed by a bare
+embedder, without constructing a Node-compatible environment:
+
+```js
+var vm = new GuestVM({nativeInterpreter: true});
+vm.installStandardLibrary(function (filename) {
+    return read(filename); // the embedding supplies source text
+});
+```
+
+The equivalent multi-context API is
+`jsRuntime.installStandardLibrary(readSource)`. Install once, before running
+application code or preparing isolated test contexts. Subsequent calls do not
+reload the libraries. All contexts in that runtime share the installed
+intrinsic methods. The reader must return a primitive string for each of
+`guest_vm/array_runtime.js`, `buffer_runtime.js`, `number_runtime.js` and
+`regexp_runtime.js` (all names have the `guest_vm/` prefix). A Node embedder
+may supply `fs.readFileSync(filename, "utf8")`; an embedded application can
+use a source map or its own filesystem service instead. The VM API imports
+no filesystem or Node modules.
+
+One runtime-owned private context compiles and retains the helper functions.
+Its bootstrap bindings are not installed in application globals, and guest
+replacement of an application's global `Object`/`Array` bindings does not
+replace the private bindings. Intrinsic prototype objects are still shared;
+this is not a separate user realm. Manage only context handles created by
+your embedding; the private context lives until runtime destruction. If
+initialization throws, destroy that partially initialized runtime rather than
+attempting to use partially installed methods. The Node-compatible adapter
+uses this same API; there is no second set of library implementations.
+
+Destroying an embedding context handle prevents further use of that handle;
+it does not change the home context of functions still reachable on the
+runtime heap. Such functions and their frames retain the heap context and
+its global object. Semantic fallback can reconstruct a borrowed context
+facade from that record without registering a new permanent root. Both
+function invocation and native-frame synchronization resolve this actual
+home context; neither substitutes the caller's context when the original
+embedding handle is gone. Frame reuse also refreshes the context field,
+not just the lexical environment and PC. This distinction is important for
+loaded scripts which export functions before their loader handle is closed.
+
+Run the complete current suite with either host or both:
+
+```sh
+guest_vm/tests/run_tests.sh node
+guest_vm/tests/run_tests.sh js_min
+guest_vm/tests/run_tests.sh both
+```
+
+The runner accepts `NODE_BINARY`, `JS_MIN_BINARY`, and `FIREFOX_LIB_DIR`
+environment overrides. It derives its default paths from the repository layout
+and contains no machine-specific absolute paths.
+
+Measure one-time runtime initialization separately from repeated fresh context
+creation with:
+
+```sh
+node guest_vm/context_benchmark.js 1000
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_vm/context_benchmark.js 1000
+```
+
+The benchmark reports the total and average create/destroy cost and does not
+use context snapshots.
+
+Run one guest program directly with:
+
+```sh
+node guest_runner.js guest_vm/tests/language/for_loop.js
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js guest_vm/tests/language/for_loop.js
+```
+
+The exact relative paths in the second example assume the current working
+directory is `mmvm_v2_tests` and the Firefox and MMVM directories are siblings
+of the repository containing it.
+
+The unchanged libc-only HTTP server is now an end-to-end guest-VM integration
+target. Prepare the ignored, temporary document root and run it with:
+
+```sh
+mkdir -p artifacts/www
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js net.js --directory artifacts/www 8000
+```
+
+It listens on all interfaces by default, matching `python3 -m http.server`.
+Add `--bind 127.0.0.1` to restrict it to localhost. Program arguments after
+`net.js` become the guest's top-level `arguments` object. `artifacts/www/` is
+ignored by Git and remains a disposable test directory; do not commit its
+contents.
+
+The unchanged Node-compatible server also runs through the guest interpreter.
+Unlike `net.js`, it does not make raw FFI calls itself. `guest_runner.js`
+installs an embedder-side subset of Node's `require`, `process`, `console`,
+`Buffer`, `Date`, `http`, and `fs` APIs, then services the resulting host-call
+yields with the existing libc-backed, nonblocking poll loop:
+
+```sh
+mkdir -p artifacts/www
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js node_web.js \
+  --bind 127.0.0.1 --directory artifacts/www 8000
+```
+
+Omit `--bind 127.0.0.1` to listen on all IPv4 interfaces. The port,
+`--bind`/`-b`, and `--directory`/`-d` behavior belongs to unchanged
+`node_web.js` and matches its direct Node.js invocation. The filesystem calls
+are asynchronous guest callbacks; the socket is nonblocking and driven by
+`poll(2)`. Binary files remain guest `Buffer` values and are copied to the
+native output queue without string conversion.
+
+The guest Node environment is deliberately a narrow embedding profile, not a
+claim that the VM already implements Node.js. At this checkpoint `require`
+accepts the built-in names `http`, `fs`, and `net`, plus relative JavaScript
+modules. The rest of Node's standard library remains future work. Run
+`node_web.js` directly with Node.js when testing the unchanged source against
+real Node.
+
+## X11 framebuffer demos through the guest VM
+
+The guest VM can run the unchanged `demo1.js` through `demo7.js`. Their relative
+dependencies, `demo_common.js` and `node_x11.js`, execute as guest CommonJS
+modules in their own `JSContext` instances. Only the Node built-ins, timers,
+and the explicitly documented native-memory intrinsics cross into the
+embedder; the X11 wire protocol, framebuffer drawing, bitmap font, simulation,
+and rasterizers remain guest JavaScript.
+
+Run it from `mmvm_v2_tests` with the existing local X display environment:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo1.js --size 64x64 --fps 5
+```
+
+The identical guest module graph can be hosted by Node.js:
+
+```sh
+node guest_runner.js demo1.js --size 64x64 --fps 5
+```
+
+Every later demo uses the same command form. For example, the optimized rally
+renderer is:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo7.js --size 160x120 --fps 20
+
+node guest_runner.js --vm-threaded demo7.js --size 160x120 --fps 20
+```
+
+Demo8 is the deliberately MMVM-specific standalone rally build. It takes two
+guest source files and cannot run with a Node host:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo8_runner.js demo8.js --size 320x240 --fps 20
+```
+
+The transitional guest `load()` binding is available on both supported hosts
+and evaluates the second file in the same guest global environment. Each
+loaded source has a separate `JSContext` execution slot under the shared
+`JSRuntime`; this permits nested evaluation without moving guest objects onto
+the host heap. Demo8 still requires MMVM for its raw native facilities. The
+demo retains its normal resolution, FPS, menu, and rasterizer-selection
+options.
+
+The covered progression is demo1's bitmap framebuffer UI; demo2's software 3D
+renderer; demo3's full-frame blit; demo4's procedural normal mapping; demo5's
+normal-mapped 3D renderer; and the demo6/demo7 rally game. In particular, the
+rally demos exercise `Math.PI`, track generation, loading-to-attract-mode
+transition, depth-buffered road/hillside/car drawing, and packed native output.
+The language suite checks the ES5.1 Math constants and methods used during
+track construction. A live X11 smoke test remains necessary to verify the
+framebuffer rather than just compilation. Demo8 additionally exercises guest
+function source recovery for its JavaScript macro compiler.
+
+This is not direct Node execution: `guest_runner.js` still tokenizes and
+compiles every application module into guest execution. The embedder selects
+built-in `fs`, `net`, `http`, timers, and process streams under Node, while
+`js_min.exe` selects the libc-backed compatibility versions. `js_min.exe`
+enables the structured compiled tier by default; pass `--vm-threaded` when a
+Node-hosted guest should exercise that same tier.
+
+The in-progress kernel-native interpreter is selected explicitly with
+`guest_runner.js --vm-native program.js`. Its portable dispatch benchmark and
+the current migration boundary are documented in `PERFORMANCE.md`.
+
+`--vm-trace-exceptions` is an opt-in debugger aid. At every guest `throw`, even
+one subsequently caught in guest code, it prints the source location and the
+visible primitive bindings from the authoritative environment or register
+cells. Object values are represented by guest type and heap address so the
+diagnostic does not recursively traverse or retain them. It is disabled by
+default and should not be used for benchmark timings.
+
+Caught exceptions are unwound directly by the native interpreter, including
+handlers in callers and both function-local and top-level catch bindings. A
+standalone application therefore does not need a host transition merely to
+run ordinary `try`/`catch`/`finally`; uncaught exceptions retain the external
+reporting boundary.
+
+Native snapshots are an explicit, experimental startup option and are never
+read or written by default. Generate one into the ignored temporary artifacts
+directory, then opt into it on later runs:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --snapshot artifacts/native-interpreter.snapshot
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --with-snapshot artifacts/native-interpreter.snapshot hello.js
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --with-snapshot artifacts/native-interpreter.snapshot \
+  --skip-snapshot-hash hello.js
+```
+
+Both options imply `--vm-native`. `--snapshot FILE` first writes a version-2
+standalone image containing the native interpreter, initialized guest runtime,
+and generic command runner. This boundary is captured before the requested
+program is opened, parsed, compiled, or installed in the guest heap; the outer
+invocation runs that program only after the image is complete. The program is
+optional: when omitted, the runner exits after writing the image. Consequently
+the output image is independent of any program and can run any supported source
+supplied later to `js_runner.exe`. Snapshot bootstrap also excludes host
+`DISPLAY`, `XAUTHORITY`, and `HOME` values; post-snapshot and standalone
+programs obtain their actual launch environment normally. The temporary
+bootstrap `process` object has no `env` property; standalone launch creates it
+from libc. The snapshot-loading option then reads the
+interpreter segment from either an older version-1 code-only image or a
+version-2 standalone image. It fails rather than silently compiling
+when the file is absent, truncated, built for profiling mode, or stale. Remove
+snapshots with `./mk_clean`; they are temporary build artifacts and must not be
+committed.
+
+`--with-snapshot FILE` does not fingerprint current kernel source at startup.
+Compatibility uses explicit versioning. The loader still checks the
+snapshot magic, file-format version, compiler version, profiling mode, declared
+code length, and actual file length. It cannot detect that a snapshot was made
+from older kernel source if its executable contract version was not bumped.
+Maintainers must bump that version for incompatible kernel/backend changes.
+Use only trusted snapshots. `--skip-snapshot-hash` remains a compatibility
+no-op and still requires `--with-snapshot FILE`.
+
+Build `js_runner.c` and create the generic runner image as documented in the
+top-level `README.md`. The image reads arbitrary source through guest-owned
+libc bindings and runs the self-hosted tokenizer, parser, compiler, and native
+interpreter. It can reproduce a byte-identical copy of itself and currently
+runs `hello.js` and the unchanged X11 demos 1 through 8. Native Array
+construction accepts exact integral-double lengths, `push`/`unshift` share the
+guest-owned capacity-growth kernel, and `Math.pow` handles zero bases without a
+host semantic exit. The standalone collector can now reclaim and reuse guest
+records without a host transition, and self-hosted adopted programs retain the
+source needed by `Function#toString`. Unsupported native semantic exits still
+report an error status. Standalone `quit(status)` resolves libc `exit` through
+the guest's direct FFI, so demo shutdown preserves its requested process status
+without a host-language callback. Demo8's self-hosted startup and broader
+lifecycle and performance work remain in progress. The standalone loader keeps
+its filesystem and intrinsic Buffer services separate from same-named globals
+installed by an application runner; this reduced measured `demo8 --help`
+startup from 109.04 seconds to 4.68 seconds. The design and staged acceptance
+gates are in `STANDALONE_SNAPSHOT_PLAN.md`.
+
+The demos retain their normal resolution and FPS options. Correctness coverage
+does not imply that the guest currently meets each requested frame cap:
+demo6/demo7 are substantially heavier than demo1--demo5. Generated snapshots
+and framebuffer images belong only in the ignored `artifacts/` directory.
+
+Current benchmark commands, measured demo2 progress, and the optional
+`guest_runner.js --vm-profile` opcode profiler are documented in
+`PERFORMANCE.md`.
+
+On a standalone image, place `--vm-profile` before the program filename to
+report guest-owned source read, self-hosted compilation, and execution times.
+It is diagnostic-only and does not change ordinary output or the image format.
+
+For a clean profile of a long-running workload,
+`--vm-profile-duration MILLISECONDS` enables profiling and stops the command
+runner at an instruction-budget boundary after approximately that interval.
+It is a cooperative diagnostic rather than a hard deadline: synchronous
+nested compilation/evaluation is allowed to finish before the outer execution
+can yield. Use an operating-system timeout when a hard process limit is needed.
+
+### Runtime introspection
+
+Embedders can inspect authoritative state without reading linear-memory offsets
+or relying on host-side handles:
+
+```js
+var record = vm.inspectHeapRecord(guestAddress);
+var snapshot = vm.inspectExecution(execution);
+var nativeTop = vm.inspectNativeFrames(1);
+```
+
+`inspectHeapRecord` reports the record type, allocation size, GC state, and the
+named fields relevant to frames, programs, and functions. `inspectExecution`
+returns the current guest call stack (top frame first), including each frame's
+program, filename, PC, numeric opcode, environment, caller, and register count;
+when the native engine is enabled its `nativeEngine` field also reports native
+runs, bytecodes, and semantic exits. These objects are read-only diagnostic snapshots allocated on
+the host. They are not guest values and changing them never changes VM state.
+The VM continues to access all authoritative fields through `HeapRecords`.
+
+`inspectNativeFrames(maximumFrames)` reads the last published native-engine
+stack at a yield, top frame first, directly through those accessors. It does
+not decode programs or materialize register arrays. Each frame includes its
+heap/program address, PC, caller, context and a bounded function-source
+preview. Cached names/filenames are included when available; otherwise they
+are explicitly unknown rather than inferred from a different execution.
+Omitting the limit reads the chain, with cycle detection. Use it between
+resume calls, before scheduling another execution on that runtime; unlike
+`inspectExecution(execution)`, it is not a historical view of an arbitrary
+suspended execution. The same API is available on `JSRuntime`.
+
+The embedder provides on both hosts:
+
+- synchronous `fs.readFileSync` for Xauthority data;
+- Unix-domain `net.createConnection` with nonblocking socket events;
+- byte-accurate Buffer slicing, copying, integer access, and ASCII conversion;
+- zero-copy native guest Buffer writes to the host socket queue when possible;
+- `setTimeout`, `clearTimeout`, and `requestAnimationFrame` scheduling;
+- `process.env.DISPLAY`, `XAUTHORITY`, and `HOME`.
+
+Guest Buffer storage does not become a host Node Buffer. Under Node, the same
+guest Buffer implementation uses the array-backed memory adapter in
+`host_memory.js`; its byte and 32-bit operations are the portable equivalent of
+the `peek8`/`poke8`/`peek32`/`poke32` native-memory operations. Consequently
+`demo1.js` sees no native pixel address under Node and correctly uses
+`Buffer.writeUInt32LE`. Under `js_min.exe`, native backing exposes a pointer and
+the unchanged demo may use `poke32`. Direct arbitrary-address FFI remains
+intentionally unavailable to a Node-hosted guest.
+
+The X11 socket remains the standardized local path selected by `DISPLAY`, such
+as `/tmp/.X11-unix/X1`; `node_x11.js` derives the display number rather than
+depending on a machine-specific absolute socket name.
+
+## Three-context multiplexing demo
+
+`demos/three_contexts.js` creates one `JSRuntime` containing `cx_a`, `cx_b`, and
+`cx_c`. The first two contexts run infinite guest loops which yield `c_call`
+host requests. A round-robin embedder routes each request into the real guest
+`c_call` function in `cx_c`. After printing 100 alternating calls, `cx_c`
+requests shutdown, returns from `c_call`, and the embedder aborts both producer
+continuations.
+
+Run it under Node with no dependencies:
+
+```sh
+node guest_vm/demos/three_contexts.js
+```
+
+Or run the same file directly under `js_min.exe`:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_vm/demos/three_contexts.js
+```
+
+The output is deterministic and starts like this:
+
+```text
+[embedder] starting round-robin execution of cx_a and cx_b
+[cx_c] hi from cx_a | call 1/100
+[cx_c] hi from cx_b | call 2/100
+```
+
+It ends only after `cx_c` has processed call 100, requested shutdown, and
+returned from that invocation.
+
+## Optional GC stress mode
+
+Use `--vm-gc-stress` before the program name when investigating lifetime and
+rooting bugs. Normal execution leaves this mode disabled.
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js --vm-native --vm-gc-stress demo1.js
+
+./artifacts/js_runner.exe artifacts/snap \
+  guest_runner.js --vm-gc-stress demo1.js
+```
+
+The compiled interpreter requests collection every one million opcode
+boundaries, even if ordinary heap pressure would not require it. The interval
+is defined once in HeapRecords.KernelConstants. Collection uses the regular
+suspended-frame mark/sweep path; it is never inserted into a partially executed
+opcode or the construction of a heap record. Internal collection preserves the
+caller's instruction budget. Opcode fusion means this is a safepoint interval,
+not an exact count of all logical bytecode instructions.
+
+The hosted semantic collector additionally uses a lower allocation-debt
+threshold (256 rather than 16384). The standalone path does not need a host
+callback to configure or run the collector. After the standalone event loop
+returns, it reports the number of native collections. A libc exit, fatal VM
+exit or signal can bypass that final report; absence of a report is not a pass.
+
+The private embedder diagnostic `__guestVMGCStress(true)` enables the default
+interval, a nonnegative int32 argument selects an interval (zero disables it),
+and a call with no arguments returns the collection count. Native execution
+handles it as an intrinsic. These diagnostics are not ECMAScript APIs.
+
+Snapshot creation happens before enabling the command-line stress mode. The
+flag therefore does not change the ready-to-run image or normal execution of
+other programs using that image. Stress mode intentionally adds pauses and
+must not be used for production FPS or benchmark measurements.

@@ -1,0 +1,841 @@
+# Guest VM performance notes
+
+## Escaped generated strings
+
+The tokenizer must not build a large escaped literal by repeatedly appending
+one character to an immutable prefix. Generated JavaScript commonly uses a
+backslash line continuation every fixed number of columns; after the first
+continuation, the old slow path made the remainder of the literal quadratic.
+
+`Tokenizer.scanString` now scans ordinary character runs by index, records
+source substrings and decoded escapes as segments, and reduces those segments
+pairwise. This keeps source scanning linear and bounds repeated string copying
+to logarithmic reduction levels using only ES3-compatible arrays and string
+concatenation. On the unchanged 185 KiB Octane zlib source, self-hosted compile
+time fell from 151.8 seconds to 19.2 seconds and peak RSS from 540.8 MiB to
+136.4 MiB. The measurement includes native-interpreter construction and
+self-hosted front-end module loading; it does not use a parsed-source cache.
+
+## 2026-09-10: native bootstrap and interpreter graph refactor
+
+The native interpreter is no longer compiled as one approximately 7,600-line
+entry function. Bytecode call-frame construction and return, intrinsic
+dispatch, FFI marshalling, and the Array, String, RegExp, Buffer, Math, and Date
+families are separate kernel-dialect functions connected by typed graph calls.
+The dispatch entry is now approximately 2,870 lines; its remaining large
+regions are intentionally hot arithmetic, comparison, property, and branch
+paths.
+
+`KernelCompiler.compileGraph` parses each reachable function's `toString()`
+source once and reuses that AST for signature and dependency discovery,
+constant validation, and lowering. Dependency discovery is folded into the
+existing constant walk, and unreachable entries in the available-dependency
+map are not emitted. Shared layout/opcode constants are owned by the entry and
+helper-local duplicates are rejected. Named frame, engine, record, and scratch
+accessors lower to inline address arithmetic, so the refactor does not replace
+raw offsets with native calls.
+
+The cold `js_min.exe guest_runner.js --vm-native --vm-profile hello.js`
+regression measured about 23.10 seconds before the parse-once work, producing
+1,671,561 bytes of native code at roughly 199 MB peak RSS. Successive green
+refactoring checkpoints measured 11.98, 10.42, 8.29, 7.22, 6.92, 6.38, 5.76,
+and 4.67 seconds. The most recent runs fluctuate with machine load around
+4.7--6.4 seconds of wall time while compiler CPU time remains about 4.5--5.0
+seconds; generated code is approximately 187 KB and peak RSS approximately
+77--79 MB. These are cold single runs, not a statistically controlled
+benchmark, but the code-size and memory reductions are stable.
+
+Runtime throughput did not pay for the startup improvement. After extracting
+bytecode call setup and return, the portable call workload completed 2,000
+guest calls in 2 ms in the native engine (26,013 bytecodes, zero semantic
+exits), versus 3 ms at the preceding checkpoint. The same command's reference
+interpreter intentionally remains much slower and took about 14.5 seconds, so
+large call-workload counts should not be used for a quick native-only check.
+The full Node and `js_min.exe` suites are required at each commit; both report
+11 guest programs and 236 guest assertions, including unchanged `net.js` and
+`node_web.js` compilation checks.
+
+## 2026-08-28: runtime-owned Buffer storage
+
+Buffer backing bytes moved from per-allocation host objects into inline,
+non-moving `BUFFER_BACKING` heap records. Native `Buffer.alloc` zeroes and
+publishes the backing plus its first view in one kernel operation, and native
+`Buffer.copy` performs overlap-safe byte movement without a semantic exit. This
+is a representation change, not a demo-specific copy shortcut: Node reads the
+same record through the JavaScript memory backend and GC traces the view-to-
+backing edge normally.
+
+The host-side copy loop was a major whole-demo cost. In an initial uncontaminated
+`demo5.js` sample at 64x64, the first five-second window increased from roughly
+1.2--1.6 FPS to about 4.3 FPS. A later window in that run received live keyboard
+input and is not a valid comparison. `demo1.js` at 320x240 reached about 5.6 FPS,
+up from the prior 5.2 FPS checkpoint and remaining above the approximately
+3.6--3.8 FPS direct-`js_min.exe` baseline measured earlier.
+
+## 2026-08-28: native/semantic boundary profiling
+
+The opcode profiler now reports cumulative time and invocation count for the
+kernel-native engine. In a 28-second `demo5.js` sample at 64x64, the engine
+spent only about 0.99 seconds executing 23.7 million bytecodes. Approximately
+5,000 unsupported-operation transitions consumed nearly all remaining time.
+This rules out dispatch, double arithmetic, and GC as the current dominant
+whole-demo cost.
+
+The portable dispatch benchmark now has arithmetic, property, call, and array
+workloads. On `js_min.exe`, 800,025 bytecodes reading properties from a
+16-property object took about 22 ms natively versus 24 ms in direct host
+JavaScript. A 5,000-iteration guest-call workload took about 5 ms natively
+versus 6 ms directly, and a 700,332-bytecode indexed-array workload took about
+12 ms natively versus 102 ms directly. These focused results are diagnostic,
+not a substitute for demo FPS.
+
+The first boundary-reduction pass keeps `Math.round`, common-range `Math.sin`
+and `Math.cos`, Buffer `length`, numeric indexing, 16-bit endian operations,
+and zero-copy Buffer slicing inside the native interpreter. At roughly 15.4
+million `demo5` bytecodes this reduced cumulative semantic exits from about
+3,900 to about 2,940, while native execution time remained around 0.64 seconds.
+The demo was still around 1.5 FPS at that scene angle, so eliminating the
+remaining general semantic transitions is still the leading work item.
+
+## 2026-08-28: kernel-native collector checkpoint
+
+The authoritative guest heap is now marked and swept by kernel-dialect code
+compiled to i386 on `js_min.exe`. In a sustained `demo5.js` run, collection of
+a roughly 12 MiB used heap measured about 6--7 ms for graph marking and about
+80--85 ms for the coalescing sweep. The previous hybrid host graph mark and
+uncoalesced host free-list rebuild each took seconds on the same workload.
+
+The native dispatch benchmark remains healthy after the collector change:
+1,000,007 native bytecodes took approximately 13 ms, compared with 53 ms for
+the direct host loop and 5,235 ms for the semantic guest interpreter on the
+development machine. A longer graphics run still slows while approaching the
+next collection and then recovers. That steady-state decay is therefore a
+separate allocation or execution issue, not the collector pause, and should
+not be hidden by quoting only the post-collection frame rate.
+
+## 2026-08-27: kernel-native dispatch checkpoint
+
+`guest_vm/benchmarks/native_dispatch_benchmark.js` is a portable, X11-free
+benchmark for the resumable bytecode engine. It runs under both supported host
+VMs and keeps compilation/VM setup outside the timed region. From
+`mmvm_v2_tests`, run:
+
+```sh
+node guest_vm/benchmarks/native_dispatch_benchmark.js 200000
+
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_vm/benchmarks/native_dispatch_benchmark.js 200000
+```
+
+On the development machine, the `js_min.exe` run completed 200,000 loop
+iterations (1,400,006 guest bytecodes) in approximately 45 ms in the native
+engine, versus approximately 59 ms for the equivalent direct JavaScript loop
+in the old host shell and 6,736 ms in the semantic guest interpreter. There
+were three intentional semantic exits for setup/call operations which have not
+yet migrated. These figures demonstrate dispatch/arithmetic parity for this
+narrow kernel; they do not yet claim whole-demo parity.
+
+`guest_runner.js --vm-native program.js` selects the new engine explicitly.
+Unsupported bytecodes currently execute one semantic step in the reference
+interpreter and then re-enter native dispatch. Normal Node-hosted runs still
+use their existing path, so the slower JavaScript emulation of the kernel does
+not replace or regress Node's default backend.
+
+## 2026-08-25: demo2 interpreter baseline and first compiler pass
+
+The live benchmark command was run from `mmvm_v2_tests` against the locally
+built minimal shell:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo2.js --size 64x64 --fps 20 \
+  --no-fps-counter --debug-events
+```
+
+The initial guest interpreter took roughly 5.5--6.8 seconds per steady frame,
+or about 0.15--0.18 FPS. After numeric lexical slots, register-resident leaf
+bindings, direct numeric array indices, frame-initialized constants,
+semantics-aware register reads and updates, MOVE-run dispatch, and register-list
+call arguments, steady frames took roughly 3.1--3.7 seconds, or about 0.27--0.32
+FPS. These are development-machine observations, not portable guarantees. The
+change is approximately a 40% reduction in steady frame time, but demo2 remains
+far from interactive under the guest interpreter.
+
+Use the host-side opcode profiler as a reserved runner option.  With
+`js_min.exe`, place it after the guest program path because the shell consumes
+leading options itself:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js demo2.js --vm-profile --size 64x64 --fps 20 \
+  --no-fps-counter --no-debug-events
+```
+
+The profiler is disabled in ordinary runs. When enabled it aggregates opcode
+counts across the initial program and asynchronous callback executions and
+prints cumulative reports every one million instructions. It changes timing,
+so use it to understand instruction mix rather than to quote FPS.
+
+The original profile was dominated by `MOVE` (about 45%) and `CONST` (about
+12%). Frame-initialized constants removed dynamic `CONST` dispatch. Direct
+register reads and update destinations reduced `MOVE` to about 27% at the
+two-million-instruction sample. At that point branches consumed roughly 18%,
+arithmetic and bitwise instructions roughly 25%, property operations roughly
+8%, and global accesses roughly 5%. This broader mix is the point where a
+kernel-dialect/native dispatch engine becomes more valuable than adding narrow
+source-pattern special cases.
+
+The benchmark deliberately uses a small framebuffer to expose interpreter
+costs without waiting minutes for each sample. Higher resolutions still work
+but are not yet practical through the guest interpreter.
+
+## 2026-08-25: portable structured backend checkpoint
+
+The portable bytecode-to-JavaScript backend now emits structured control flow,
+compiles closure-backed callbacks, uses fixed-arity calls, caches compiled
+programs and call sites, guards object/array shapes once per function, and
+propagates proven return and array-element shapes.  It does not evaluate the
+original guest source.  Finite-budget execution and failed specialization
+guards retain the general interpreter path.
+
+At the same 64x64, 20 FPS settings, steady `js_min.exe` observations are:
+
+- direct `node_runner.js demo2.js`: approximately 19.6--19.8 FPS;
+- `guest_runner.js demo2.js`: approximately 11.0--11.9 FPS;
+- the earlier structured backend before the cache-order correction: about
+  2.1 FPS;
+- the opcode interpreter before the structured backend: about 0.3 FPS.
+
+The large gain from 2.1 FPS came from fixing the compiled-program cache order:
+the old path rescanned all 1,148 rasterizer bytecode words on every call before
+checking the cache.  Guarded compound property writes and direct guarded array
+`push` operations produced the next largest portable improvements.
+
+Two diagnostic builds were measured and then reverted: omitting only
+`rasterTriangle` and `clearFramebuffer` reached about 17.5 FPS, while omitting
+the entire draw callback reached about 20.2 FPS.  These no-op substitutions are
+not present in the repository.  They establish that parity now requires both a
+native numeric/pixel kernel and further reduction of geometry/object overhead;
+optimizing only the rasterizer cannot honestly meet the target.
+
+An attempted mirrored/direct host-property cache is also absent.  A coherence
+bug initially made the FPS counter cumulative and falsely showed more than 20
+FPS.  Once corrected, the layout was substantially slower on old SpiderMonkey.
+Measurements must therefore be checked for stable per-interval frame counts,
+not merely a rising displayed number.
+
+## 2026-08-25: demo1--demo7 correctness sweep
+
+After completing the ES5.1 Math surface required by the later demos, a live
+64x64 structured-tier sweep under `js_min.exe` measured approximately:
+
+- demo1: 13.5 FPS;
+- demo2: 12.2 FPS;
+- demo3: 19.1 FPS;
+- demo4: 17.0 FPS;
+- demo5: 4.5 FPS.
+
+These results are stable with, or slightly above, the immediately preceding
+compiled-tier observations (12.8, 11.7, 18.9, 16.4, and 4.2 FPS respectively).
+They are smoke-test measurements on the development machine, not portable
+performance guarantees.
+
+At 160x120, demo6 rendered its complete road/hills/car scene at roughly
+0.8--1.0 FPS. Demo7 rendered its complete scene at roughly 0.4--0.6 FPS. An
+earlier demo6/demo7 observation around 1.3--1.6 FPS is invalid as a performance
+baseline: absent `Math.PI` made every generated track coordinate `NaN`, so that
+run drew the HUD and background but skipped all rasterized scene geometry.
+Correctness was confirmed by capturing the live X11 windows; no capture or
+generated framebuffer is stored in the repository.
+
+A Node 24.14.1 host running the same guest structured tier sustained about
+19.5 FPS for demo7 at 64x64. Direct Node execution of demos 1--7 remained at
+the configured 20 FPS cap in the same smoke sweep.
+
+## 2026-08-25: demo8 guest startup checkpoint
+
+The js_min-only demo8 command documented in `README.md` now opens its X11
+window, parses Xauthority through the inlined Buffer implementation, generates
+the 512x64 procedural skybox, initializes the 320x240 rally scene, and enters
+attract mode with the compiled-native triangle rasterizer selected. A timed
+smoke test established correct startup and continued execution; it did not
+produce a trustworthy steady-state FPS sample, so no new frame-rate claim is
+recorded here.
+
+Functions constructing guest-defined classes stay in the semantic interpreter
+to avoid a Firefox 1 generated-function receiver defect. Built-in construction
+and constructor-free renderer functions retain structured/native compilation.
+Demo8 is not a Node-host compatibility target.
+
+## 2026-08-25: authoritative-heap migration gate
+
+An experimental live handle-to-heap shadow allocation was tested and reverted.
+With bytewise record clearing it reduced demo2 at 64x64 from roughly 11 FPS to
+3.8 FPS. Relying on the bump heap's already-zeroed memory improved that to
+about 5--6 FPS, still below the accepted baseline. No slow live switch is
+present in the committed runtime; demo2 returned to 11.0--11.4 FPS.
+
+The shared kernel IR now emits a bulk record initializer through JavaScript on
+Node and generated i386 macro assembly on MMVM. Both backends produce identical
+tested heap words. Live object migration must use this bulk path, rather than
+scattered per-field peek/poke calls, before it can pass the performance gate.
+
+## 2026-08-25: trusted fixed-layout accessor checkpoint
+
+After the live heap migration, a 64x64 demo1 run could not complete enough
+frames to print one five-second sample within 18 seconds. The common accessor
+path was re-reading and validating a record's type and size for every fixed
+field access, multiplying native `peek32` traffic throughout all demos.
+
+`HeapRecords` now performs fixed-layout accesses through trusted internal
+`Heap` primitives after its public accessor has established the relevant
+record/index invariant. This does not mirror guest values in host objects and
+does not expose raw heap addresses to guest code. The same 18-second command
+then reported 5 frames in 6.5 seconds, or 0.8 FPS. This is a working migration
+checkpoint, not an acceptable final result; the pre-migration demo1 reference
+remains approximately 13.5 FPS at this resolution.
+
+The next compiler checkpoint caches module-global and closure-cell values in
+the generated activation, writes mutations through to the heap, spills local
+environment registers before re-entrant guest calls, and reloads synchronized
+state afterwards. Functions which require heap environments because they
+contain nested callbacks now use this compiled path instead of unconditionally
+falling back to the interpreter. Demo1 consequently improved to approximately
+1.6--1.8 FPS at 64x64. This remains an intermediate result well below the
+pre-migration reference; no parity claim is made.
+
+Trusted value-cell operations now also bypass the duplicate generic
+`LinearMemory.checkRange` pass while retaining the host allocation bounds
+check. Heap-native array inline caches retain vector addresses and structural
+versions, but never element values. After these changes, demo1 measured about
+2.1--2.2 FPS at 64x64 and demo2 measured about 0.6 FPS at 64x64. The accepted
+pre-migration references remain 13.5 and 12.2 FPS respectively.
+
+## 2026-08-29: native guest-call and function-prototype checkpoint
+
+The native interpreter now enters ordinary guest bytecode closures directly,
+including calls forwarded by `Function.prototype.apply`. Function methods live
+on a real runtime-owned guest function prototype, so fetching `.apply` also
+stays in native prototype-chain lookup. This removes the repeated
+`Function.apply` semantic call exits and bytecode-function `.apply` property
+misses from demo8's macro-assembler recorder.
+
+Native own-property queries subsequently removed `Object.hasOwnProperty` from
+the recorder's fallback-call profile. With that addition the same initialization
+timer reported about 23.4 seconds. The continuing post-initialization hotspot
+is still the recorder's repeated Array join/string construction; own-property
+queries no longer appear in the fallback-call table.
+
+Moving the common signed-int32 and already-string forms of the `String`
+constructor into native execution reduced the same reported initialization
+time further, to about 19.6 seconds. The remaining `String` fallbacks are
+non-int32 conversions; they are substantially smaller than the continuing
+Array-join call count.
+
+At 320x240 with a 20 FPS limit, demo8 continued to initialize correctly in
+about 24.1 seconds as measured by its own initialization timer, versus roughly
+26.1 seconds at the preceding source-processing checkpoint. This is a startup
+improvement, not a steady-frame-rate claim: the first complete rendered frame
+still did not finish during the subsequent 70-second observation window.
+
+A native fast path for `Array.prototype.join` was measured and rejected. It
+increased demo8's reported initialization time to about 45.2 seconds because
+its allocation and character-copy cost exceeded the existing complete bridge.
+The rejected path is not enabled or retained in the interpreter. The remaining
+recorder profile is dominated by Array join/string construction and later
+rasterizer specialization, so string allocation/interning must be improved as
+a general facility before revisiting native join.
+
+## 2026-08-30: garage-transition allocation and source-building checkpoint
+
+The native collector now rebuilds its free-block index with a shared
+kernel-dialect scan after sweeping. On the real demo8 Escape-then-G transition,
+the first collection still reclaimed approximately 28.9 MiB, while the
+reported sweep/index phase fell from about 2184 ms to about 703 ms. The kernel
+scan has both JavaScript and generated-i386 backends; the host only materializes
+the resulting free-address list after the scan.
+
+The semantic `Array.prototype.join` implementation now resolves the guest
+array's backing vector and length once, reads elements through named value-cell
+accessors, and performs one host-array join. It does not add a demo-specific
+intrinsic or retain the previously rejected native guest-string builder. In a
+profiled 64x64 demo8 startup, one early sample put the large source-generation
+call at 13.3 seconds, but repeated samples remained in the 26--28 second range.
+The lower result is therefore not treated as a reproducible speedup. Profiling
+substantially perturbs total runtime; the accessor change is retained because
+it removes redundant heap reads, but no wall-clock claim is made for it.
+
+For repeatable interactive profiling, start demo8 and obtain its window ID
+with `xwininfo -root -tree`, then send X11 keycodes with the repository's
+dependency-free JavaScript tool. The common Xorg keycodes 9 and 42 select
+Escape followed by G:
+
+```sh
+node guest_vm/tools/x11_send_keys.js WINDOW_ID 9 42
+```
+
+The tool uses only built-in `fs` and `net`, contains its own minimal X11 setup
+and SendEvent bindings, and can also be loaded through `node_runner.js` on
+js_min.exe. It is profiling support, not part of guest VM execution.
+
+Computed guest strings are no longer promoted into the runtime's permanent
+intern table merely because a semantic register is spilled. A per-generation
+reverse cache preserves address reuse during normal execution, while ordinary
+heap reachability controls lifetime at collection. This particularly targets
+the temporary macro-assembly and specialization strings created while changing
+demo8 modes. The atom table preserves canonical identity only while an atom is
+reachable: properties, programs, snapshots, and values mark their string
+records normally, and collection rebuilds the table from its marked entries.
+This weak-interning rule prevents a runtime which compiles many unrelated
+sources from retaining every identifier and literal spelling forever.
+
+Trusted value-cell and fixed-field reads now reach js_min's aligned
+`peek32`/`poke32` primitives without repeating host-memory validation after the
+record accessor has already established the address. Constant-property inline
+caches similarly retain the interned key address per compiled site, and object
+handles retain only their property-record addresses. These changes target the
+millions of authoritative-heap reads in terrain and garage geometry without
+copying guest property values onto the host heap. A short 64x64 demo2 smoke run
+continued to render at roughly 0.4--0.6 FPS on the current fully migrated heap;
+this is a stability checkpoint, not the requested final performance level.
+
+The same checkpoint adds a 256-entry polymorphic property-cell cache per
+compiled constant-key site. A profiled 64x64 demo8 run reduced X11 setup-reply
+processing from roughly 0.81 seconds to 0.44 seconds, the initial incoming-X11
+callback from roughly 6.5--6.9 seconds to 5.8 seconds, and the large source-
+generation call from roughly 26.3 seconds to 24.2 seconds. Terrain construction
+still took about 185 seconds under profiling and remains a major general guest-
+object access bottleneck. These samples are useful directional measurements,
+not frame-rate claims.
+
+## 2026-08-30: native guest-constructor checkpoint
+
+Ordinary guest-bytecode construction now remains inside the native interpreter
+instead of yielding and executing the complete constructor body in the host
+interpreter. Receiver and prototype allocation, `this` binding, guest-frame
+entry, and constructor return semantics all use authoritative heap records.
+This is a general `CONSTRUCT` implementation; no demo functions or object
+shapes are recognized specially.
+
+On the unchanged profiled 64x64 demo8 workload, the rally became playable in
+roughly 30 seconds of total wall time. That includes approximately 14 seconds
+for Firefox 1 to build the native interpreter, X11 initialization, and the
+game's reported 8.2-second initialization. At the preceding checkpoint, the
+profiled terrain-construction phase alone took about 185 seconds. The large
+difference occurs because a semantic constructor exit previously ran the
+entire called constructor in the host bytecode interpreter, not merely because
+of the number of `CONSTRUCT` opcodes.
+
+The same run entered garage mode after Escape then G. Its first automatic heap
+collection reclaimed about 34.6 MiB and spent 49 ms marking plus 655 ms
+sweeping/indexing; the mode then reported itself active without the former
+long constructor stall or a freed-reference failure. These are startup and
+mode-transition results at a deliberately small profiling resolution, not a
+320x240 frame-rate or direct-js_min parity claim.
+
+Fallback profiling now reports both host-visible argument kinds and the
+authoritative descriptor/source tags in guest call frames. This exposed an
+important distinction in demo8's runtime assembler: many values passed to
+`String` are numerically int32-valued, while their guest cells correctly retain
+the double tag. A native exact-int32-double conversion was evaluated, removed,
+and not committed as an optimization: it enlarged the native interpreter by
+about 4.8 KiB and one comparable profiled initialization rose from roughly
+8.3 seconds to 10.5 seconds despite eliminating those `String` exits. The
+remaining dominant assembler boundary is `Array.join`; reducing a smaller
+exit class at the cost of a larger dispatch engine is not a net improvement.
+
+## 2026-09-01: unchecked native-snapshot startup
+
+`--with-snapshot FILE --skip-snapshot-hash` explicitly trusts a native
+snapshot and avoids both `interpreterKernel.toString()` and hashing the
+recovered source. Three alternating `hello.js` process starts under
+`js_min.exe` measured:
+
+| snapshot mode | runs (seconds) | mean |
+| --- | --- | --- |
+| checked | 4.38, 4.17, 4.05 | 4.20 s |
+| source hash unchecked | 0.41, 0.39, 0.40 | 0.40 s |
+
+The unchecked mode saved 3.80 seconds, or about 90% of checked snapshot
+startup, and made this small workload start 10.5 times faster. Its measured
+0.40-second startup is also far below the earlier roughly 9.44-second normal
+native compilation path. This mode still validates snapshot magic, format and
+compiler versions, profile mode, code length, and file length; only source
+identity is unchecked. It is opt-in because stale native code would otherwise
+be indistinguishable from code for the current interpreter kernel.
+
+## 2026-09-08: bounded profiling and Zlib bitwise exits
+
+`guest_runner.js --vm-profile-duration MILLISECONDS` enables the ordinary
+native profile and asks the command-line embedder to stop at the first
+instruction-budget boundary after that wall-clock interval. The diagnostic
+uses finite one-million-instruction slices, so it does not add a timer check to
+the interpreter dispatch loop. Bootstrap work that synchronously evaluates a
+nested context can finish before the outer execution reaches a budget boundary;
+the option is therefore a bounded steady-execution profiler, not a hard process
+deadline.
+
+An initial Zlib profile showed almost all semantic exits at general `BIT_AND`
+and `BIT_OR` bytecodes whose operands were boolean comparison results. ES5.1
+`ToInt32` maps true to 1 and false, null, and undefined to 0 (undefined through
+NaN). Handling those immediate tags in the native bitwise path removes the
+guest/host transitions without specializing generated code or Zlib. With the
+same explicitly loaded unchecked snapshot, quick correctness completes in
+141.70 seconds and the original stock benchmark completes in 600.14 seconds
+with score 257. Peak RSS was approximately 280,000 KiB for both measurements.
+
+## 2026-09-08: uncached front-end baseline and quadratic fix
+
+`frontend_benchmark.js` measures parsing, bytecode compilation, and verification
+separately and never reads or writes a source parse cache. On the 1,466,203-byte
+Octane PdfJS source, the old js_min front end was still consuming one CPU after
+579 seconds and was stopped. The dominant algorithmic defect was
+`Compiler.constant` linearly searching a growing constant array for every
+literal. Large numeric tables made compilation quadratic.
+
+Primitive constant indexing, direct append for normally unique structural and
+large numeric constants, a precedence-climbing expression parser, removal of
+unused token raw-source copies, and direct hot numeric/string scans reduced the
+same uncached js_min front end to approximately:
+
+| phase | elapsed |
+| --- | ---: |
+| parse | 9.63 s |
+| compile | 8.26 s |
+| verify | 0.00 s |
+| total | 17.90 s |
+
+The corresponding Node measurement was 0.27 seconds parsing, 0.32 seconds
+compiling, and 0.59 seconds total. These figures measure the bootstrap-hosted
+front end; they are not an acceptable final self-hosted result, but they remove
+the multi-minute algorithmic failure without recognizing PdfJS or caching its
+parse.
+
+`self_hosted_frontend.js` is the first executable self-hosted boundary. When it
+is required by a program launched through `guest_runner.js`, its tokenizer,
+parser, AST, compiler state, and result are guest code and guest-heap objects.
+The companion benchmark always reparses its input.
+
+The first self-hosted PdfJS attempt did not finish parsing in 102 seconds. Its
+profile was dominated by roughly 68,000 guest-to-host numeric-conversion exits
+from the tokenizer. The compact front end now accumulates decimal integers of
+up to nine digits and hexadecimal integers of up to seven digits directly.
+Those bounds make the conversion exact in binary64; longer, fractional, and
+exponent forms keep the general `Number` path. The native interpreter's string
+`Number` path can call libc `strtod` through the general typed native-call IR,
+and validates that the complete string was consumed before accepting the
+result. This is a general language implementation path, not a PdfJS cache or a
+benchmark-specific parser.
+
+On the same 1,466,203-byte source, an uncached, fully guest-owned run measured:
+
+| self-hosted phase | elapsed |
+| --- | ---: |
+| parse | 11.25 s |
+| compile | 6.21 s |
+| total | 17.46 s |
+
+A repeated parse-only run measured 11.48 seconds inside the benchmark and
+45.30 seconds for the complete process. The latter includes normal module
+loading and generation of the native interpreter, so it is recorded separately
+from front-end execution. The parser run executed about 230 million guest
+bytecodes while making only a few hundred semantic exits. The remaining cost
+is consequently in generic guest object/property traffic and bytecode dispatch,
+not host numeric conversion. A compact guest-heap AST representation remains a
+promising structural improvement, but is not required for correctness and has
+not been substituted for the real parser in these measurements.
+
+## 2026-09-11: cheap fresh contexts
+
+`context_benchmark.js` separates one-time `JSRuntime` initialization from
+repeated, genuinely fresh `JSContext` creation and destruction. It accepts a
+context count and runs without npm or generated data:
+
+```sh
+js_min.exe guest_vm/context_benchmark.js 1000
+node guest_vm/context_benchmark.js 1000
+```
+
+The former context constructor enumerated runtime globals into a guest Array,
+decoded every key, and installed every property through the general semantic
+API. It also rebuilt `Function` and `eval` for every context. A 100-variant
+Test262 profile measured about 58 ms per context on `js_min.exe`.
+
+The runtime now initializes context-neutral `Function` and `eval` once. A
+kernel-compiled record copier clones the context-global property table, and a
+single native `memset` clears its destination allocation. The property count
+is cached using the source object's existing version. With 1,000 contexts:
+
+- `js_min.exe`: 311 ms total, or 0.311 ms per fresh context; runtime
+  initialization was 5,023 ms in that run;
+- Node.js 24.14.1: 108 ms total, or 0.108 ms per fresh context; runtime
+  initialization was 65 ms.
+
+The MMVM result is approximately 187 times faster than the original measured
+path. Snapshot-based Test262 isolation remains available while its replacement
+is evaluated; these figures measure actual new context/global records, not
+snapshot restoration.
+
+The `--fresh-contexts ch07/7.9` comparison initially took 54.45 seconds for
+202 passing variants. Correct phase accounting showed 67 ms of context
+creation and 42.18 seconds of harness evaluation. Three general interpreter
+changes reduced the same fresh run without sharing mutable context state:
+
+- the documented UTC `Date.getTimezoneOffset()` operation now returns directly
+  from the guest intrinsic dispatcher;
+- `SET_GLOBAL` can allocate a normal missing property record in the native
+  heap rather than leaving the interpreter;
+- the UTC Date getters and the common numeric Date-construction path operate
+  on guest value cells in the kernel interpreter. Unsupported Date conversions
+  retain the semantic fallback.
+
+The measured progression was 54.45, 46.83, 26.82, and finally 25.93 seconds;
+all four runs passed 202 of 202 variants. In the latest profiled run, creating
+200 contexts cost 99 ms and executing their harnesses cost 14.02 seconds. The
+remaining repeated initialization is therefore a realm/harness problem, not a
+context-allocation problem. The native changes also apply to normal programs;
+they are not keyed to Test262 source or filenames.
+
+Dynamic `Function` construction has two levels of runtime cache. The parsed,
+verified program cache avoids repeating front-end work on every invocation.
+For the common single-body-argument form, a guest-heap index also lets the
+native interpreter instantiate a new bytecode function directly from that
+immutable program. The resulting function gets a new object/prototype pair and
+the current context as its home context. Multi-argument constructors retain the
+semantic path, avoiding a cache-key ambiguity between parameter lists.
+
+This removed repeated host transitions for the two `Function("return this")`
+forms in the Test262 harness. The same 202 fresh-context variants completed in
+23.68 seconds with 202 passes, down from the preceding 25.93 seconds. This is a
+general dynamic-code cache; first-time source still goes through the actual
+guest parser/compiler and no source-specific answer is cached.
+
+## 2026-09-24: standalone source-loader isolation
+
+The generic standalone image accepts `--vm-profile` before the program path.
+This reports read, self-hosted compile, and execution phases from inside the
+guest using the existing `gettimeofday`-backed runtime clock. Profiling remains
+opt-in and neither changes the snapshot format nor adds a host callback.
+
+The first phase run of `demo8_runner.js demo8.js --help` measured 109.04
+seconds total. Reading `demo8_runner.js` took 0.20 seconds and compiling it
+took 1.76 seconds, but reading `demo8.js` took 104.96 seconds. The application
+runner had installed its own global `Buffer`; the loader's retained `NodeFs`
+method resolved that replacement dynamically and therefore copied source
+through the compatibility Buffer's JavaScript byte path.
+
+The loader now retains its intrinsic-backed Buffer together with its filesystem
+service and binds that Buffer only while it reads source, restoring the
+application's Buffer immediately afterwards. No demo or application source was
+changed. The same standalone command then measured:
+
+- `demo8_runner.js` read: 213 ms;
+- `demo8_runner.js` self-hosted compile: 1,921 ms;
+- `demo8.js` read: 251 ms;
+- `demo8.js` self-hosted compile: 2,136 ms;
+- total process time: 4.68 seconds.
+
+This is roughly a 22-fold startup improvement. A normal X11 run subsequently
+created the rally window, generated its procedural sky, initialized the game,
+selected the compiled rasterizer, and entered its render loop. The change is a
+general embedder-boundary fix: arbitrary guest declarations can no longer make
+later standalone source loads silently select their Buffer implementation.
+
+## 2026-09-26: self-hosted indirect eval
+
+Non-empty indirect eval no longer requires a semantic transition to a host
+parser. The native dispatcher calls a retained guest front-end function, then
+uses a named frame continuation to invoke the returned global executable.
+This keeps zlib's generated 185 KiB source in the same guest tokenizer,
+parser, compiler, verifier, heap, and bytecode engine used for ordinary loaded
+programs. A Node-hosted kernel-IR run verifies global declaration behavior and
+exception unwinding; the full Node regression suite remains at 12 programs and
+now 266 assertions.
+
+This change also centralizes the runtime-support vector's layout. Kernel
+lowering substitutes the named layout values as immediates, so there is no
+per-access table lookup in the hot interpreter. The snapshot source hash now
+includes the sorted override values, preventing a stale native image from
+silently using an older support ABI.
+
+## 2026-09-26: JavaScript kernel raw-memory parity
+
+The shared native-interpreter kernel can also execute as generated JavaScript
+under Node.js. Buffer-heavy code exposed an incomplete backend boundary:
+generated code correctly emitted raw byte and word operations, but
+`LinearMemory` only provided the ordinary allocation-relative methods. The
+result was an immediate `memory.writeRawU8 is not a function` failure during
+EarleyBoyer setup.
+
+Raw operations now resolve centrally in `LinearMemory`. The JavaScript backend
+interprets the address as a checked zero-based runtime-memory offset; the i386
+backend still treats it as a native address and emits the existing direct load
+or store. The shared kernel integration test executes byte and word reads and
+writes through the JavaScript backend and verifies that i386 output uses the
+corresponding macro-assembler operations. This is backend completion rather
+than a benchmark-specific fast path.
+
+## 2026-09-26: direct paged words in the JavaScript backend
+
+A CPU profile of a fixed EarleyBoyer prefix showed that Node spent most of its
+time in `HostMemory`: every 32-bit heap field load performed four byte-helper
+calls, and each helper repeated allocation/page work. Reading or writing all
+four bytes after one page lookup reduced 1,018,021 bytecodes from 14.71 seconds
+to 5.55 seconds. Cross-page words still use the byte helpers, preserving
+unaligned boundary behavior.
+
+Generated JavaScript kernels were also paying checked public-memory overhead
+that generated i386 code does not have. Routing compiler-emitted byte, word,
+and binary64 operations through named trusted accessors reduced the same
+prefix to 4.89 seconds. The public API remains checked. An experiment with a
+shared `Uint32Array` page view was discarded after it regressed the prefix to
+6.06 seconds; the committed representation remains the simpler byte page.
+
+With both retained changes, EarleyBoyer quick correctness completes in
+2:07.04 at approximately 254 MiB peak RSS. It passes its stock Octane result
+verification. These are general Node execution-backend changes: no benchmark
+source, opcode, property name, or application path is recognized.
+
+## 2026-09-26: guest-owned RegExp execution on every host
+
+The standalone snapshot already replaced `RegExp.prototype.exec` and `test`
+with bytecode functions from `regexp_runtime.js`, but an ordinary native-kernel
+run retained the transitional host callbacks. A RegExp Octane profile crossed
+the semantic boundary roughly 20,000 times in its first few million guest
+bytecodes, principally for `RegExp.exec`.
+
+Guest runtime-library installation is now a single environment operation used
+by ordinary native-kernel execution and snapshot preparation. The same bounded
+profile subsequently recorded only five calls: four source-loader calls for
+the runtime and benchmark modules, plus `print`. RegExp matching and
+backtracking remained in guest bytecode throughout.
+
+The guest RegExp engine now retains at most 256 immutable parsed pattern trees,
+keyed by ES5.1 RegExp source text, with a most-recent entry fast path. Flags and
+`lastIndex` are deliberately excluded: flags are consumed as execution state,
+and `lastIndex` belongs to each RegExp instance. Bounding the cache avoids an
+unbounded runtime-lifetime retention path for dynamically generated patterns.
+This is general engine state and does not recognize benchmark patterns.
+
+## 2026-09-26: explicit guest RegExp machine
+
+The original guest matcher represented sequencing, alternatives, and repeats
+with newly allocated continuation closures and capture-array copies. A full
+RegExp quick run under Node remained active after 8:24 and reached about
+652 MiB RSS. Installing guest String methods exposed the same allocation model
+more broadly; it was not suitable as the final self-hosted engine.
+
+Patterns now compile once to named instructions for characters, classes,
+assertions, captures, branches, lookahead, backreferences, and counted
+repetition. The executor uses explicit program counters and reusable flat
+backtracking workspaces. Counted repeat instructions avoid source/code growth
+for large `{m,n}` quantifiers and record the previous input position so an
+empty repeated atom cannot loop indefinitely. Conservative anchored and common
+leading-literal metadata rejects impossible start positions before allocating
+matcher state.
+
+Across successive versions of the same three-million-bytecode Node profile,
+the guest heap bump changed from roughly 22.0 MiB for continuation execution,
+to 15.5 MiB for the first explicit machine, and to 13.0 MiB after reusable
+workspaces. Kernel time moved from 7.66 seconds to 6.88 seconds. The profile
+continues to report only five host calls for module loading and output.
+
+The standalone i386 smoke path now runs RegExp `exec`/`test` and String
+`split`, global/capturing `match`, string replacement, and callback replacement
+without a host VM. The complete Node and js_min suites pass, together with the
+standalone generic-program and byte-identical snapshot fixed-point tests. The
+full Octane RegExp workload remains too slow and is not recorded as complete;
+further work must reduce general guest matcher/interpreter cost rather than
+delegate matching back to a host regexp engine.
+
+## 2026-09-27: standalone collection pressure
+
+Standalone engine state distinguishes three allocator concepts: the current
+tail bump, the active pressure limit, and the maximum address reservation. The
+snapshot file contains only initialized heap bytes; the maximum remains a
+virtual-address reservation and does not inflate or fix the snapshot image.
+
+Allocation failure at the active pressure limit runs the native mark/sweep
+collector. Reclaimed regions are indexed and consumed before untouched tail
+space. After collection, the dispatcher grants at least 1 MiB of headroom and
+otherwise half the reclaimed byte count. If the very same instruction still
+cannot allocate before executing another bytecode, the logical limit grows
+geometrically up to the separately recorded maximum. This avoids both failure
+modes: touching the whole reservation before the first collection, and
+repeatedly collecting an unchanged live set that cannot satisfy one request.
+
+The engine-record offsets used by these kernels are exported once by
+`heap_records.js` as named compiler constants. Accesses remain named field
+accessors in kernel source; the shared compiler substitutes immediate offsets,
+so the maintainability boundary adds no runtime lookup.
+
+On the standalone RegExp setup diagnostic, periodic collection held RSS near
+66 MiB with a fixed pressure line. Adaptive post-collection headroom held it
+near 82 MiB over the measured interval, versus approximately 541 MiB when the
+first collection was deferred to the maximum reservation. Execution remained
+too slow and is not considered complete; the subsequent compact RegExp
+instruction work reduced a fixed Node-kernel slice from about 31.5 to 29.9
+seconds without adding a host semantic call.
+
+## 2026-09-27: typed matcher state
+
+The guest RegExp compiler now emits one fixed-width `Int32Array` instruction
+stream. Reusable capture and backtracking workspaces are also typed arrays,
+grown geometrically at their high-water mark. Buffer backing bytes live inside
+ordinary guest heap records, so collection, snapshots, and the Node memory
+backend use the same ownership model.
+
+This is a representation improvement rather than a special interpreter path.
+The normal typed-array constructor and indexed element operations service the
+matcher. On deterministic Octane RegExp setup, hosted native total time fell
+from 100.5 to 86.2 seconds. Standalone total time fell from 108.1 to 76.5
+seconds and its peak RSS fell from about 211 MiB to 194 MiB. Both runs passed
+the stock checksum.
+
+The final profile still executed approximately 2.51 billion guest bytecodes;
+typed storage reduced the cost per bytecode but did not eliminate matcher
+dispatch. This makes low-level matcher control flow, rather than heap capacity
+or host transitions, the next high-value target.
+
+## 2026-09-27: do not confuse tail exhaustion with a live heap
+
+Hosted logical-heap growth previously included `tail >= 15/16 * limit` as an
+independent reason to double capacity. That condition is not sufficient after
+a moving-free-list collector: a high-churn program can exhaust the untouched
+tail while retaining only 6--7 MiB and exposing a very large swept arena.
+
+The collector now distinguishes fragmentation from tail exhaustion. If the
+largest reusable block holds at least one sixteenth of total free bytes, the
+native allocator reuses the existing logical heap. It still grows for a live
+set above two thirds of capacity, for failure to provide the minimum native
+arena, or when reusable storage is genuinely fragmented below that ratio.
+
+On deterministic RegExp setup this reduced an observed 602 MiB peak to 257 MiB.
+The lower-memory run took 91.7 seconds total rather than 79.5 seconds, because
+it reused and swept existing records rather than continually touching fresh
+pages. The pre-optimization baseline was 100.5 seconds. Demo8 remained stable
+at 16.5 FPS at 256x192 with roughly 2.9 seconds of initialization.
+
+## 2026-09-27: reduce RegExp machine dispatch
+
+Three compiler/executor changes reduce work before introducing a kernel
+intrinsic:
+
+1. consecutive exactly-once literals compile to one literal-run instruction;
+2. quantified single-character atoms compile to one scanning instruction that
+   records greedy/lazy continuation positions; and
+3. those continuation entries share one capture-state snapshot because the
+   simple atom cannot mutate captures.
+
+Complex atoms retain the generic counted-repeat instructions. Backtracking
+stack entries explicitly name their snapshot slot, so a path that mutates
+captures before failing still restores the quantifier-entry state.
+
+On deterministic Octane RegExp setup under the reclaimed-region policy, total
+time fell from 91.7 to 82.6 seconds and setup time from 78.2 to 67.8 seconds.
+Peak RSS remained about 259 MiB and the stock checksum passed. The remaining
+control-flow volume is still large enough to justify compiling the low-level
+matcher executor from the kernel dialect next.

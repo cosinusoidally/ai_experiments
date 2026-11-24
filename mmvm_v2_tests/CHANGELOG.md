@@ -8,6 +8,762 @@ versions. Every completed new feature or user-visible feature update advances
 the point release by one (`0.1`, `0.2`, `0.3`, and so on). The major version
 remains `0` for this development series.
 
+## 0.75
+
+Approximate completion: 2026-09-28 afternoon BST
+
+### Guest VM
+
+- Added bytecode invocation of guest-defined property setters and completed
+  the corresponding receiver/argument/return-state handling. Accessor calls
+  remain resumable guest frames rather than host semantic callbacks.
+- Added native guest implementations for `parseFloat`, `isNaN`, and the ASCII
+  portion of `String.prototype.toUpperCase`, together with shared primitive
+  numeric conversion used by arithmetic, comparison, and loose equality.
+  Non-ASCII case conversion remains an explicit unsupported path until the
+  authoritative ES5 Unicode mapping is integrated.
+- Implemented lexicographic UTF-16 string comparison, primitive loose-equality
+  coercions, and the default ordinary-object primitive conversion cases needed
+  by general ES5 code. Numeric coercion no longer stores a value cell in the
+  engine's two adjacent 32-bit scratch fields.
+- Corrected the intrinsic arity classifier so IDs after the typed-array
+  constructor range are not accidentally consumed by an open-ended range.
+  Standalone `String.prototype.toUpperCase` now stays within the native guest.
+- Extended the guest `in` operator to exact non-negative integral double keys.
+  Corrected sparse array growth to preserve absent holes instead of filling
+  them with present `undefined` properties.
+- Implemented the typed-array `buffer` virtual property in both computed-key
+  and constant-key native property paths. The returned ArrayBuffer is the
+  authoritative guest backing record, not a host wrapper.
+- Centralized standalone diagnostic ranges, heap-first-record policy, rope
+  flags/sizes, and native-region thresholds. Recursive kernel functions now
+  consume the compiler's shared constants instead of redeclaring tag, heap
+  type, or record-layout numbers.
+- PdfJS standalone compilation is approximately 23 seconds and now enters the
+  benchmark after correctly reading its XRef substreams. The hosted native
+  path reaches Octane's final verification in approximately 66 seconds, but
+  currently reports `Unknown command "eq"` and an incorrect result (`6
+  1694498816` instead of `36788 939524096`); this is the next correctness
+  point, not a pass.
+- Rechecked the complete Node and i386 js_min guest suites at 12 programs and
+  266 assertions, including net.js, node_web.js, demo1, demo2, and context
+  multiplexing. Program-independent standalone snapshots and their
+  byte-identical fixed point pass. Live native-guest smoke runs of unchanged
+  demos 1 through 8 all created their X11 windows and entered their main
+  rendering or attract loops.
+
+## 0.74
+
+Approximate completion: 2026-09-27 evening BST
+
+### Guest VM
+
+- Replaced repeated large flat-string copying in the native guest interpreter
+  with immutable, balanced concatenation records. Small strings remain flat;
+  larger concatenations form bounded-depth trees which preserve ES5 string
+  immutability and are traversed by the same character accessor used by both
+  host backends.
+- Taught both guest collectors to trace concatenation children. The record
+  layout, character access, hashing, and traversal remain behind named heap
+  accessors rather than leaking offsets into benchmark code.
+- Added guest bytecode invocation for property getters, including the original
+  access receiver, resumable caller state, and strict functions which use an
+  unmapped `arguments` object. Corrected `String.fromCharCode` coercion for
+  the primitive values covered by ES5 `ToUint16`.
+- Extended standalone failure diagnostics with the rejected callable kind and
+  allocation status. This distinguishes missing language semantics from heap
+  pressure without calling back into the host VM.
+- PdfJS quick correctness now reaches benchmark execution in about 26.6
+  seconds at roughly 207 MiB peak RSS. It advances past its former repeated
+  string-allocation failure and its first accessor call; the subsequent
+  `String.fromCharCode` call is the current bring-up point, not a recorded
+  correctness pass.
+- Rechecked both complete guest regression suites at 12 programs and 266
+  assertions, plus net.js, node_web.js, demo1, demo2, and context multiplexing.
+
+## 0.73
+
+Approximate completion: 2026-09-27 afternoon BST
+
+### Guest VM
+
+- Added native guest implementations of `Object.create`, object-literal
+  getter/setter definition, and the ES5 `in` operator. `in` traverses guest
+  prototypes and understands ordinary, array, RegExp, and typed-buffer-view
+  records without returning to the host VM.
+- Extended native `+` coercion for strings combined with `undefined`, `null`,
+  and booleans, and numeric coercion of `null` and booleans. This allowed the
+  standalone self-hosted frontend to finish loading PdfJS and enter its
+  benchmark instead of exiting during compilation.
+- Added an explicit standalone unsupported-bytecode diagnostic containing the
+  opcode and guest bytecode PC. Previously the standalone loader returned only
+  status 70, which obscured the distinction between a language gap and an
+  allocation failure.
+- Added `arrayPrototype` to the kernel compiler's named record accessors; the
+  native `in` implementation therefore shares the authoritative heap layout
+  rather than embedding an offset.
+- Rechecked both complete guest regression suites at 12 programs and 266
+  assertions, plus net.js, node_web.js, demo1, demo2, and context multiplexing.
+- PdfJS quick correctness now gets past loading and `in`, but its repeated
+  string building exposes a general quadratic flat-string concatenation cost.
+  The current run is not recorded as a pass: it spends most of its time
+  allocating copied strings and repeatedly collecting a roughly 19 MiB live
+  heap despite tens of MiB of reclaimed space.
+
+## 0.72
+
+Approximate completion: 2026-09-27 late morning BST
+
+### Guest VM
+
+- Added general native `String(number)` conversion for non-integral binary64
+  values by sharing the kernel's existing number-formatting path. This removes
+  Splay's per-key semantic exit without benchmark-specific handling.
+- Changed the self-hosted collector to grow its logical heap limit when a
+  completed collection proves that live records occupy at least two thirds of
+  the current limit. Reclaimed regions remain reusable and guest addresses do
+  not move; the policy avoids repeatedly marking and sweeping a mostly-live
+  graph after only 1 MiB of new allocation.
+- Standalone Splay quick correctness improved from exceeding 180 seconds to
+  2.12 seconds. Its stock suite now completes in 4.28 seconds with score 784
+  (`Splay` 484 and `SplayLatency` 1272).
+- The same collector correction prevents RayTrace's former three-second native
+  crash. Quick correctness still passes, though the current stock run remains
+  too slow and reached a 180-second diagnostic ceiling.
+- Rechecked both complete guest regression suites at 12 programs and 266
+  assertions, along with net.js, node_web.js, demo1, demo2, and context
+  multiplexing. Richards, DeltaBlue, Crypto, and NavierStokes retain their
+  standalone stock passes.
+
+## 0.71
+
+Approximate completion: 2026-09-27 evening BST
+
+### Guest VM
+
+- Added fixed literal-run matcher instructions so consecutive exactly-once
+  characters no longer require one regex dispatch each.
+- Added a general simple-quantifier instruction for literals, dot, character
+  classes, and class escapes. It scans once and records alternative positions
+  in ECMAScript greedy or lazy order; complex/capturing atoms retain the
+  generic repeat machine.
+- Backtracking entries now name their capture-state snapshot. Alternatives
+  produced by one simple quantifier share a single immutable snapshot rather
+  than copying identical state for every possible match length.
+- The stock deterministic RegExp checksum continues to pass. Under the
+  conservative reclaimed-region policy, hosted total time improved from 91.7
+  to 82.6 seconds and setup time from 78.2 to 67.8 seconds, with peak RSS
+  remaining about 259 MiB.
+
+## 0.70
+
+Approximate completion: 2026-09-27 late afternoon BST
+
+### Guest VM
+
+- Hoisted immutable RegExp matcher values—flags, input length, state-slot
+  count, and stack capacity—out of the instruction loop. Stock hosted setup
+  fell as low as 65.9 seconds while retaining the benchmark checksum.
+- Corrected logical-heap growth so an exhausted tail does not force a larger
+  heap when collection has produced large reusable arenas. Growth for
+  fragmentation now requires the largest block to be less than one sixteenth
+  of all reusable bytes.
+- On the same RegExp setup, the revised reuse policy reduced observed peak RSS
+  from 602 MiB to 257 MiB. Total time was 91.7 seconds versus the original
+  100.5-second baseline; future work will move matcher control flow into the
+  kernel dialect rather than buying speed by touching fresh heap pages.
+- Rechecked demo8 through the hosted native guest path: initialization remains
+  about 2.9 seconds and attract mode rendered at 16.5 FPS at 256x192.
+
+## 0.69
+
+Approximate completion: 2026-09-27 afternoon BST
+
+### Guest VM
+
+- Corrected the Octane `--setup-only` diagnostic to install Octane's seeded
+  random-number generator before setup, matching the stock suite harness and
+  preserving its checksum validation.
+- Extended RegExp start metadata from one character to the longest common
+  literal prefix of every alternative. Case-sensitive searches use the guest
+  VM's native String search intrinsic to skip impossible candidate positions.
+- Packed matcher instructions into one fixed-width `Int32Array` and moved
+  capture/backtracking workspaces to reusable, geometrically grown typed
+  arrays. These remain ordinary guest-owned buffer-backing records and use the
+  same typed-array implementation as application code.
+- Stock deterministic RegExp setup now passes in both hosted native and
+  standalone modes. Hosted total time fell from 100.5 to 86.2 seconds;
+  standalone total time fell from 108.1 to 76.5 seconds, with standalone peak
+  RSS falling from about 211 MiB to 194 MiB.
+
+## 0.68
+
+Approximate completion: 2026-09-27 morning BST
+
+### Guest VM
+
+- Added an independent maximum reservation bound to native engine state.
+  Standalone snapshots now begin at the runtime's ordinary collection-pressure
+  boundary, collect before exhausting the complete 512 MiB reservation, and
+  grow logical headroom only after collection shows that it is useful.
+- Made the standalone collector's post-collection pressure adaptive. Reclaimed
+  regions remain the allocator's first choice, while a high-churn workload is
+  given headroom proportional to the work reclaimed so it does not repeatedly
+  sweep the same mostly-live graph.
+- Centralized native engine-layout constants in the record accessor module.
+  Both kernel backends receive the named authoritative offsets; the dispatcher
+  no longer owns an independent copy of the engine ABI.
+- Reduced general guest RegExp work by lowering unquantified atoms directly,
+  removing per-match helper closures, and packing matcher instructions into
+  local parallel opcode/operand arrays. Case-sensitive leading literals use
+  the guest String search implementation to skip impossible start positions.
+- Added the general Octane `--setup-only` diagnostic. The complete Node and
+  js_min suites remain at 12 programs and 266 assertions; demo8 starts and
+  renders through the native guest path, and standalone program-independent
+  snapshots retain their byte-identical fixed point.
+
+## 0.67
+
+Approximate completion: 2026-09-26 evening BST
+
+### Guest VM
+
+- Moved RegExp-aware `String.match`, `replace`, `split`, and `search` onto the
+  guest-owned matcher, including captures, global and zero-length progress,
+  replacement substitutions, and callable replacement arguments.
+- Replaced the allocation-heavy continuation matcher with an explicit
+  backtracking VM. Named instructions cover alternatives, groups, lookahead,
+  backreferences, assertions, and counted greedy/lazy repetition without
+  expanding large quantifiers into repeated code.
+- Added reusable flat state/backtracking workspaces and compile-time anchored
+  and mandatory-leading-literal metadata. The same bounded RegExp workload's
+  guest heap bump fell from 22.0 MiB to 13.0 MiB while host semantic calls
+  remained limited to module loading and output.
+- Standalone programs now format caught guest exceptions before exiting, and
+  guest String wrappers are unboxed without requiring a semantic callback.
+  Full Node and js_min suites pass, as does the generic standalone snapshot
+  and byte-identical fixed-point suite.
+
+## 0.66
+
+Approximate completion: 2026-09-26 late afternoon BST
+
+### Guest VM
+
+- Installed the guest-owned Number and RegExp runtime libraries in every
+  native-kernel environment, not only while preparing a standalone snapshot.
+  Node and js_min therefore exercise the same guest bytecode implementation.
+- Factored runtime-library installation out of standalone snapshot setup, so
+  snapshot preparation no longer carries a duplicate prototype-patching path.
+- Added a bounded, guest-heap compiled-pattern cache to the RegExp engine.
+  Immutable parser trees are shared by RegExp instances with the same ES5.1
+  `source`, while `lastIndex` and flags remain instance execution state.
+- A bounded RegExp profile now records only its five bootstrap/output host
+  calls rather than approximately 20,000 calls to host RegExp/String methods.
+  The full Node regression path continues to pass 12 programs, 266 guest
+  assertions, demo1/demo2 integration, and context multiplexing.
+
+## 0.65
+
+Approximate completion: 2026-09-26 afternoon BST
+
+### Guest VM
+
+- Reworked the Node host-memory backend to read or write an in-page 32-bit
+  word directly rather than reconstructing it through four separately checked
+  byte operations. Cross-page accesses retain the portable byte path.
+- Made generated JavaScript kernels use the same trusted-memory contract as
+  generated i386 kernels. Public linear-memory operations remain checked;
+  only compiler-produced code bypasses the redundant boundary check.
+- Reduced a fixed 1,018,021-bytecode EarleyBoyer profile from 14.71 seconds to
+  4.89 seconds without changing its exits, allocation, or collection counts.
+  Quick correctness now completes under the Node kernel backend in 2:07.04,
+  down from 2:29.39 after the first word-access improvement.
+
+## 0.64
+
+Approximate completion: 2026-09-26 afternoon BST
+
+### Guest VM
+
+- Completed the JavaScript kernel backend's raw linear-memory contract. Raw
+  byte and word operations now use checked offsets in the runtime-owned
+  `LinearMemory`, while the same shared kernel IR continues to use actual
+  addresses in the i386 backend.
+- This removes the missing `writeRawU8` failure reached by buffer-intensive
+  programs such as EarleyBoyer when the native interpreter kernel is executed
+  through the Node-hosted JavaScript backend.
+- Extended the existing kernel-backend integration test to exercise the raw
+  memory contract on JavaScript and validate the corresponding i386 macro
+  assembly. The full Node reference suite remains at 12 programs and 266
+  guest assertions.
+
+## 0.63
+
+Approximate completion: 2026-09-26 morning BST
+
+### Guest VM
+
+- Added a guest-owned indirect-eval continuation to the compiled interpreter.
+  Non-empty global eval now enters the retained self-hosted front end as an
+  ordinary bytecode call, then invokes the returned executable without a host
+  parser or host-language callback.
+- Represented the compile/invoke transition with a named frame state so normal
+  guest return, exception unwinding, collection, and frame reuse remain the
+  authoritative lifecycle machinery.
+- Centralized the complete native runtime-support vector layout. Constructor,
+  setter, and kernel code now share named indices through compiler constant
+  overrides, and snapshot compatibility hashing includes those override
+  values.
+- Added high-level coverage for indirect global declarations and exceptions.
+  The full Node reference suite passes 12 programs and 266 assertions, and
+  the same kernel graph continues to validate its macro-assembled i386 output.
+
+## 0.62
+
+Approximate completion: 2026-09-25 late evening BST
+
+### Guest VM
+
+- Fixed a native-collection root omission which could reclaim the runtime's
+  platform-service table under zlib's allocation pressure. A later number
+  formatting call then attempted to invoke a reused object field as the libc
+  `snprintf` pointer and jumped to address `0x1`.
+- The engine-state and platform-service records are now explicit roots of
+  host-triggered native collection. The compiled entry parameter was renamed
+  from the misleading `globalObject` to `platformServices` to document the
+  actual ABI and internal-collector root.
+- The unchanged zlib quick-correctness run now completes with its original
+  checksum in 75.2 seconds at 305.5 MiB peak RSS. Both complete regression
+  suites still pass 12 programs and 264 assertions.
+
+## 0.61
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Reworked escaped string-literal scanning to consume ordinary source runs
+  directly and combine decoded fragments with a balanced reduction. The old
+  path appended every character to an immutable prefix after the first
+  escape, producing quadratic copying for generated sources with regular line
+  continuations.
+- Reduced a self-hosted compile of the unchanged 185 KiB zlib source from
+  151.8 seconds and 540.8 MiB peak RSS to 19.2 seconds and 136.4 MiB. The new
+  measurement includes native-interpreter compilation and front-end module
+  loading.
+- Re-ran the complete Node and js_min suites after the tokenizer change; both
+  pass 12 guest programs and 264 guest assertions, together with the network,
+  web, demo1, demo2, and multi-context command-line paths.
+
+## 0.60
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Implemented ES5 string-index property access in the compiled interpreter,
+  including undefined out-of-range results and guest-heap one-character
+  strings for non-Latin-1 code units.
+- Removed zlib's remaining numeric string-property exits. A repeat startup
+  profile reduced semantic exits from 23 to 20; the remaining transitions are
+  calls and loose equality rather than indexed property access.
+
+## 0.59
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Moved `Boolean`, `Date.now`, `Array.prototype.reverse`,
+  `encodeURIComponent`, Annex B `unescape`, `TypedArray.prototype.set`, and
+  ArrayBuffer/typed-array construction into the compiled guest interpreter.
+- Typed-array constructors now create their backing storage, ArrayBuffer
+  record, and typed view directly in the relocatable guest heap. Length,
+  ordinary-array-copy, and shared-ArrayBuffer forms use the same general path,
+  with runtime-owned prototypes held in named support-vector slots.
+- Corrected native `unescape` so malformed `%XX` and `%uXXXX` sequences remain
+  literal rather than being partially consumed. The standalone integration
+  test now covers malformed escapes and all three typed-array construction
+  forms.
+- A fresh 15-second zlib profile executes just over one million guest
+  bytecodes after initialization without typed-array constructor or set host
+  callbacks. The existing Node and js_min regression suites remain at 12
+  programs and 264 assertions each.
+
+## 0.58
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Made EarleyBoyer quick correctness pass through the generic standalone
+  `js_runner.exe` image. Non-strict calls now allocate primitive `this`
+  wrappers directly on the guest heap instead of leaving the interpreter.
+- Added a general native `Array.prototype.splice`; this lets the self-hosted
+  compiler handle direct-eval scope insertion while compiling the unchanged
+  EarleyBoyer source.
+- Added a checked-in high-level front-end diagnostic which compiles an
+  arbitrary source file through the guest-owned tokenizer, parser, compiler,
+  and verifier without executing that source.
+
+## 0.57
+
+Approximate completion: 2026-09-25 evening BST
+
+### Guest VM
+
+- Removed RayTrace's remaining arithmetic exits with general guest-side
+  string-to-number coercion, including whitespace trimming and direct libc
+  conversion through the standalone platform table.
+- Added native `Object` construction, boxed primitive lookup,
+  `String.prototype.toString`/`valueOf`, boxed-string character access, and
+  `Number.prototype.toString`. EarleyBoyer quick correctness now has only one
+  benchmark-language transition remaining outside the compiled interpreter.
+
+## 0.56
+
+Approximate completion: 2026-09-25 afternoon BST
+
+### Guest VM
+
+- Kept DeltaBlue and Crypto quick-correctness execution inside the native
+  guest interpreter by adding general native implementations of
+  `Object.defineProperty`, `Number.prototype.toFixed`, and `Math.random`.
+- Property descriptors and formatted-number results are read from and written
+  to the runtime-owned guest heap. The standalone random-number sequence is
+  derived entirely inside the interpreter and owns no host-VM state.
+
+## 0.55
+
+Approximate completion: 2026-09-25 afternoon BST
+
+### Guest VM
+
+- Made the generic standalone snapshot run the Octane wrapper and completed
+  quick-correctness execution of Richards without bootstrap-host language
+  callbacks.
+- Added native guest implementations of `Array.prototype.indexOf`,
+  `Math.log`, `Number.prototype.toPrecision`, Date construction, and numeric
+  Date coercion. The x87 logarithm is emitted through the JavaScript macro
+  assembler, while the Node backend uses the same kernel IR.
+- Corrected self-hosted script declaration instantiation and passed the live
+  platform-service table explicitly through the compiled-interpreter ABI.
+  This also prevents allocation-heavy interpreter construction from leaving
+  its service record outside the runtime root graph.
+
+## 0.54
+
+Approximate completion: 2026-09-25 morning BST
+
+### Guest VM
+
+- Removed bootstrap-host environment values from standalone images. Changes
+  to `DISPLAY`, `XAUTHORITY`, or `HOME` no longer change snapshot bytes; when
+  an outer invocation also runs a program, its real environment is installed
+  only after the snapshot boundary.
+- Removed the inert bootstrap `process.env` placeholder itself. The standalone
+  launch path creates `process.env` only when it reads the new process's
+  environment through libc.
+
+## 0.53
+
+Approximate completion: 2026-09-25 morning BST
+
+### Guest VM
+
+- Made the program argument optional when creating a standalone snapshot.
+  `guest_runner.js --vm-native --snapshot FILE` now writes the generic image
+  and exits, on both the js_min-hosted and snapshot-hosted runner paths.
+
+## 0.52
+
+Approximate completion: 2026-09-25 morning BST
+
+### Guest VM
+
+- Made `--snapshot` capture the initialized generic command runner before the
+  requested application is read or represented in the guest heap. Images made
+  while running different programs are now byte-identical and can each run any
+  supported source file.
+- Removed process-local Buffer backing addresses from serialized heap
+  templates. The macro-assembled standalone bootstrap now reconstructs those
+  pointers from the mapped heap base before guest execution.
+
+## 0.51
+
+Approximate completion: 2026-09-15 afternoon BST
+
+### Guest VM
+
+- Added standalone runner-image fixed-point reproduction. A relocatable image
+  can now process `guest_runner.js --vm-native --snapshot FILE hello.js`, write
+  itself through libc obtained from the loader's sole `dlsym` capability, and
+  then execute the prepared guest hello program.
+- Added a high-level regression requiring the regenerated non-sparse image to
+  be byte-identical to its source, while keeping `js_runner.c` limited to image
+  validation/mapping and the `argc`/`argv`/`dlsym` ABI transfer.
+- Stored bytecode-function source in guest-heap program records and added
+  native Buffer and Function string conversion paths needed by continued
+  self-hosting work. Native allocator ownership is now released safely before
+  re-entrant host call boundaries.
+
+## 0.50
+
+Approximate completion: 2026-09-15 morning BST
+
+### Guest VM
+
+- Replaced the sparse full-capacity heap extent in standalone snapshots with a
+  genuinely compact initialized heap template. The current hello image is
+  about 273 KiB as both an ordinary file and apparent file size.
+- Made the native bootstrap resolve `mmap` and `memcpy` through its sole
+  loader-supplied `dlsym` capability, reserve zero-filled anonymous heap memory
+  at startup, and copy the compact template before entering the interpreter.
+  The C runner still supplies no VM support.
+
+## 0.49
+
+Approximate completion: 2026-09-15 morning BST
+
+### Guest VM
+
+- Added the first complete standalone snapshot image: a macro-assembled native
+  bootstrap, relocatable interpreter, precompiled guest program and initial
+  frame/context, and a canonical sparse guest-heap template.
+- Added the minimal ANSI C `js_runner.c` loader. It maps the image, supplies
+  only `argc`, `argv`, and the address of `dlsym`, and transfers control; the
+  snapshotted guest bytecode performs the `Hello, world!` libc FFI call.
+- Made standalone image output deterministic by excluding process-local
+  platform pointers. Two clean generations are byte-identical. Version-2
+  images remain usable as native-interpreter inputs through `--with-snapshot`,
+  and older version-1 code images remain readable.
+
+## 0.48
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Identified the exact 0.46 crash: the kernel expression `loadI32F64(1)` tried
+  to load and convert an int32 at native address `0x1`; it did not convert the
+  immediate value one. This caused demo8's field-of-view `Math.atan` call to
+  segfault during default-size initialization.
+- Reintroduced native guest `Math.atan` using the established safe pattern:
+  write the denominator one through the named engine-scratch accessor, then
+  pass that scratch-cell address to `loadI32F64`. The exact reported demo8
+  command now initializes and continues rendering, with observed 18.6 and
+  19.8 FPS samples at its default 256x192 resolution.
+
+## 0.47
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Removed the 0.46 native `Math.atan` intrinsic after the exact default demo8
+  invocation exposed an i386 crash during field-of-view initialization. The
+  established semantic `Math.atan` implementation is restored while the
+  separately tested native `Math.atan2` path remains unchanged.
+- Reproduced the original status-139 failure with
+  `js_min.exe guest_runner.js --vm-native demo8_runner.js demo8.js`, then
+  confirmed that the corrected build initializes and continues rendering at
+  its default 256x192 resolution. Observed five-second samples were 18.7,
+  19.6, and 18.5 FPS. The parser, allocator, `parseInt`, and signed-zero
+  improvements remain enabled; no demo source was changed.
+
+## 0.46
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Added a native guest `Math.atan` intrinsic. It uses the existing kernel/x87
+  binary64 `atan2` operation with a denominator of one, so ordinary numeric
+  calls no longer require the host Math implementation. `Math.atan2` retains
+  its existing two-argument path.
+
+## 0.45
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Combined kernel local-variable discovery with the mandatory graph walk that
+  already finds constants and helper dependencies. Graph members carry their
+  ordered local-name list into lowering, while standalone compiler users keep
+  the original independent local collector.
+- This removes one complete traversal of the native interpreter AST. Two cold
+  builds measured about 4.40 and 4.46 seconds, down from 4.66--4.68 seconds at
+  the preceding checkpoint and roughly 4.95 seconds before the parser work.
+  The lowering-side local collection phase fell from 248--255 ms to 11 ms.
+
+## 0.44
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Enabled the parser's compact literal representation for kernel AOT and made
+  both kernel lowering paths consume primitive integer literals directly.
+  Constant discovery preserves signed-int32 validation, including unary
+  negative constants, and now distinguishes an initializer or return value of
+  zero from the parser's absent-expression `null` sentinel.
+- Two measured cold native-interpreter builds took about 4.66 and 4.68 seconds,
+  down from roughly 4.70 seconds after the preceding metadata reduction.
+  Kernel constant/dependency collection fell from 280--285 ms to 248--255 ms.
+
+## 0.43
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Made parser statement locations and copied function-source text explicitly
+  optional, while preserving both by default for guest programs and their
+  source-located errors. Kernel compilation disables this metadata because its
+  validation and lowering stages do not consume it.
+- This reduces both parser allocation and the object graph traversed during
+  kernel constant/dependency collection. Two measured cold native-interpreter
+  builds fell from about 4.95 seconds to 4.70 seconds; collection of kernel
+  constants and dependencies fell from roughly 355 ms to 280--285 ms.
+
+## 0.42
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Fixed the native `Array.join` allocator contract. Join now bounds its result
+  against the representable guest string-record size and leaves physical
+  placement to the general native allocator, which can move from an exhausted
+  reclaimed arena to another region or to tail space.
+- Previously, join compared the result with only the current arena's suffix
+  and entered host semantics before the allocator had a chance to switch.
+  Demo8's recurring free-driving `Array.join` fallbacks dropped from 163 to
+  zero; three consecutive post-transition samples held 20.0 FPS at
+  320x240/20 FPS. No demo source was changed.
+
+## 0.41
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Removed the native `Math.min`/`Math.max` fallback for signed zero. The
+  compiled guest implementation now applies the ES5 tie rule directly:
+  `Math.min` prefers negative zero and `Math.max` prefers positive zero, while
+  returning the selected authoritative guest value cell.
+- This removed hundreds of recurring host transitions from demo8 free-driving
+  frames. At 320x240 with the 20 FPS limit, the measured post-transition
+  samples were 19.9, 19.9, and 19.6 FPS after the initial heap growth and
+  collection interval. No demo source was changed.
+
+## 0.40
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Moved the ordinary ES5 `parseInt` string/radix path into the compiled guest
+  interpreter. It handles ES whitespace, signs, radix inference, hexadecimal
+  prefixes, ASCII digits through base 36, NaN, negative zero, and the complete
+  signed-int32 result range without returning to the host. Inputs requiring
+  wider binary64 accumulation or object/string coercion retain the exact
+  semantic fallback rather than using an approximation.
+- Added the named kernel operation `setValueCellDoubleBits` for readable NaN
+  and signed-zero construction. The compiler lowers it to authoritative guest
+  heap stores; callers do not repeat value-cell offset arithmetic.
+- Confirmed that `parseInt` disappeared from demo8's profiled fallback-call
+  list. At 320x240 with the 20 FPS limit, free-driving samples after the mode
+  transition were 17.8, 18.6, and 20.0 FPS while the heap grew and collected;
+  the final interval met the 20 FPS limit. No demo source was changed.
+
+## 0.39
+
+Approximate completion: 2026-09-14 evening BST
+
+### Guest VM
+
+- Added a 256-entry direct-mapped cache for native constant-name reads of own
+  properties on ordinary guest objects. Entries live in the engine-state heap
+  record and are guarded by receiver/key identity, the receiver's structural
+  version, GC generation mark, and current property-head address. Values still
+  come from the authoritative property value cell on every hit.
+- Made property deletion advance the authoritative object structural version,
+  and clear the weak cache at collection before dead addresses can be reused.
+  The cache therefore cannot keep an object or property alive and cannot
+  confuse a recycled address with its previous record.
+- Fixed graph-wide kernel constant overrides. `--vm-profile` once again counts
+  native dispatch opcodes after the interpreter was split into compiled helper
+  functions, rather than reporting only semantic exits.
+- A comparable profiled demo8 run improved from roughly 14.7 million to about
+  15.3 million bytecodes per native-execution second. Sustained free-driving
+  samples at 320x240/20 FPS held between 19.6 and 20.0 FPS after the mode-switch
+  interval. No demo source was changed.
+
+## 0.38
+
+Approximate completion: 2026-09-14 afternoon BST
+
+### Guest VM
+
+- Removed redundant host-memory reads from post-mark weak-handle, program,
+  environment, and string-cache filtering. A named collector-mark accessor
+  now answers liveness directly; free records have mark zero and therefore
+  cannot be mistaken for members of the current generation.
+- Made the native free-block indexing pass report total reusable bytes during
+  its existing record walk. Collection no longer performs a second complete
+  host-side walk merely to calculate live occupancy.
+- Restricted the expensive native-frame and heap-graph validation walks to the
+  explicit `--vm-verify-heap` diagnostic mode. Normal execution still uses the
+  same native tracing and sweep algorithms; only the redundant validation pass
+  is omitted.
+- On the development machine, demo8's first 50 MiB collection at 320x240 fell
+  from approximately 239 ms to 71 ms (native mark 11 ms, native sweep 7 ms).
+  After the free-driving mode-switch interval, five-second samples recovered
+  to 18.9, 19.9, 20.0, 20.1, and 20.0 FPS; later collection-affected samples
+  were 19.6, 19.8, and 18.6 FPS. No demo source was changed.
+
+## 0.37
+
+Approximate completion: 2026-09-14 afternoon BST
+
+### Guest VM
+
+- Added a general i386 indexed-address lowering for guest-heap reads. Named
+  accessor expressions such as `heapBase + record + FIELD` now fold into one
+  machine load without exposing layout offsets at call sites.
+- The native interpreter's first 26 million demo8 bytecodes improved from
+  approximately 1.75 seconds to 1.65 seconds. A 320x240 attract-mode sample
+  with the 20 FPS limit ranged from 16.5 to 20.0 FPS and averaged about 18.2
+  FPS, compared with about 18.8 FPS for direct `js_min.exe` in the same scene.
+- Rejected two measured alternatives: indirect jump-table dispatch was about
+  15 percent slower than balanced branch dispatch on this i386 host, and
+  indexed stores/numeric x87 loads also regressed throughput. They are not
+  retained in the implementation.
+
+## 0.36
+
+Approximate completion: 2026-09-14 afternoon BST
+
+### Guest VM
+
+- Moved reclaimed-region selection and switching into the compiled guest
+  interpreter. All native allocation sites now reserve their complete record
+  group through the same kernel allocator instead of yielding for each arena.
+- Preserved undersized fragments on a named retired-region list and ordered
+  available regions largest-first, removing lost free space and quadratic
+  rescanning under renderer allocation churn.
+- Kept native and semantic-fallback allocation ranges disjoint while allowing
+  non-collecting fallbacks to run without rebuilding the entire host free-block
+  index. At 320x240 with the 20 FPS limit, the post-fix attract-mode sample
+  ranged from 14.8 to 19.8 FPS and no longer collapsed to 1--7 FPS after the
+  first collection.
+- Corrected the native engine-state opcode counter extent so opcodes 48--60
+  cannot overwrite allocator state, and added named accessors for every new
+  allocator field.
+
 ## 0.35
 
 Approximate completion: 2026-08-23 late evening BST

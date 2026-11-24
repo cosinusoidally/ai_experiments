@@ -1,0 +1,6218 @@
+(function (root) {
+    var BufferSupport = root.GuestVMBufferSupport;
+    var TypedArraySupport = root.GuestVMTypedArraySupport;
+    var JSONSupport = root.GuestVMJSONSupport;
+    var HostFFI = root.GuestVMHostFFI;
+    var Heap = root.GuestVMHeap;
+    var ValueCells = root.GuestVMValueCells;
+    var HeapRecords = root.GuestVMHeapRecords;
+    var PropertySemantics = root.GuestVMPropertySemanticsKernel;
+    var Bytecode = root.GuestVMBytecode;
+    var ThreadedCompiler = root.GuestVMThreadedCompiler;
+    var RecordInitializer = root.GuestVMRecordInitializer;
+    var HeapSweeper = root.GuestVMHeapSweeper;
+    var NumericBytecodeBackend = root.GuestVMNumericBytecodeBackend;
+    var NativeInterpreter = root.GuestVMNativeInterpreter;
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var DateSupport = root.GuestVMDateSupport;
+    var ErrorSupport = root.GuestVMErrorSupport;
+    /* null is a valid retained guest value, not a free-handle marker. */
+    var RELEASED_ROOT = {};
+    if (typeof module !== "undefined" && module.exports) {
+        BufferSupport = require("./buffer.js");
+        TypedArraySupport = require("./typed_array.js");
+        JSONSupport = require("./json.js");
+        HostFFI = require("./host_ffi.js");
+        Heap = require("./heap.js");
+        ValueCells = require("./value_cell.js");
+        HeapRecords = require("./heap_records.js");
+        PropertySemantics = require("./property_semantics_kernel.js");
+        Bytecode = require("./bytecode.js");
+        ThreadedCompiler = require("./threaded_compiler.js");
+        RecordInitializer = require("./aot/record_initializer.js");
+        HeapSweeper = require("./aot/heap_sweeper.js");
+        NumericBytecodeBackend = require("./aot/bytecode_numeric_backend.js");
+        NativeInterpreter = require("./aot/native_interpreter.js");
+        NativeIntrinsics = require("./native_intrinsics.js");
+        DateSupport = require("./date.js");
+        ErrorSupport = require("./error.js");
+    }
+
+    function own(object, key) {
+        return object.hasOwnProperty(key);
+    }
+
+    function guestMethod(table, key) {
+        /* Firefox 1 exposes a legacy host Object.prototype.eval. Method tables
+         * are ordinary ES3 objects, so raw lookup must not expose inherited
+         * host functions to guest code. Every real entry is a guest callable. */
+        var value = table[key];
+        return value && value.guestType ? value : undefined;
+    }
+
+    function hexDigitValue(code) {
+        if (code >= 48 && code <= 57) return code - 48;
+        if (code >= 65 && code <= 70) return code - 55;
+        if (code >= 97 && code <= 102) return code - 87;
+        return -1;
+    }
+
+    function legacyUnescape(value) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            if (value.charCodeAt(index) === 37) {
+                var unicode = index + 5 < value.length &&
+                    value.charCodeAt(index + 1) === 117;
+                var digits = unicode ? 4 : 2;
+                var start = index + (unicode ? 2 : 1);
+                if (start + digits <= value.length) {
+                    var decoded = 0;
+                    var digitIndex = 0;
+                    while (digitIndex < digits) {
+                        var digit = hexDigitValue(
+                            value.charCodeAt(start + digitIndex));
+                        if (digit < 0) break;
+                        decoded = decoded * 16 + digit;
+                        digitIndex++;
+                    }
+                    if (digitIndex === digits) {
+                        result += String.fromCharCode(decoded);
+                        index = start + digits;
+                        continue;
+                    }
+                }
+            }
+            result += value.charAt(index++);
+        }
+        return result;
+    }
+
+    function uriHex(octet) {
+        var digits = "0123456789ABCDEF";
+        return "%" + digits.charAt((octet >> 4) & 15) +
+            digits.charAt(octet & 15);
+    }
+
+    function uriUnescaped(code, component) {
+        if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+            (code >= 48 && code <= 57) || code === 45 || code === 95 ||
+            code === 46 || code === 33 || code === 126 || code === 42 ||
+            code === 39 || code === 40 || code === 41) return true;
+        if (component) return false;
+        return code === 59 || code === 47 || code === 63 || code === 58 ||
+            code === 64 || code === 38 || code === 61 || code === 43 ||
+            code === 36 || code === 44 || code === 35;
+    }
+
+    function encodeURIValue(value, component) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            var code = value.charCodeAt(index++);
+            if (uriUnescaped(code, component)) {
+                result += String.fromCharCode(code);
+                continue;
+            }
+            var codePoint = code;
+            if (code >= 55296 && code <= 56319) {
+                if (index >= value.length) throw new URIError("invalid URI character");
+                var low = value.charCodeAt(index++);
+                if (low < 56320 || low > 57343) {
+                    throw new URIError("invalid URI character");
+                }
+                codePoint = 65536 + (code - 55296) * 1024 + low - 56320;
+            } else if (code >= 56320 && code <= 57343) {
+                throw new URIError("invalid URI character");
+            }
+            if (codePoint < 128) {
+                result += uriHex(codePoint);
+            } else if (codePoint < 2048) {
+                result += uriHex(192 | (codePoint >> 6));
+                result += uriHex(128 | (codePoint & 63));
+            } else if (codePoint < 65536) {
+                result += uriHex(224 | (codePoint >> 12));
+                result += uriHex(128 | ((codePoint >> 6) & 63));
+                result += uriHex(128 | (codePoint & 63));
+            } else {
+                result += uriHex(240 | (codePoint >> 18));
+                result += uriHex(128 | ((codePoint >> 12) & 63));
+                result += uriHex(128 | ((codePoint >> 6) & 63));
+                result += uriHex(128 | (codePoint & 63));
+            }
+        }
+        return result;
+    }
+
+    function uriReserved(code) {
+        return code === 59 || code === 47 || code === 63 || code === 58 ||
+            code === 64 || code === 38 || code === 61 || code === 43 ||
+            code === 36 || code === 44 || code === 35;
+    }
+
+    function uriByte(value, index) {
+        if (index + 2 >= value.length || value.charCodeAt(index) !== 37) {
+            return -1;
+        }
+        var high = hexDigitValue(value.charCodeAt(index + 1));
+        var low = hexDigitValue(value.charCodeAt(index + 2));
+        return high < 0 || low < 0 ? -1 : high * 16 + low;
+    }
+
+    function decodeURIValue(value, component) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            if (value.charCodeAt(index) !== 37) {
+                result += value.charAt(index++);
+                continue;
+            }
+            var sequenceStart = index;
+            var first = uriByte(value, index);
+            if (first < 0) throw new URIError("malformed URI sequence");
+            var count = 0;
+            var codePoint = 0;
+            var minimum = 0;
+            if (first < 128) {
+                count = 1;
+                codePoint = first;
+            } else if (first >= 194 && first <= 223) {
+                count = 2;
+                codePoint = first & 31;
+                minimum = 128;
+            } else if (first >= 224 && first <= 239) {
+                count = 3;
+                codePoint = first & 15;
+                minimum = 2048;
+            } else if (first >= 240 && first <= 244) {
+                count = 4;
+                codePoint = first & 7;
+                minimum = 65536;
+            } else throw new URIError("malformed URI sequence");
+            var byteIndex = 1;
+            while (byteIndex < count) {
+                var next = uriByte(value, index + byteIndex * 3);
+                if (next < 128 || next > 191) {
+                    throw new URIError("malformed URI sequence");
+                }
+                codePoint = codePoint * 64 + (next & 63);
+                byteIndex++;
+            }
+            if (codePoint < minimum || codePoint > 1114111 ||
+                (codePoint >= 55296 && codePoint <= 57343)) {
+                throw new URIError("malformed URI sequence");
+            }
+            index += count * 3;
+            if (!component && codePoint < 128 && uriReserved(codePoint)) {
+                result += value.substring(sequenceStart, index);
+            } else if (codePoint < 65536) {
+                result += String.fromCharCode(codePoint);
+            } else {
+                codePoint -= 65536;
+                result += String.fromCharCode(55296 + (codePoint >> 10));
+                result += String.fromCharCode(56320 + (codePoint & 1023));
+            }
+        }
+        return result;
+    }
+
+    function expandStringReplacement(template, matched, prefix, suffix) {
+        template = String(template);
+        var result = "";
+        var index = 0;
+        while (index < template.length) {
+            var character = template.charAt(index++);
+            if (character !== "$" || index >= template.length) {
+                result += character;
+                continue;
+            }
+            var token = template.charAt(index);
+            if (token === "$") {
+                result += "$";
+                index++;
+            } else if (token === "&") {
+                result += matched;
+                index++;
+            } else if (token === "`") {
+                result += prefix;
+                index++;
+            } else if (token === "'") {
+                result += suffix;
+                index++;
+            } else result += "$";
+        }
+        return result;
+    }
+
+    function hexadecimal(value, digits) {
+        var alphabet = "0123456789ABCDEF";
+        var result = "";
+        while (digits-- > 0) {
+            result = alphabet.charAt(value & 15) + result;
+            value >>>= 4;
+        }
+        return result;
+    }
+
+    function legacyEscape(value) {
+        value = String(value);
+        var result = "";
+        var safe = "@*_+-./";
+        var index = 0;
+        while (index < value.length) {
+            var code = value.charCodeAt(index++);
+            var alphaNumeric = code >= 48 && code <= 57 ||
+                code >= 65 && code <= 90 || code >= 97 && code <= 122;
+            if (alphaNumeric || safe.indexOf(String.fromCharCode(code)) >= 0) {
+                result += String.fromCharCode(code);
+            } else if (code < 256) result += "%" + hexadecimal(code, 2);
+            else result += "%u" + hexadecimal(code, 4);
+        }
+        return result;
+    }
+
+    function isESWhiteSpace(code) {
+        return code === 9 || code === 10 || code === 11 || code === 12 ||
+               code === 13 || code === 32 || code === 160 || code === 5760 ||
+               code === 6158 || (code >= 8192 && code <= 8202) ||
+               code === 8232 || code === 8233 || code === 8239 ||
+               code === 8287 || code === 12288 || code === 65279;
+    }
+
+    function trimESWhiteSpace(value) {
+        var start = 0;
+        var end = value.length;
+        while (start < end && isESWhiteSpace(value.charCodeAt(start))) start++;
+        while (end > start && isESWhiteSpace(value.charCodeAt(end - 1))) end--;
+        return value.substring(start, end);
+    }
+
+    var MAX_ARRAY_CAPACITY = 67108860;
+
+    function Runtime(options) {
+        options = options || {};
+        /* Opt-in compiler diagnostics; ordinary native runs release build IR. */
+        this.retainNativeBuildIR = !!options.retainNativeBuildIR;
+        this.contexts = [];
+        /* One weak spelling-to-address index for both atoms and computed
+         * strings. Neither classification changes ownership: only traced
+         * guest edges retain a string across collection. */
+        this.stringAddresses = {};
+        /* Strings are immutable. This is a decoded representation cache keyed
+         * only by the authoritative heap address, never semantic storage. */
+        this.decodedStrings = {};
+        /* Derived, weak interning of private immutable compiler metadata.
+         * The ordinary heap graph, never this table, owns the records. */
+        this.programMetadataInterns = {};
+        this.programMetadataInternGeneration = -1;
+        /* Transitional compiled-pattern cache for semantic regexp calls.
+         * Guest-visible state never lives here: lastIndex is reset before
+         * each use, matching the current guest record semantics. */
+        this.hostRegExpCache = {};
+        this.hostRegExpCacheEntries = 0;
+        this.assertions = 0;
+        this.heapObjects = [];
+        this.heapHandles = {};
+        this.nextHeapIdentity = 1;
+        this.functionMetadata = {};
+        /* Only host-created callbacks need permanent embedding roots. The
+         * linked records are also the native engine's callback root list;
+         * guest-created native callables are ordinary collectible objects. */
+        this.nativeCallbackRootHead = 0;
+        this.environmentMetadata = {};
+        this.programObjects = [];
+        this.programAddresses = [];
+        this.freeProgramMetadataIndices = [];
+        this.programMetadata = {};
+        this.retainedProgramAddresses = {};
+        this.heapStateSnapshots = [];
+        this.hostRoots = [];
+        this.hostRootPersistentAddresses = [];
+        this.evalCompilerRoot = 0;
+        this.indirectEvalCompilerRoot = 0;
+        this.functionCompilerRoot = 0;
+        this.gcGeneration = 0;
+        this.gcThreshold = options.gcStress ? 1 :
+            normalizeGCThreshold(options.gcThreshold);
+        this.gcAllocationDebt = 0;
+        this.gcRecordAllocationCheckpoint = 0;
+        this.gcPending = false;
+        this.gcCollecting = false;
+        this.gcHeapPressureBump = 0;
+        this.compiledDepth = 0;
+        this.collectionCount = 0;
+        this.activeRegisterFrames = [];
+        this.activeEnvironmentFrames = [];
+        /* Synchronous guest callbacks can be nested beneath a context's
+         * published execution (for example while a module loader is serving
+         * require). They are independent live call stacks and must remain GC
+         * roots without replacing JSContext.execution. */
+        this.activeExecutions = [];
+        this.activeRegisters = null;
+        this.interpretGuest = null;
+        this.linearHeap = null;
+        this.valueCells = null;
+        this.heapSweeper = null;
+        this.heapRecords = null;
+        this.linearHeapBytes = options.heapBytes === undefined ?
+            64 * 1024 * 1024 : Number(options.heapBytes);
+        /* An explicit heapBytes without maxHeapBytes preserves the historical
+         * fixed-capacity embedding behavior. The normal default runtime starts
+         * small but reserves a stable native address range for automatic growth. */
+        this.maximumLinearHeapBytes = options.maxHeapBytes === undefined ?
+            (options.heapBytes === undefined ? 512 * 1024 * 1024 :
+             this.linearHeapBytes) : Number(options.maxHeapBytes);
+        this.profileOpcodeCounts = options.profile ? [] : null;
+        this.nativeOperandPredecode = !!options.nativeOperandPredecode;
+        this.kernelOptimization = options.kernelOptimization || "default";
+        this.kernelSourceReader = options.kernelSourceReader || null;
+        if (this.kernelSourceReader && typeof this.kernelSourceReader !== "function") {
+            throw new TypeError("kernelSourceReader must be a function");
+        }
+        if (this.kernelSourceReader && options.withSnapshot) {
+            throw new Error("kernel debug provenance requires fresh compilation, not withSnapshot");
+        }
+        if (this.kernelOptimization !== "default" && this.kernelOptimization !== "none") {
+            throw new RangeError("unknown kernel optimization policy: " + this.kernelOptimization);
+        }
+        this.traceExceptions = !!options.traceExceptions;
+        this.forbidHostCalls = !!options.forbidHostCalls;
+        this.logHostCalls = !!options.logHostCalls;
+        this.hostCallLogCount = 0;
+        this.verifyNativeHeap = !!options.verifyNativeHeap;
+        this.nativeSnapshotWrite = options.snapshot || null;
+        /* Execution-oriented VMs avoid encoding short-lived programs only to
+         * decode them immediately. Snapshot construction favors compact,
+         * retained nested programs; embedders can select either policy. */
+        this.compactProgramStorage = options.compactProgramStorage === undefined ?
+            !!options.snapshot : !!options.compactProgramStorage;
+        this.nativeSnapshotRead = options.withSnapshot || null;
+        this.deferNativeSnapshotWrite = !!options.deferSnapshotWrite;
+        this.skipNativeSnapshotHash = !!options.skipSnapshotHash;
+        if (this.nativeSnapshotWrite && this.nativeSnapshotRead) {
+            throw new Error("snapshot and withSnapshot are mutually exclusive");
+        }
+        if ((this.nativeSnapshotWrite || this.nativeSnapshotRead) &&
+            !options.nativeInterpreter) {
+            throw new Error("native snapshots require nativeInterpreter");
+        }
+        if (this.skipNativeSnapshotHash && !this.nativeSnapshotRead) {
+            throw new Error("skipSnapshotHash requires withSnapshot");
+        }
+        this.profileFunctionCounts = options.profile ? {} : null;
+        this.profileInstructionCount = 0;
+        this.profileNextReport = 1000000;
+        this.heapNativeBuiltins = !!options.nativeInterpreter;
+        this.threadedCompiler = options.threadedCompile ?
+            new ThreadedCompiler(this) : null;
+        this.ensureLinearHeap();
+        this.globalObject = this.makeObject();
+        this.numericBytecodeBackend = options.threadedCompile ?
+            new NumericBytecodeBackend(this) : null;
+        this.nativeCompilations = [];
+        this.installBuiltins();
+        this.bufferSupport = new BufferSupport(this);
+        this.typedArraySupport = new TypedArraySupport(this);
+        this.jsonSupport = new JSONSupport(this);
+        this.nativeInterpreter = options.nativeInterpreter ?
+            new NativeInterpreter(this) : null;
+        if (this.nativeInterpreter && this.datePrototype) {
+            this.nativeInterpreter.setDateSupport(
+                this.datePrototype, this.dateValueKey);
+        }
+        this.installProgramBuilder();
+        if (options.rawFFI) this.installRawFFI(options.rawFFIBridge);
+        this.finalizeBuiltinGlobals();
+    }
+
+    Runtime.prototype.finalizeBuiltinGlobals = function () {
+        /* ES5.1 15.1 gives the initial global bindings DontEnum. This pass is
+         * deliberately performed once, after every optional runtime facility
+         * has installed itself. Guest declarations and embedder-installed
+         * globals created later retain their requested ordinary attributes. */
+        var owner = this.globalObject.heapAddress;
+        var property = this.heapRecords.lastOwnPropertyEntry(owner);
+        while (property) {
+            var key = this.heapRecords.readString(
+                this.heapRecords.ownPropertyEntryKey(owner, property));
+            var attributes = this.heapRecords.ownPropertyEntryAttributes(owner, property) &
+                ~HeapRecords.Attributes.ENUMERABLE;
+            if (key === "undefined" || key === "NaN" || key === "Infinity") {
+                attributes = 0;
+            }
+            this.heapRecords.setOwnPropertyEntryAttributes(owner, property, attributes);
+            property = this.heapRecords.previousOwnPropertyEntry(owner, property);
+        }
+    };
+
+    Runtime.prototype.ensureLinearHeap = function () {
+        if (!this.linearHeap) {
+            this.linearHeap = new Heap({heapBytes: this.linearHeapBytes,
+                maxHeapBytes: this.maximumLinearHeapBytes,
+                profileAllocationSearch: !!this.profileOpcodeCounts,
+                collectorWorkspace: true});
+            this.valueCells = new ValueCells(this.linearHeap);
+            this.heapRecords = new HeapRecords(this.linearHeap, this.valueCells);
+            this.linearHeap.setRecordInitializer(
+                new RecordInitializer(this.linearHeap));
+            this.heapSweeper = new HeapSweeper(this.linearHeap);
+            this.resetHeapPressureBump(0);
+        }
+        return this.linearHeap;
+    };
+
+    Runtime.prototype.resetHeapPressureBump = function (minimumBump) {
+        var heap = this.linearHeap;
+        var pressureBump = Math.floor(heap.allocationLimit * 3 / 4);
+        minimumBump = Number(minimumBump) || 0;
+        if (pressureBump < minimumBump) pressureBump = minimumBump;
+        if (pressureBump > heap.maximumAllocationLimit) {
+            pressureBump = heap.maximumAllocationLimit;
+        }
+        this.gcHeapPressureBump = pressureBump;
+    };
+
+    Runtime.prototype.rebuildFreeBlockIndex = function () {
+        if (this.heapSweeper && this.heapSweeper.indexer) {
+            return this.heapSweeper.rebuildFreeBlocks();
+        }
+        return this.linearHeap.rebuildFreeBlocks();
+    };
+
+    Runtime.prototype.makeNativeFunction = function (name, callback, callMode,
+                                                      intrinsicId) {
+        this.ensureLinearHeap();
+        var address = this.heapRecords.allocateFunction(
+            true,
+            this.functionPrototype ? this.functionPrototype.heapAddress : 0,
+            0, intrinsicId || NativeIntrinsics.NONE);
+        var callable = this.makeHeapHandle(address, "function");
+        callable.name = name;
+        callable.callback = callback;
+        callable.callMode = callMode || "intrinsic";
+        callable.nativeIntrinsic = intrinsicId || NativeIntrinsics.NONE;
+        this.functionMetadata["$" + address] = callable;
+        this.registerNativeCallbackRoot(address);
+        if (own(NativeIntrinsics.formalLengths, name)) {
+            this.defineDataProperty(callable, "length",
+                NativeIntrinsics.formalLengths[name], 0);
+        }
+        return callable;
+    };
+
+    Runtime.prototype.makeGuestBuiltin = function (name, implementation) {
+        var callable = this.makeNativeFunction(name, null,
+            "intrinsic", NativeIntrinsics.GUEST_BUILTIN);
+        this.setGuestBuiltinImplementation(callable, implementation);
+        return callable;
+    };
+
+    Runtime.prototype.setGuestBuiltinImplementation = function (callable, implementation) {
+        var runtime = this;
+        var layout = NativeIntrinsics.GuestBuiltinLayout;
+        var closure = this.heapRecords.allocateValueVector(layout.LENGTH);
+        this.writeHeapValue(this.heapRecords.vectorCell(closure, layout.IMPLEMENTATION), implementation);
+        this.heapRecords.setVectorLength(closure, layout.LENGTH);
+        this.heapRecords.setFunctionClosure(callable.heapAddress, closure);
+        callable.callback = function (receiver, args) {
+            return runtime.invokePropertyFunction(implementation, receiver, args);
+        };
+        return callable;
+    };
+
+    Runtime.prototype.registerNativeCallbackRoot = function (address) {
+        this.heapRecords.setFunctionGCNext(address, this.nativeCallbackRootHead);
+        this.nativeCallbackRootHead = address;
+        if (this.nativeInterpreter) {
+            this.heapRecords.setEngineGCNativeFunctionHead(
+                this.nativeInterpreter.stateAddress, address);
+        }
+    };
+
+    Runtime.prototype.makeHostFunction = function (name, callback) {
+        return this.makeNativeFunction(name, callback, "host");
+    };
+
+    Runtime.prototype.makeObject = function () {
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateObject(
+                this.objectPrototype ? this.objectPrototype.heapAddress : 0),
+            "object"));
+    };
+
+    Runtime.prototype.makeObjectWithPrototype = function (prototype) {
+        if (prototype !== null) {
+            this.assertOwned(prototype);
+            if (!prototype || !prototype.guestType) {
+                throw new TypeError("Object prototype must be an object or null");
+            }
+        }
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateObject(
+                prototype ? prototype.heapAddress : 0), "object"));
+    };
+
+    Runtime.prototype.cloneEnumerableOwnProperties = function (source, target) {
+        this.assertOwned(source);
+        this.assertOwned(target);
+        var propertyCount;
+        if (source === this.globalObject) {
+            var entries = this.guardedOwnPropertyEntries(source);
+            if (this.contextGlobalPropertyCount === undefined ||
+                this.contextGlobalPropertyEntries !== entries ||
+                this.contextGlobalPropertyVersion !==
+                    source.propertyVersion) {
+                this.contextGlobalPropertyCount =
+                    this.heapRecords.countEnumerableOwnProperties(
+                        source.heapAddress);
+                this.contextGlobalPropertyVersion = source.propertyVersion;
+                this.contextGlobalPropertyEntries = entries;
+            }
+            propertyCount = this.contextGlobalPropertyCount;
+        }
+        this.heapRecords.cloneEnumerableOwnProperties(
+            source.heapAddress, target.heapAddress, propertyCount);
+        target.propertyEntries = {};
+        target.propertyVersion++;
+        target.valueVersion++;
+        return target;
+    };
+
+    Runtime.prototype.contextGlobalPropertyCount = function () {
+        var source = this.globalObject;
+        var entries = this.guardedOwnPropertyEntries(source);
+        if (this.contextGlobalOwnPropertyCount === undefined ||
+            this.contextGlobalOwnPropertyEntries !== entries ||
+            this.contextGlobalOwnPropertyVersion !== source.propertyVersion) {
+            this.contextGlobalOwnPropertyCount =
+                this.heapRecords.countOwnProperties(source.heapAddress);
+            this.contextGlobalOwnPropertyVersion = source.propertyVersion;
+            this.contextGlobalOwnPropertyEntries = entries;
+        }
+        return this.contextGlobalOwnPropertyCount;
+    };
+
+    Runtime.prototype.cloneOwnProperties = function (source, target) {
+        this.assertOwned(source);
+        this.assertOwned(target);
+        var propertyCount = source === this.globalObject ? this.contextGlobalPropertyCount() : undefined;
+        this.heapRecords.cloneOwnProperties(
+            source.heapAddress, target.heapAddress, propertyCount, false);
+        target.propertyEntries = {};
+        target.propertyVersion++;
+        target.valueVersion++;
+        return target;
+    };
+
+    Runtime.prototype.defineInternalValue = function (object, key, value) {
+        if (key === this.primitiveValueKey && object.guestType === "object") {
+            this.linearHeap.setFlags(object.heapAddress,
+                this.linearHeap.flags(object.heapAddress) | HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER);
+        }
+        var keyAddress = this.internStringAddress(key);
+        var property = this.heapRecords.defineOwnPropertyEntry(
+            object.heapAddress, keyAddress, 0);
+        this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, property, 0);
+        this.writeHeapValue(this.heapRecords.resolvedOwnPropertyEntryValueCell(
+            object.heapAddress, property), value);
+        this.cacheOwnPropertyEntry(object, keyAddress, property);
+        object.propertyVersion++;
+        object.valueVersion++;
+        return value;
+    };
+
+    Runtime.prototype.makePrimitiveWrapper = function (value, prototype) {
+        var wrapper = this.makeObjectWithPrototype(prototype);
+        this.defineInternalValue(wrapper, this.primitiveValueKey, value);
+        if (typeof value === "string") this.defineDataProperty(wrapper, "length", value.length, 0);
+        return wrapper;
+    };
+
+    Runtime.prototype.stringWrapperValue = function (object) {
+        if (!object || object.guestType !== "object" ||
+                !(this.linearHeap.flags(object.heapAddress) & HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER)) return undefined;
+        var entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress,
+            this.internStringAddress(this.primitiveValueKey));
+        if (!entry) return undefined;
+        var value = this.readHeapValue(this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, entry));
+        return typeof value === "string" ? value : undefined;
+    };
+
+    Runtime.prototype.makeArgumentsObject = function (
+            values, callable, strict, environment) {
+        var result = this.arrayFrom(values);
+        this.heapRecords.setObjectPrototype(
+            result.heapAddress, this.objectPrototype.heapAddress);
+        this.heapRecords.setArrayReserved(result.heapAddress, strict ?
+            HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT :
+            environment ? environment.heapAddress : 0);
+        this.defineDataProperty(result, "length", values.length,
+            HeapRecords.Attributes.WRITABLE |
+            HeapRecords.Attributes.CONFIGURABLE);
+        if (strict) {
+            this.defineAccessorProperty(result,
+                this.internStringAddress("callee"),
+                this.strictArgumentsThrower,
+                this.strictArgumentsThrower, 0);
+            this.defineAccessorProperty(result,
+                this.internStringAddress("caller"),
+                this.strictArgumentsThrower,
+                this.strictArgumentsThrower, 0);
+        } else {
+            this.defineDataProperty(result, "callee", callable,
+                HeapRecords.Attributes.WRITABLE |
+                HeapRecords.Attributes.CONFIGURABLE);
+        }
+        return result;
+    };
+
+    Runtime.prototype.makeArray = function (capacity) {
+        capacity = capacity === undefined ? 4 : Number(capacity);
+        if (capacity < 0 || capacity > MAX_ARRAY_CAPACITY ||
+            capacity !== Math.floor(capacity)) {
+            throw new RangeError("invalid initial Array capacity");
+        }
+        this.ensureLinearHeap();
+        return this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateArray(
+                this.arrayPrototype ? this.arrayPrototype.heapAddress : 0,
+                capacity),
+            "array"));
+    };
+
+    Runtime.prototype.makeArrayLiteral = function (length) {
+        var array = this.makeArray(length);
+        this.heapRecords.setArrayLength(array.heapAddress, length);
+        return array;
+    };
+
+    Runtime.prototype.makeObjectLiteral3 = function (
+            k0, v0, k1, v1, k2, v2) {
+        var object = this.makeObject();
+        this.setProperty(object, k0, v0);
+        this.setProperty(object, k1, v1);
+        this.setProperty(object, k2, v2);
+        return object;
+    };
+
+    Runtime.prototype.makeObjectLiteral5 = function (
+            k0, v0, k1, v1, k2, v2, k3, v3, k4, v4) {
+        var object = this.makeObject();
+        this.setProperty(object, k0, v0);
+        this.setProperty(object, k1, v1);
+        this.setProperty(object, k2, v2);
+        this.setProperty(object, k3, v3);
+        this.setProperty(object, k4, v4);
+        return object;
+    };
+
+    Runtime.prototype.makeArrayLiteral0 = function () {
+        return this.makeArray();
+    };
+
+    Runtime.prototype.makeRegExp = function (pattern, flags) {
+        this.ensureLinearHeap();
+        var regexp = this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateRegExp(pattern, flags,
+                this.regexpPrototype ? this.regexpPrototype.heapAddress : 0),
+            "regexp"));
+        /* ES5.1 15.10.7: these are own properties of every RegExp instance.
+         * Keeping them in ordinary guest property records makes descriptor,
+         * enumeration, assignment and instanceof behaviour use the same path
+         * as every other guest object. */
+        this.defineDataProperty(regexp, "source",
+            pattern.length ? pattern : "(?:)", 0);
+        this.defineDataProperty(regexp, "global",
+            flags.indexOf("g") >= 0, 0);
+        this.defineDataProperty(regexp, "ignoreCase",
+            flags.indexOf("i") >= 0, 0);
+        this.defineDataProperty(regexp, "multiline",
+            flags.indexOf("m") >= 0, 0);
+        this.defineDataProperty(regexp, "lastIndex", 0,
+            HeapRecords.Attributes.WRITABLE);
+        return regexp;
+    };
+
+    Runtime.prototype.hostRegExp = function (regexp) {
+        this.assertOwned(regexp);
+        var pattern = this.heapRecords.regexpPattern(regexp.heapAddress);
+        var flags = this.heapRecords.regexpFlags(regexp.heapAddress);
+        var key = "$" + pattern.length + ":" + pattern + ":" + flags;
+        var compiled = this.hostRegExpCache[key];
+        if (!compiled) {
+            /* This is only an execution accelerator, not semantic state. Do
+             * not let workloads containing unbounded distinct patterns turn
+             * it into a second, immortal regexp heap. Replacing the table is
+             * also friendlier to old SpiderMonkey's property allocator than
+             * repeatedly deleting thousands of dictionary entries. */
+            if (this.hostRegExpCacheEntries >= 256) {
+                this.hostRegExpCache = {};
+                this.hostRegExpCacheEntries = 0;
+            }
+            compiled = new RegExp(pattern, flags);
+            this.hostRegExpCache[key] = compiled;
+            this.hostRegExpCacheEntries++;
+        }
+        compiled.lastIndex = 0;
+        return compiled;
+    };
+
+    Runtime.prototype.makeGuestFunction = function (program, closure, homeContext) {
+        this.ensureLinearHeap();
+        /* Keep construction intermediates on the runtime. Firefox 1 does not
+         * reliably preserve arbitrary JS locals across these re-entrant heap
+         * allocation calls. Runtime fields are also visible to the guest GC. */
+        this.functionConstructionProgram = this.programAddress(program);
+        this.functionConstructionPrototype = this.makeObject();
+        this.functionConstructionCallable = this.trackObject(this.makeHeapHandle(
+            this.heapRecords.allocateFunction(false,
+                this.functionPrototype ?
+                    this.functionPrototype.heapAddress : 0,
+                closure ? closure.heapAddress : 0,
+                this.functionConstructionProgram,
+                homeContext ? homeContext.heapAddress : 0),
+            "bytecodeFunction"));
+        var callable = this.functionConstructionCallable;
+        callable.program = program;
+        callable.name = program.name || "";
+        callable.source = program.source || null;
+        callable.homeContext = homeContext;
+        this.functionMetadata["$" + callable.heapAddress] = callable;
+        this.defineDataProperty(this.functionConstructionCallable, "length",
+            program.parameters.length, 0);
+        this.defineDataProperty(this.functionConstructionCallable, "prototype",
+            this.functionConstructionPrototype, HeapRecords.Attributes.WRITABLE);
+        this.defineDataProperty(this.functionConstructionPrototype, "constructor",
+            this.functionConstructionCallable,
+            HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
+        if (program.strict) this.poisonFunctionProperties(this.functionConstructionCallable);
+        callable = this.functionConstructionCallable;
+        this.functionConstructionCallable = null;
+        this.functionConstructionPrototype = null;
+        this.functionConstructionProgram = 0;
+        return callable;
+    };
+
+    Runtime.prototype.poisonFunctionProperties = function (callable) {
+        this.defineAccessorProperty(callable, this.internStringAddress("caller"),
+            this.strictArgumentsThrower, this.strictArgumentsThrower, 0);
+        this.defineAccessorProperty(callable, this.internStringAddress("arguments"),
+            this.strictArgumentsThrower, this.strictArgumentsThrower, 0);
+    };
+
+    Runtime.prototype.makeCallEnvironment = function (program, receiver, args,
+                                                       closure, callable) {
+        if (program.bindingRegisters) return closure || null;
+        /* A top-level program adopted as an executable callable has no
+         * function environment or argument/this slots.  The presence of the
+         * callable handle does not manufacture slots that its program does
+         * not describe. */
+        if (!program.bindings) return null;
+        var bindings = program.bindings || [];
+        this.ensureLinearHeap();
+        var environment = {heapAddress: this.heapRecords.allocateEnvironment(
+                               closure ? closure.heapAddress : 0, bindings.length,
+                               this.programAddress(program)),
+                           ownerRuntime: this};
+        this.environmentMetadata["$" + environment.heapAddress] = {
+            handle: environment, bindingSlots: program.bindingSlots || {}};
+        var index = 0;
+        index = 0;
+        while (index < program.parameters.length) {
+            this.writeHeapValue(this.heapRecords.environmentCell(
+                environment.heapAddress, program.parameterSlots[index]),
+                index < args.length ? args[index] : undefined);
+            index++;
+        }
+        if (program.evalCode) return environment;
+        if (program.usesArguments && program.argumentsSlot >= 0) {
+            this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
+                program.argumentsSlot),
+                this.makeArgumentsObject(args, callable, !!program.strict, environment));
+        }
+        this.writeHeapValue(this.heapRecords.environmentCell(environment.heapAddress,
+            program.thisSlot), receiver);
+        if (program.functionNameSlot >= 0) this.writeHeapValue(
+            this.heapRecords.environmentCell(environment.heapAddress,
+                program.functionNameSlot), callable);
+        return environment;
+    };
+
+    Runtime.prototype.normalizeCallReceiver = function (
+            context, receiver, strict) {
+        if (strict) return receiver;
+        /* ES5.1 10.4.3: non-strict calls substitute the callee realm's global
+         * object for null/undefined and box primitive receivers. */
+        if (receiver === null || receiver === undefined) {
+            if (!context || !context.globalObject) {
+                throw new Error("call receiver normalization needs a JSContext");
+            }
+            return context.globalObject;
+        }
+        return receiver && receiver.guestType ? receiver :
+            this.toObject(receiver);
+    };
+
+    Runtime.prototype.initializeFrameRegisters = function (program, registers,
+                                                            receiver, args, callable) {
+        var constantRegisters = program.constantRegisters || [];
+        var constantIndex = 0;
+        while (constantIndex < constantRegisters.length) {
+            var constantRegister = constantRegisters[constantIndex];
+            /* Heap-adopted layouts use a negative sentinel for constants
+             * without a preloaded register. Match native frame initialization
+             * rather than treating that sentinel as an array property. */
+            if (constantRegister !== undefined && constantRegister >= 0) {
+                registers[constantRegister] =
+                    program.constants[constantIndex];
+            }
+            constantIndex++;
+        }
+        var bindingRegisters = program.bindingRegisters;
+        if (!bindingRegisters) return;
+        var index = 0;
+        while (index < bindingRegisters.length) {
+            registers[bindingRegisters[index++]] = undefined;
+        }
+        index = 0;
+        while (index < program.parameterSlots.length) {
+            registers[bindingRegisters[program.parameterSlots[index]]] =
+                index < args.length ? args[index] : undefined;
+            index++;
+        }
+        if (program.evalCode) return;
+        if (program.usesArguments && program.argumentsSlot >= 0) {
+            registers[bindingRegisters[program.argumentsSlot]] =
+                this.makeArgumentsObject(args, callable, !!program.strict);
+        }
+        registers[bindingRegisters[program.thisSlot]] = receiver;
+        if (program.functionNameSlot >= 0) {
+            registers[bindingRegisters[program.functionNameSlot]] = callable;
+        }
+    };
+
+    Runtime.prototype.getBinding = function (context, environment, name) {
+        var current = environment;
+        while (current) {
+            var bindingObjectAddress = this.heapRecords.environmentObject(
+                current.heapAddress);
+            if (bindingObjectAddress) {
+                var bindingObject = this.readHeapReference(bindingObjectAddress);
+                if (this.hasProperty(bindingObject, name)) {
+                    return this.getProperty(bindingObject, name);
+                }
+            }
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            var slot = metadata ? metadata.bindingSlots["$" + name] : undefined;
+            if (slot !== undefined) return this.readHeapValue(
+                this.heapRecords.environmentCell(current.heapAddress, slot));
+            current = this.environmentParent(current);
+        }
+        return this.getGlobal(context, name);
+    };
+
+    Runtime.prototype.setBinding = function (
+            context, environment, name, value, strict) {
+        var current = environment;
+        while (current) {
+            var bindingObjectAddress = this.heapRecords.environmentObject(
+                current.heapAddress);
+            if (bindingObjectAddress) {
+                var bindingObject = this.readHeapReference(bindingObjectAddress);
+                if (this.hasProperty(bindingObject, name)) {
+                    return this.setProperty(bindingObject, name, value, strict);
+                }
+            }
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            var slot = metadata ? metadata.bindingSlots["$" + name] : undefined;
+            if (slot !== undefined) {
+                this.writeHeapValue(this.heapRecords.environmentCell(
+                    current.heapAddress, slot), value);
+                return value;
+            }
+            current = this.environmentParent(current);
+        }
+        return this.setGlobal(context, name, value, strict);
+    };
+
+    Runtime.prototype.makeObjectEnvironment = function (parent, object) {
+        this.assertOwned(object);
+        if (!object || !object.guestType) {
+            object = this.toObject(object);
+        }
+        var environment = {heapAddress:
+            this.heapRecords.allocateObjectEnvironment(
+                parent ? parent.heapAddress : 0, object.heapAddress),
+            ownerRuntime: this};
+        this.environmentMetadata["$" + environment.heapAddress] = {
+            handle: environment, bindingSlots: {}
+        };
+        return environment;
+    };
+
+    Runtime.prototype.declareEvalBindings = function (context, environment,
+                                                       names) {
+        var target = environment;
+        /* Object environments belong to `with`; variable declarations pass
+         * through them to the caller's variable environment. */
+        while (target && !this.heapRecords.environmentProgram(
+                target.heapAddress)) {
+            target = this.environmentParent(target);
+        }
+        var index = 0;
+        if (!target) {
+            while (index < names.length) {
+                var globalName = names[index++];
+                if (!this.hasProperty(context.globalObject, globalName)) {
+                    this.defineDataProperty(context.globalObject, globalName,
+                        undefined, HeapRecords.Attributes.WRITABLE |
+                        HeapRecords.Attributes.ENUMERABLE |
+                        HeapRecords.Attributes.CONFIGURABLE);
+                }
+            }
+            return;
+        }
+        var bindingObjectAddress = this.heapRecords.environmentObject(
+            target.heapAddress);
+        var bindingObject = bindingObjectAddress ?
+            this.readHeapReference(bindingObjectAddress) : this.makeObject();
+        if (!bindingObjectAddress) {
+            this.heapRecords.setEnvironmentObject(target.heapAddress,
+                                                   bindingObject.heapAddress);
+        }
+        var metadata = this.environmentMetadata["$" + target.heapAddress];
+        while (index < names.length) {
+            var name = names[index++];
+            var existingSlot = metadata ?
+                metadata.bindingSlots["$" + name] : undefined;
+            if (existingSlot === undefined &&
+                !this.hasOwnProperty(bindingObject, name)) {
+                this.defineDataProperty(bindingObject, name, undefined,
+                    HeapRecords.Attributes.WRITABLE |
+                    HeapRecords.Attributes.ENUMERABLE |
+                    HeapRecords.Attributes.CONFIGURABLE);
+            }
+        }
+    };
+
+    Runtime.prototype.evalThisBinding = function (context, environment) {
+        var current = environment;
+        while (current) {
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            var slot = metadata ? metadata.bindingSlots.$this : undefined;
+            if (slot !== undefined) {
+                return this.readHeapValue(this.heapRecords.environmentCell(
+                    current.heapAddress, slot));
+            }
+            current = this.environmentParent(current);
+        }
+        return context.globalObject;
+    };
+
+    Runtime.prototype.deleteBinding = function (context, environment, name,
+                                                  strict) {
+        var current = environment;
+        while (current) {
+            var bindingObjectAddress = this.heapRecords.environmentObject(
+                current.heapAddress);
+            if (bindingObjectAddress) {
+                var bindingObject = this.readHeapReference(bindingObjectAddress);
+                if (this.hasProperty(bindingObject, name)) {
+                    return this.deleteProperty(bindingObject, name, strict);
+                }
+            }
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            if (metadata && metadata.bindingSlots["$" + name] !== undefined) {
+                return false;
+            }
+            current = this.environmentParent(current);
+        }
+        return this.deleteProperty(context.globalObject, name, strict);
+    };
+
+    Runtime.prototype.typeOfBinding = function (context, environment, name) {
+        try {
+            return this.typeOf(this.getBinding(context, environment, name));
+        } catch (error) {
+            if (error && error.name === "ReferenceError") return "undefined";
+            throw error;
+        }
+    };
+
+    Runtime.prototype.getEnvironmentSlot = function (environment, depth, slot) {
+        var requestedDepth = depth;
+        while (depth > 0) {
+            environment = this.environmentParent(environment);
+            depth--;
+        }
+        var slotCount = environment ?
+            this.heapRecords.environmentSlotCount(environment.heapAddress) : 0;
+        if (!environment || slot < 0 || slot >= slotCount) {
+            throw new Error("invalid lexical environment slot " + slot +
+                            " of " + slotCount + " at depth " + requestedDepth);
+        }
+        return this.readHeapValue(
+            this.heapRecords.environmentCell(environment.heapAddress, slot));
+    };
+
+    Runtime.prototype.environmentCellAddress = function (environment, depth, slot) {
+        var requestedDepth = depth;
+        while (depth > 0) {
+            environment = this.environmentParent(environment);
+            depth--;
+        }
+        if (!environment || slot < 0 ||
+            slot >= this.heapRecords.environmentSlotCount(environment.heapAddress)) {
+            throw new Error("invalid lexical environment slot depth=" +
+                requestedDepth + " slot=" + slot +
+                (environment ? " count=" +
+                 this.heapRecords.environmentSlotCount(environment.heapAddress) :
+                 " without environment"));
+        }
+        return this.heapRecords.environmentCell(environment.heapAddress, slot);
+    };
+
+    Runtime.prototype.setEnvironmentSlot = function (environment, depth, slot, value) {
+        this.assertOwned(value);
+        while (depth > 0) {
+            environment = this.environmentParent(environment);
+            depth--;
+        }
+        if (!environment || slot < 0 ||
+            slot >= this.heapRecords.environmentSlotCount(environment.heapAddress)) {
+            throw new Error("invalid lexical environment slot");
+        }
+        this.writeHeapValue(
+            this.heapRecords.environmentCell(environment.heapAddress, slot), value);
+        return value;
+    };
+
+    Runtime.prototype.updateEnvironmentSlot = function (
+            environment, depth, slot, amount, prefix) {
+        var old = Number(this.getEnvironmentSlot(environment, depth, slot));
+        var value = old + amount;
+        this.setEnvironmentSlot(environment, depth, slot, value);
+        return prefix ? value : old;
+    };
+
+    Runtime.prototype.environmentParent = function (environment) {
+        if (!environment) return null;
+        var address = this.heapRecords.environmentParent(environment.heapAddress);
+        if (!address) return null;
+        var metadata = this.environmentMetadata["$" + address];
+        if (!metadata) return this.adoptEnvironment(address, {}).handle;
+        return metadata.handle;
+    };
+
+    /* Native frames create lexical environments without allocating host
+     * objects.  Materialize the lightweight handle only if execution falls
+     * back to the host interpreter; the authoritative slots remain entirely
+     * in the guest heap. */
+    Runtime.prototype.adoptEnvironment = function (address, bindingSlots) {
+        var key = "$" + address;
+        var metadata = this.environmentMetadata[key];
+        if (metadata) return metadata;
+        this.linearHeap.requireRecord(address, Heap.Types.ENVIRONMENT);
+        var bindingName = this.heapRecords.environmentBindingName(address);
+        if (bindingName) {
+            bindingSlots = {};
+            bindingSlots["$" + this.heapRecords.readString(bindingName)] = 0;
+        } else {
+            /* A native-created parent need not have a portable activation
+             * cache. Recover its own layout, never the caller's layout or
+             * an empty map supplied while adopting a closure. */
+            var program = this.heapRecords.environmentProgram(address);
+            if (program) {
+                bindingSlots = {};
+                var names = this.heapRecords.programBindingNames(program);
+                var count = this.heapRecords.environmentSlotCount(address);
+                for (var slot = 0; names && slot < count; slot++) {
+                    var name = this.readHeapValue(this.heapRecords.vectorCellWithinLength(names, slot));
+                    bindingSlots["$" + name] = slot;
+                }
+            }
+        }
+        var handle = {heapAddress: address, ownerRuntime: this};
+        metadata = {handle: handle, bindingSlots: bindingSlots || {}};
+        this.environmentMetadata[key] = metadata;
+        return metadata;
+    };
+
+    Runtime.prototype.makeCatchEnvironment = function (parent, name, value) {
+        var valueRoot = this.retain(value);
+        var address = 0;
+        try {
+            var nameAddress = this.internStringAddress(name);
+            address = this.heapRecords.allocateEnvironment(parent, 1, 0);
+            this.linearHeap.setFlags(address, HeapRecords.EnvironmentFlags.SINGLE_BINDING);
+            this.heapRecords.setEnvironmentScopeData(address, nameAddress);
+            this.writeHeapValue(this.heapRecords.environmentCell(address, 0), value);
+            return this.adoptEnvironment(address, {}).handle;
+        } finally {
+            this.release(valueRoot);
+        }
+    };
+
+    Runtime.prototype.functionClosure = function (callable) {
+        var address = this.heapRecords.functionClosure(callable.heapAddress);
+        if (!address) return null;
+        var metadata = this.environmentMetadata["$" + address];
+        if (!metadata) throw new Error("guest function closure has no environment metadata");
+        return metadata.handle;
+    };
+
+    Runtime.prototype.pushActiveRegisters = function (registers, environment) {
+        this.activeRegisterFrames.push(registers);
+        this.activeEnvironmentFrames.push(environment);
+        this.activeRegisters = registers;
+    };
+
+    Runtime.prototype.popActiveRegisters = function () {
+        this.activeRegisterFrames.pop();
+        this.activeEnvironmentFrames.pop();
+        this.activeRegisters = this.activeRegisterFrames.length ?
+            this.activeRegisterFrames[this.activeRegisterFrames.length - 1] : null;
+    };
+
+    Runtime.prototype.clearActiveRegisters = function () {
+        this.activeRegisterFrames = [];
+        this.activeEnvironmentFrames = [];
+        this.activeRegisters = null;
+    };
+
+    Runtime.prototype.trackObject = function (object) {
+        object.ownerRuntime = this;
+        this.heapObjects.push(object);
+        this.noteAllocation(1);
+        return object;
+    };
+
+    Runtime.prototype.makeHeapHandle = function (address, guestType) {
+        var key = "$" + address;
+        var existing = this.heapHandles[key];
+        if (existing) return existing;
+        var handle = {guestType: guestType, ownerRuntime: this,
+                      heapAddress: address, gcMark: 0, propertyVersion: 0,
+                      valueVersion: 0, arrayStructureVersion: 0,
+                      propertyEntries: {}, propertyStorage: -1,
+                      propertyEpoch: -1, propertyGeneration: -1,
+                      heapIdentity: this.nextHeapIdentity++};
+        this.heapHandles[key] = handle;
+        return handle;
+    };
+
+    Runtime.prototype.writeHeapValue = function (cell, value) {
+        this.assertOwned(value);
+        if (typeof value === "string") {
+            this.valueCells.writeReferenceAt(cell,
+                this.computedStringAddress(value));
+        } else if (value && value.guestType && value.heapAddress) {
+            this.valueCells.writeReferenceAt(cell, value.heapAddress);
+        } else if (value && typeof value === "object") {
+            throw new TypeError("host object cannot be stored in guest heap" +
+                (value.name ? ": " + value.name : ""));
+        } else if (typeof value === "function") {
+            throw new TypeError("host function cannot be stored in guest heap" +
+                (value.name ? ": " + value.name : ""));
+        } else this.valueCells.writePrimitiveAt(cell, value);
+    };
+
+    Runtime.prototype.writeConstantHeapValue = function (cell, value) {
+        /* Bytecode property-name constants share the runtime atom address so
+         * the native constant-property path may compare addresses directly. */
+        if (typeof value === "string") {
+            this.valueCells.writeReferenceAt(cell,
+                this.internStringAddress(value));
+        } else this.writeHeapValue(cell, value);
+    };
+
+    Runtime.prototype.readHeapValue = function (cell) {
+        var tag = this.valueCells.tagAt(cell);
+        if (tag !== ValueCells.Tags.REFERENCE) {
+            return this.valueCells.readPrimitiveTaggedAt(cell, tag);
+        }
+        var address = this.valueCells.referenceAddressAt(cell);
+        return this.readHeapReference(address, cell);
+    };
+
+    /* Native execution deliberately does not manufacture host wrappers for
+     * every guest allocation.  Adopt one only when a semantic exit actually
+     * needs to expose the reference to host-side runtime code. */
+    Runtime.prototype.readHeapReference = function (address, sourceCell) {
+        var handle = this.heapHandles["$" + address];
+        if (!handle) {
+            var recordType = this.linearHeap.recordType(address);
+            if (recordType === Heap.Types.STRING) {
+                return this.readHeapString(address);
+            }
+            if (recordType === Heap.Types.BYTECODE_FUNCTION) {
+                return this.adoptBytecodeFunction(address);
+            }
+            if (recordType === Heap.Types.NATIVE_FUNCTION &&
+                    this.heapRecords.functionMetadata(address) === NativeIntrinsics.BOUND_FUNCTION) {
+                return this.adoptBoundFunction(address);
+            }
+            var guestType = recordType === Heap.Types.OBJECT ? "object" :
+                recordType === Heap.Types.ARRAY ? "array" :
+                recordType === Heap.Types.REGEXP ? "regexp" :
+                recordType === Heap.Types.BUFFER_VIEW ?
+                    (this.heapRecords.bufferViewKind(address) === 0 ? "buffer" :
+                     this.heapRecords.bufferViewKind(address) === 1 ?
+                        "arrayBuffer" : "typedArray") : null;
+            if (!guestType) {
+                throw new Error("guest heap reference has no runtime handle: " +
+                    "address=" + address + " type=" + recordType +
+                    (sourceCell === undefined ? "" :
+                     " cell=" + sourceCell));
+            }
+            handle = this.makeHeapHandle(address, guestType);
+            this.heapObjects.push(handle);
+            this.noteAllocation(1);
+        }
+        return handle;
+    };
+
+    /* A native-created bound function needs no host handle during native
+     * execution. Reconstruct a portable adapter only when an embedding read
+     * or semantic fallback asks for one. Its state remains on the guest heap;
+     * unlike bootstrap callbacks it is not pinned as a permanent native root. */
+    Runtime.prototype.boundFunctionCallState = function (address, args) {
+        var layout = NativeIntrinsics.BoundFunctionLayout;
+        var closure = this.heapRecords.functionClosure(address);
+        var target = this.readHeapValue(this.heapRecords.vectorCell(closure, layout.TARGET));
+        var receiver = this.readHeapValue(this.heapRecords.vectorCell(closure, layout.THIS));
+        var combined = [], index = layout.ARGUMENT_BASE;
+        while (index < this.heapRecords.vectorLength(closure)) {
+            combined.push(this.readHeapValue(this.heapRecords.vectorCell(closure, index++)));
+        }
+        index = 0;
+        while (index < args.length) combined.push(args[index++]);
+        return {target: target, receiver: receiver, args: combined};
+    };
+
+    Runtime.prototype.adoptBoundFunction = function (address) {
+        var callable = this.makeHeapHandle(address, "function"), runtime = this;
+        callable.name = "bound";
+        callable.callMode = "intrinsic";
+        callable.nativeIntrinsic = NativeIntrinsics.BOUND_FUNCTION;
+        callable.callback = function (ignoredReceiver, args) {
+            var state = runtime.boundFunctionCallState(address, args);
+            return runtime.invokePropertyFunction(state.target, state.receiver, state.args);
+        };
+        callable.constructCallback = function (args, context) {
+            var state = runtime.boundFunctionCallState(address, args);
+            if (state.target.guestType !== "bytecodeFunction") {
+                return runtime.construct(state.target, state.args, context);
+            }
+            var prototype = runtime.getProperty(state.target, "prototype");
+            var receiver = runtime.makeObjectWithPrototype(prototype && prototype.guestType ?
+                prototype : runtime.objectPrototype);
+            var result = runtime.invokePropertyFunction(state.target, receiver, state.args);
+            return result && result.guestType ? result : receiver;
+        };
+        this.functionMetadata["$" + address] = callable;
+        this.heapObjects.push(callable);
+        return callable;
+    };
+
+    /* Functions created by the native MAKE_FUNCTION opcode acquire a host
+     * handle only if a later semantic exit needs one.  Program, closure, and
+     * context identity are reconstructed from authoritative heap fields. */
+    Runtime.prototype.adoptBytecodeFunction = function (address) {
+        var key = "$" + address;
+        var existing = this.heapHandles[key];
+        if (existing) return existing;
+        this.linearHeap.requireRecord(address, Heap.Types.BYTECODE_FUNCTION);
+        var programAddress = this.heapRecords.functionMetadata(address);
+        var program = this.adoptHeapProgram(programAddress);
+        var callable = this.makeHeapHandle(address, "bytecodeFunction");
+        callable.program = program;
+        callable.name = program.name || "";
+        callable.source = program.source || null;
+        var contextAddress = this.heapRecords.functionHomeContext(address);
+        callable.homeContext = this.contextForHeapAddress(contextAddress);
+        var closureAddress = this.heapRecords.functionClosure(address);
+        if (closureAddress) this.adoptEnvironment(closureAddress, {});
+        this.functionMetadata[key] = callable;
+        this.heapObjects.push(callable);
+        this.noteAllocation(1);
+        return callable;
+    };
+
+    Runtime.prototype.heapOwnProperty = function (object, key, create) {
+        var keyAddress = this.internStringAddress(key);
+        return this.heapOwnPropertyEntry(object, keyAddress, create);
+    };
+
+    /* The owner is implicit in the handle; its entry IDs are valid only for
+     * this backing/epoch/GC generation. Native code can mutate the heap
+     * without changing host propertyVersion, so that counter is not a guard.
+     * No negative results are retained. */
+    Runtime.prototype.guardedOwnPropertyEntries = function (object) {
+        var records = this.heapRecords;
+        var owner = object.heapAddress;
+        var storage = records.ownPropertyStorage(owner);
+        var epoch = records.ownPropertyEpoch(owner);
+        var generation = records.ownPropertyGeneration(owner);
+        if (object.propertyStorage !== storage ||
+                object.propertyEpoch !== epoch ||
+                object.propertyGeneration !== generation) {
+            object.propertyEntries = {};
+            object.propertyStorage = storage;
+            object.propertyEpoch = epoch;
+            object.propertyGeneration = generation;
+        }
+        return object.propertyEntries;
+    };
+
+    Runtime.prototype.cacheOwnPropertyEntry = function (object, key, entry) {
+        this.guardedOwnPropertyEntries(object)["$" + key] = entry;
+        return entry;
+    };
+
+    /* Site caches retain logical references, never value-cell addresses.
+     * Identity protects against a recycled handle/address; the remaining
+     * guards protect against native edits, collection and backing movement. */
+    Runtime.prototype.captureOwnPropertyReference = function (object, key, entry) {
+        this.guardedOwnPropertyEntries(object);
+        return {owner: object, identity: object.heapIdentity, key: key,
+            storage: object.propertyStorage, epoch: object.propertyEpoch,
+            generation: object.propertyGeneration, entry: entry};
+    };
+
+    Runtime.prototype.ownPropertyReferenceIsCurrent = function (reference, object) {
+        return reference && reference.owner === object &&
+            reference.identity === object.heapIdentity &&
+            reference.storage === this.heapRecords.ownPropertyStorage(object.heapAddress) &&
+            reference.epoch === this.heapRecords.ownPropertyEpoch(object.heapAddress) &&
+            reference.generation === this.heapRecords.ownPropertyGeneration(object.heapAddress);
+    };
+
+    Runtime.prototype.heapOwnPropertyEntry = function (
+            object, keyAddress, create) {
+        var cacheKey = "$" + keyAddress;
+        var entries = this.guardedOwnPropertyEntries(object);
+        var property = entries[cacheKey] || 0;
+        if (!property) {
+            property = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
+            if (property) entries[cacheKey] = property;
+        }
+        if (!property && create) {
+            property = this.heapRecords.defineOwnPropertyEntry(
+                object.heapAddress, keyAddress,
+                HeapRecords.Attributes.DEFAULT);
+            this.cacheOwnPropertyEntry(object, keyAddress, property);
+            object.propertyVersion++;
+        }
+        return property;
+    };
+
+    Runtime.prototype.defineAccessorProperty = function (
+            object, keyAddress, getter, setter, attributes) {
+        this.assertOwned(object);
+        this.assertOwned(getter);
+        this.assertOwned(setter);
+        if (!object || !object.heapAddress) {
+            throw new TypeError("accessor target is not an object");
+        }
+        if (getter !== undefined &&
+            (!getter || (getter.guestType !== "function" &&
+                         getter.guestType !== "bytecodeFunction"))) {
+            throw new TypeError("property getter is not callable");
+        }
+        if (setter !== undefined &&
+            (!setter || (setter.guestType !== "function" &&
+                         setter.guestType !== "bytecodeFunction"))) {
+            throw new TypeError("property setter is not callable");
+        }
+        var property = this.heapRecords.defineOwnPropertyEntry(
+            object.heapAddress, keyAddress,
+            (attributes || 0) | HeapRecords.Attributes.ACCESSOR);
+        this.writeHeapValue(this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, property),
+                            getter);
+        this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, property,
+            setter === undefined ? 0 : setter.heapAddress);
+        this.cacheOwnPropertyEntry(object, keyAddress, property);
+        object.propertyVersion++;
+        object.valueVersion++;
+        return property;
+    };
+
+    Runtime.prototype.defineDataProperty = function (
+            object, key, value, attributes) {
+        this.assertOwned(object);
+        this.assertOwned(value);
+        if (!object || !object.heapAddress) {
+            throw new TypeError("data-property target is not an object");
+        }
+        var keyAddress = this.internStringAddress(this.propertyKey(key));
+        var property = this.heapRecords.defineOwnPropertyEntry(
+            object.heapAddress, keyAddress, attributes || 0);
+        this.writeHeapValue(this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, property), value);
+        this.cacheOwnPropertyEntry(object, keyAddress, property);
+        object.propertyVersion++;
+        object.valueVersion++;
+        return property;
+    };
+
+    Runtime.prototype.defineBuiltinProperty = function (object, key, value) {
+        return this.defineDataProperty(object, key, value,
+            HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
+    };
+
+    Runtime.prototype.populateDataDescriptor = function (descriptor, value, attributes) {
+        this.defineDataProperty(descriptor, "value", value, HeapRecords.Attributes.DEFAULT);
+        this.defineDataProperty(descriptor, "writable",
+            !!(attributes & HeapRecords.Attributes.WRITABLE), HeapRecords.Attributes.DEFAULT);
+        this.defineDataProperty(descriptor, "enumerable",
+            !!(attributes & HeapRecords.Attributes.ENUMERABLE), HeapRecords.Attributes.DEFAULT);
+        this.defineDataProperty(descriptor, "configurable",
+            !!(attributes & HeapRecords.Attributes.CONFIGURABLE), HeapRecords.Attributes.DEFAULT);
+        return descriptor;
+    };
+
+    Runtime.prototype.sameValue = function (left, right) {
+        if (left === right) return left !== 0 || 1 / left === 1 / right;
+        if (typeof left === "number" && typeof right === "number") {
+            return left !== left && right !== right;
+        }
+        return !!left && !!right && !!left.guestType && !!right.guestType &&
+            left.heapAddress === right.heapAddress;
+    };
+
+    /* ES5.1 ToPropertyDescriptor followed by ordinary [[DefineOwnProperty]].
+     * Resolve the target entry only after descriptor getters have run: those
+     * getters may mutate it, grow packed storage, or collect. Returned guest
+     * objects are explicitly rooted across subsequent getter calls. */
+    Runtime.prototype.definePropertyFromDescriptor = function (object, key, descriptor) {
+        var fields = ["enumerable", "configurable", "value", "writable", "get", "set"];
+        var desc = {}, roots = [], index;
+        try {
+            for (index = 0; index < fields.length; index++) {
+                var field = fields[index];
+                if (this.hasProperty(descriptor, field)) {
+                    var value = this.getProperty(descriptor, field);
+                    roots.push(this.retain(value));
+                    desc[field] = field === "enumerable" || field === "configurable" ||
+                        field === "writable" ? this.truthy(value) : value;
+                    if ((field === "get" || field === "set") && value !== undefined &&
+                        (!value || (value.guestType !== "function" &&
+                                    value.guestType !== "bytecodeFunction"))) {
+                        throw new TypeError("property " + field + " is not callable");
+                    }
+                }
+            }
+            var accessor = own(desc, "get") || own(desc, "set");
+            var data = own(desc, "value") || own(desc, "writable");
+            if (accessor && data) throw new TypeError("invalid mixed property descriptor");
+            if ((object.guestType === "buffer" || object.guestType === "typedArray") && isArrayIndex(key)) {
+                var viewIndex = Number(key);
+                var viewLength = this.heapRecords.bufferViewLength(object.heapAddress);
+                if (viewIndex >= viewLength || !PropertySemantics.indexedViewDescriptorAllowed(
+                        accessor ? 1 : 0, own(desc, "writable") ? 1 : 0, desc.writable ? 1 : 0,
+                        own(desc, "enumerable") ? 1 : 0, desc.enumerable ? 1 : 0,
+                        own(desc, "configurable") ? 1 : 0, desc.configurable ? 1 : 0)) {
+                    throw new TypeError("invalid indexed view descriptor");
+                }
+                if (own(desc, "value")) this.setProperty(object, key, this.toNumber(desc.value));
+                return object;
+            }
+            if (object.guestType === "array" && key === "length" &&
+                !this.isArgumentsObject(object)) {
+                return this.defineArrayLength(object, desc);
+            }
+            var indexedArray = object.guestType === "array" && isArrayIndex(key);
+            var elementIndex = indexedArray ? Number(key) : -1;
+            if (indexedArray) {
+                if (elementIndex >= this.arrayLength(object) && !this.isArgumentsObject(object) &&
+                    !this.isArrayLengthWritable(object)) throw new TypeError("array length is not writable");
+                if (!this.heapOwnProperty(object, key, false) && this.arrayHas(object, elementIndex)) {
+                    this.defineDataProperty(object, key, this.arrayGet(object, elementIndex), HeapRecords.Attributes.DEFAULT);
+                }
+            }
+            var keyAddress = this.internStringAddress(key);
+            var entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
+            var attributes = entry ? this.heapRecords.ownPropertyEntryAttributes(
+                object.heapAddress, entry) : 0;
+            var virtualStringKind = 0, virtualStringValue;
+            if (object.guestType === "object") {
+                var wrapped = this.primitiveWrapperValue(object);
+                if (wrapped.found && typeof wrapped.value === "string") {
+                    if (key === "length") {
+                        virtualStringKind = PropertySemantics.virtualKinds.STRING_LENGTH;
+                        virtualStringValue = wrapped.value.length;
+                    } else if (isArrayIndex(key) && Number(key) < wrapped.value.length) {
+                        virtualStringKind = PropertySemantics.virtualKinds.STRING_INDEX;
+                        virtualStringValue = wrapped.value.charAt(Number(key));
+                    }
+                }
+            }
+            if (virtualStringKind) attributes = PropertySemantics.virtualAttributes(virtualStringKind, 0);
+            var exists = !!entry || !!virtualStringKind;
+            var oldAccessor = !!(attributes & HeapRecords.Attributes.ACCESSOR);
+            var oldValue = entry ? this.readHeapValue(
+                this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, entry)) : undefined;
+            if (virtualStringKind) oldValue = virtualStringValue;
+            if (indexedArray && !oldAccessor) {
+                var currentMapping = this.argumentsMappedCell(object, elementIndex);
+                if (currentMapping) oldValue = this.readHeapValue(currentMapping);
+            }
+            var oldSetterAddress = entry ? this.heapRecords.ownPropertyEntrySetter(
+                object.heapAddress, entry) : 0;
+            var oldSetter = oldSetterAddress ? this.readHeapReference(oldSetterAddress) : undefined;
+            var fieldBits = PropertySemantics.fields;
+            var present = PropertySemantics.descriptorPresence(own(desc, "value") ? 1 : 0,
+                own(desc, "writable") ? 1 : 0, own(desc, "enumerable") ? 1 : 0,
+                own(desc, "configurable") ? 1 : 0, own(desc, "get") ? 1 : 0, own(desc, "set") ? 1 : 0);
+            var requested = PropertySemantics.descriptorRequestedAttributes(desc.writable ? 1 : 0,
+                desc.enumerable ? 1 : 0, desc.configurable ? 1 : 0);
+            var mismatches = 0;
+            if (exists && !(attributes & HeapRecords.Attributes.CONFIGURABLE)) {
+                if (oldAccessor) {
+                    if (own(desc, "get") && !this.sameValue(desc.get, oldValue)) mismatches |= fieldBits.GET;
+                    if (own(desc, "set") && !this.sameValue(desc.set, oldSetter)) mismatches |= fieldBits.SET;
+                } else if (!(attributes & HeapRecords.Attributes.WRITABLE) &&
+                        own(desc, "value") && !this.sameValue(desc.value, oldValue)) {
+                    mismatches |= fieldBits.VALUE;
+                }
+            }
+            attributes = PropertySemantics.decision(exists ? 1 : 0,
+                exists || this.heapRecords.objectIsExtensible(object.heapAddress) ? 1 : 0,
+                attributes, present, requested, mismatches);
+            if (attributes < 0) throw new TypeError(PropertySemantics.messages[attributes]);
+            if (virtualStringKind) return object;
+            if ((accessor || data) && oldAccessor !== accessor) {
+                oldValue = undefined;
+                oldSetter = undefined;
+            }
+            if (attributes & HeapRecords.Attributes.ACCESSOR) {
+                this.defineAccessorProperty(object, keyAddress,
+                    own(desc, "get") ? desc.get : oldValue,
+                    own(desc, "set") ? desc.set : oldSetter, attributes);
+            } else {
+                this.defineDataProperty(object, key,
+                    own(desc, "value") ? desc.value : oldValue, attributes);
+                entry = this.heapRecords.findOwnPropertyEntry(object.heapAddress, keyAddress);
+                this.heapRecords.setOwnPropertyEntrySetter(object.heapAddress, entry, 0);
+            }
+            if (indexedArray) {
+                var mapped = this.argumentsMappedCell(object, elementIndex);
+                if (mapped && own(desc, "value")) this.writeHeapValue(mapped, desc.value);
+                if (mapped && (accessor || desc.writable === false)) this.detachArgumentMapping(object, elementIndex);
+                if (elementIndex >= this.arrayLength(object)) {
+                    this.ensureArrayCapacity(object, elementIndex + 1);
+                    this.heapRecords.setArrayLength(object.heapAddress, elementIndex + 1);
+                }
+                this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(object.heapAddress, elementIndex));
+            }
+            return object;
+        } finally {
+            for (index = roots.length - 1; index >= 0; index--) this.release(roots[index]);
+        }
+    };
+
+    Runtime.prototype.defineLiteralAccessor = function (
+            object, key, callable, setterDefinition) {
+        var keyAddress = this.internStringAddress(this.propertyKey(key));
+        var property = this.heapRecords.findOwnPropertyEntry(
+            object.heapAddress, keyAddress);
+        var getter;
+        var setter;
+        if (property && (this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property) &
+                         HeapRecords.Attributes.ACCESSOR)) {
+            getter = this.readHeapValue(
+                this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, property));
+            var setterAddress = this.heapRecords.ownPropertyEntrySetter(object.heapAddress, property);
+            setter = setterAddress ? this.readHeapReference(setterAddress) :
+                                     undefined;
+        }
+        if (setterDefinition) setter = callable;
+        else getter = callable;
+        return this.defineAccessorProperty(object, keyAddress, getter, setter,
+            HeapRecords.Attributes.ENUMERABLE |
+            HeapRecords.Attributes.CONFIGURABLE);
+    };
+
+    Runtime.prototype.functionHomeContext = function (callable, fallback) {
+        var context = callable.homeContext;
+        if (context && !context.destroyed) return context;
+        var address = this.heapRecords.functionHomeContext(callable.heapAddress);
+        if (!address) return fallback || null;
+        context = this.contextForHeapAddress(address);
+        callable.homeContext = context;
+        return context;
+    };
+
+    Runtime.prototype.invokePropertyFunction = function (
+            callable, receiver, args) {
+        if (!callable) return undefined;
+        if (callable.guestType === "bytecodeFunction") {
+            if (!this.interpretGuest) {
+                throw new Error("guest accessor execution is unavailable");
+            }
+            return this.interpretGuest(callable, receiver, args,
+                                       this.functionHomeContext(callable));
+        }
+        return this.call(callable, receiver, args);
+    };
+
+    Runtime.prototype.readPropertyEntry = function (
+            owner, entry, receiver) {
+        var descriptor = this.heapRecords.resolvedOwnPropertyEntryDescriptor(owner.heapAddress, entry);
+        if (this.heapRecords.propertyDescriptorAttributes(descriptor) &
+            HeapRecords.Attributes.ACCESSOR) {
+            var getter = this.readHeapValue(
+                this.heapRecords.propertyDescriptorValueCell(descriptor));
+            return getter === undefined ? undefined :
+                this.invokePropertyFunction(getter, receiver, []);
+        }
+        return this.readHeapValue(this.heapRecords.propertyDescriptorValueCell(descriptor));
+    };
+
+    Runtime.prototype.writePropertyEntry = function (
+            owner, entry, receiver, value, strict) {
+        var descriptor = this.heapRecords.resolvedOwnPropertyEntryDescriptor(owner.heapAddress, entry);
+        var attributes = this.heapRecords.propertyDescriptorAttributes(descriptor);
+        var setterAddress = attributes & HeapRecords.Attributes.ACCESSOR ?
+            this.heapRecords.propertyDescriptorSetter(descriptor) : 0;
+        var action = PropertySemantics.writeAction(attributes, setterAddress);
+        if (action === PropertySemantics.writeActions.CALL_SETTER) {
+            var setter = this.readHeapReference(setterAddress);
+            this.invokePropertyFunction(setter, receiver, [value]);
+            return value;
+        }
+        if (action !== PropertySemantics.writeActions.WRITE_DATA) {
+            if (strict) throw new TypeError(action === PropertySemantics.writeActions.NO_SETTER ?
+                "property has no setter" : "property is not writable");
+            return value;
+        }
+        this.writeHeapValue(this.heapRecords.propertyDescriptorValueCell(descriptor), value);
+        return value;
+    };
+
+    Runtime.prototype.setNamedProperty = function (object, key, value, strict) {
+        if (object.guestType === "array" && key === "length" &&
+            !this.isArgumentsObject(object)) {
+            if (!this.isArrayLengthWritable(object)) {
+                if (strict) throw new TypeError("array length is not writable");
+                return value;
+            }
+            this.defineArrayLength(object, {value: value}, !!strict);
+            return value;
+        }
+        var property = this.heapOwnProperty(object, key, false);
+        if (property) {
+            this.writePropertyEntry(object, property, object, value, strict);
+            object.valueVersion++;
+            return value;
+        }
+        var inheritedOwner = this.findPrototypePropertyOwner(object, key);
+        if (inheritedOwner) {
+            var inherited = this.heapOwnProperty(inheritedOwner, key, false);
+            var inheritedAttributes =
+                this.heapRecords.ownPropertyEntryAttributes(inheritedOwner.heapAddress, inherited);
+            if ((inheritedAttributes & HeapRecords.Attributes.ACCESSOR) ||
+                !(inheritedAttributes & HeapRecords.Attributes.WRITABLE)) {
+                this.writePropertyEntry(inheritedOwner, inherited, object, value, strict);
+                object.valueVersion++;
+                return value;
+            }
+        }
+        if (!this.heapRecords.objectIsExtensible(object.heapAddress)) {
+            if (strict) throw new TypeError("object is not extensible");
+            return value;
+        }
+        property = this.heapOwnProperty(object, key, true);
+        this.writeHeapValue(this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, property), value);
+        object.valueVersion++;
+        return value;
+    };
+
+    Runtime.prototype.findPrototypePropertyOwner = function (object, key) {
+        if (!object || !object.heapAddress) return 0;
+        var prototypeAddress = this.heapRecords.objectPrototype(
+            object.heapAddress);
+        if (!prototypeAddress) return 0;
+        if (!this.namedPropertyOwnerResolver) {
+            var runtime = this;
+            this.namedPropertyOwnerResolver = PropertySemantics.createNamedPropertyOwnerResolver(
+                function (heapBase, state, owner, keyAddress) {
+                    return runtime.heapOwnPropertyEntry(runtime.readHeapReference(owner), keyAddress, false);
+                }, function (heapBase, owner) { return runtime.heapRecords.objectPrototype(owner); });
+        }
+        var owner = this.namedPropertyOwnerResolver(0, 0, prototypeAddress,
+            this.internStringAddress(this.propertyKey(key)));
+        return owner ? this.readHeapReference(owner) : 0;
+    };
+
+    Runtime.prototype.setPrototype = function (object, prototype) {
+        this.assertOwned(object);
+        this.assertOwned(prototype);
+        this.heapRecords.setObjectPrototype(object.heapAddress,
+            prototype ? prototype.heapAddress : 0);
+        object.propertyVersion++;
+        object.valueVersion++;
+    };
+
+    Runtime.prototype.arrayLength = function (array) {
+        return this.heapRecords.arrayLength(array.heapAddress);
+    };
+
+    Runtime.prototype.isArrayLengthWritable = function (array) {
+        if (!this.heapRecords.objectPropertyHead(array.heapAddress)) return true;
+        var entry = this.heapOwnProperty(array, "length", false);
+        return !entry || !!(this.heapRecords.ownPropertyEntryAttributes(
+            array.heapAddress, entry) & HeapRecords.Attributes.WRITABLE);
+    };
+
+    Runtime.prototype.publishArrayLength = function (array, length, writable) {
+        this.heapRecords.setArrayLength(array.heapAddress, length);
+        /* The element vector owns the value; a materialized named entry
+         * stores exceptional attributes. Descriptor reads always use the
+         * current vector length, not an obsolete mirror in that entry. */
+        if (!writable || this.heapOwnProperty(array, "length", false)) {
+            this.defineDataProperty(array, "length", length,
+                writable ? HeapRecords.Attributes.WRITABLE : 0);
+        }
+        array.arrayStructureVersion++;
+        array.valueVersion++;
+    };
+
+    Runtime.prototype.defineArrayLength = function (array, desc, throwOnReject) {
+        var oldLength = this.arrayLength(array);
+        var length = oldLength;
+        if (own(desc, "value")) {
+            /* ES5.1 explicitly performs both conversions, in this order.
+             * A valueOf callback can therefore run twice or throw. */
+            length = this.toNumber(desc.value) >>> 0;
+            if (length !== this.toNumber(desc.value)) throw new RangeError("invalid array length");
+        }
+        /* Conversion can mutate/freeze the array. Apply ordinary policy to
+         * current storage, never restore writability from a stale snapshot. */
+        var oldWritable = this.isArrayLengthWritable(array);
+        var present = PropertySemantics.descriptorPresence(own(desc, "value") ? 1 : 0,
+            own(desc, "writable") ? 1 : 0, own(desc, "enumerable") ? 1 : 0,
+            own(desc, "configurable") ? 1 : 0, own(desc, "get") ? 1 : 0, own(desc, "set") ? 1 : 0);
+        var requested = PropertySemantics.descriptorRequestedAttributes(desc.writable ? 1 : 0,
+            desc.enumerable ? 1 : 0, desc.configurable ? 1 : 0);
+        var attributes = PropertySemantics.decision(1, 1,
+            PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.ARRAY_LENGTH, oldWritable ? 1 : 0),
+            present, requested, length !== this.arrayLength(array) ? PropertySemantics.fields.VALUE : 0);
+        if (attributes < 0) throw new TypeError(PropertySemantics.messages[attributes]);
+        var writable = !!(attributes & HeapRecords.Attributes.WRITABLE);
+        if (length > this.arrayLength(array)) {
+            var current = this.arrayLength(array);
+            this.ensureArrayCapacity(array, length);
+            while (current < length) {
+                this.valueCells.writeAbsentAt(this.heapRecords.arrayElementCell(array.heapAddress, current++));
+            }
+        } else {
+            var index = this.arrayLength(array);
+            while (index > length) {
+                index--;
+                if (!this.deleteProperty(array, String(index), false)) {
+                    this.publishArrayLength(array, index + 1, writable);
+                    if (throwOnReject === false) return false;
+                    throw new TypeError("cannot truncate a non-configurable array element");
+                }
+            }
+        }
+        this.publishArrayLength(array, length, writable);
+        return array;
+    };
+
+    Runtime.prototype.isArgumentsObject = function (object) {
+        return !!object && object.guestType === "array" &&
+            this.heapRecords.arrayReserved(object.heapAddress) !== 0;
+    };
+
+    Runtime.prototype.argumentsMappedCell = function (array, index) {
+        var environment = this.heapRecords.arrayReserved(array.heapAddress);
+        if (!environment || environment === HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT ||
+            !this.arrayHas(array, index)) return 0;
+        var program = this.heapRecords.environmentProgram(environment);
+        if (!program) return 0;
+        var parameterSlots = this.heapRecords.programParameterSlots(program);
+        var parameterCount = this.heapRecords.integerVectorLength(parameterSlots);
+        if (index < 0 || index >= parameterCount) return 0;
+        if (this.argumentMappingDetached(environment, index)) return 0;
+        var slot = this.heapRecords.integerVectorValue(parameterSlots, index);
+        var later = index + 1;
+        while (later < parameterCount) {
+            if (this.heapRecords.integerVectorValue(parameterSlots, later) === slot) {
+                return 0;
+            }
+            later++;
+        }
+        return this.heapRecords.environmentCell(environment, slot);
+    };
+
+    Runtime.prototype.argumentMappingDetached = function (environment, index) {
+        if (!(this.linearHeap.flags(environment) & HeapRecords.EnvironmentFlags.DETACHED_ARGUMENTS)) return false;
+        var map = this.heapRecords.environmentScopeData(environment);
+        var bits = HeapRecords.ArgumentsLayout.MAPPING_WORD_BITS;
+        var word = Math.floor(index / bits);
+        return word < this.heapRecords.integerVectorLength(map) &&
+            (this.heapRecords.integerVectorValue(map, word) & (1 << (index % bits))) !== 0;
+    };
+
+    Runtime.prototype.detachArgumentMapping = function (array, index) {
+        var environment = this.heapRecords.arrayReserved(array.heapAddress);
+        if (!environment || environment === HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT || index < 0) return;
+        var program = this.heapRecords.environmentProgram(environment);
+        if (!program) return;
+        var count = this.heapRecords.integerVectorLength(this.heapRecords.programParameterSlots(program));
+        if (index >= count) return;
+        var flags = this.linearHeap.flags(environment);
+        var map = this.heapRecords.environmentScopeData(environment);
+        var bits = HeapRecords.ArgumentsLayout.MAPPING_WORD_BITS;
+        if (!(flags & HeapRecords.EnvironmentFlags.DETACHED_ARGUMENTS)) {
+            var arrayRoot = this.retain(array);
+            try {
+                var words = Math.ceil(count / bits);
+                map = this.heapRecords.allocateIntegerVector(words);
+                for (var word = 0; word < words; word++) this.heapRecords.setIntegerVectorValue(map, word, 0);
+                this.heapRecords.setEnvironmentScopeData(environment, map);
+                this.linearHeap.setFlags(environment, flags | HeapRecords.EnvironmentFlags.DETACHED_ARGUMENTS);
+            } finally {
+                this.release(arrayRoot);
+            }
+        }
+        var indexWord = Math.floor(index / bits);
+        this.heapRecords.setIntegerVectorValue(map, indexWord,
+            this.heapRecords.integerVectorValue(map, indexWord) | (1 << (index % bits)));
+    };
+
+    Runtime.prototype.arrayHas = function (array, index) {
+        if (this.heapRecords.objectPropertyHead(array.heapAddress) && this.heapOwnProperty(array, String(index), false)) return true;
+        if (index < 0 || index >= this.arrayLength(array)) return false;
+        return this.valueCells.tagAt(
+            this.heapRecords.arrayElementCell(array.heapAddress, index)) !== 0;
+    };
+
+    Runtime.prototype.arrayGet = function (array, index, receiver) {
+        if (index < 0 || index !== Math.floor(index)) return undefined;
+        var entry = this.heapRecords.objectPropertyHead(array.heapAddress) ?
+            this.heapOwnProperty(array, String(index), false) : 0;
+        if (entry) {
+            var attributes = this.heapRecords.ownPropertyEntryAttributes(array.heapAddress, entry);
+            var mapped = this.argumentsMappedCell(array, index);
+            if (mapped && !(attributes & HeapRecords.Attributes.ACCESSOR)) return this.readHeapValue(mapped);
+            return this.readPropertyEntry(array, entry, receiver === undefined ? array : receiver);
+        }
+        var vector = this.heapRecords.arrayElements(array.heapAddress);
+        if (index >= this.heapRecords.vectorLength(vector) || this.valueCells.tagAt(
+                this.heapRecords.vectorCellWithinLength(vector, index)) === 0) {
+            var prototype = this.heapRecords.objectPrototype(array.heapAddress);
+            return prototype ? this.getProperty(this.readHeapReference(prototype), String(index),
+                receiver === undefined ? array : receiver) : undefined;
+        }
+        var cell = this.heapRecords.vectorCellWithinLength(vector, index);
+        if (this.valueCells.tagAt(cell) === 0) return undefined;
+        var mappedCell = this.argumentsMappedCell(array, index);
+        if (mappedCell) return this.readHeapValue(mappedCell);
+        return this.readHeapValue(cell);
+    };
+
+    Runtime.prototype.ensureArrayCapacity = function (array, required) {
+        var oldVector = this.heapRecords.arrayElements(array.heapAddress);
+        var oldCapacity = this.heapRecords.vectorCapacity(oldVector);
+        if (required <= oldCapacity) return oldVector;
+        var capacity = HeapRecords.grownArrayCapacity(oldCapacity, required);
+        if (!capacity) throw new RangeError("array backing exceeds guest heap limits");
+        var newVector = this.heapRecords.allocateValueVector(capacity);
+        var length = this.heapRecords.vectorLength(oldVector);
+        var index = 0;
+        while (index < length) {
+            var oldCell = this.heapRecords.vectorCell(oldVector, index);
+            var newCell = this.heapRecords.vectorCell(newVector, index);
+            this.linearHeap.memory.writeU32(newCell,
+                this.linearHeap.memory.readU32(oldCell));
+            this.linearHeap.memory.writeU32(newCell + 4,
+                this.linearHeap.memory.readU32(oldCell + 4));
+            this.linearHeap.memory.writeU32(newCell + 8,
+                this.linearHeap.memory.readU32(oldCell + 8));
+            this.linearHeap.memory.writeU32(newCell + 12,
+                this.linearHeap.memory.readU32(oldCell + 12));
+            index++;
+        }
+        this.heapRecords.setVectorLength(newVector, length);
+        this.heapRecords.setArrayElements(array.heapAddress, newVector);
+        array.arrayStructureVersion++;
+        this.linearHeap.freeRecord(oldVector, "array growth");
+        return newVector;
+    };
+
+    Runtime.prototype.arraySet = function (array, index, value, strict) {
+        this.assertOwned(value);
+        index = Number(index);
+        if (index < 0 || index >= 4294967295 || index !== Math.floor(index)) {
+            throw new RangeError("invalid array index");
+        }
+        var property = this.heapRecords.objectPropertyHead(array.heapAddress) ? this.heapOwnProperty(array, String(index), false) : 0;
+        if (property) {
+            this.writePropertyEntry(array, property, array, value, strict);
+            var propertyAttributes = this.heapRecords.ownPropertyEntryAttributes(array.heapAddress, property);
+            var mappedProperty = this.argumentsMappedCell(array, index);
+            if (mappedProperty && (propertyAttributes & HeapRecords.Attributes.WRITABLE)) this.writeHeapValue(mappedProperty, value);
+            return value;
+        }
+        if (!this.arrayHas(array, index)) {
+            var inheritedOwner = this.findPrototypePropertyOwner(array, String(index));
+            if (inheritedOwner) {
+                var inherited = this.heapOwnProperty(inheritedOwner, String(index), false);
+                var inheritedAttributes = this.heapRecords.ownPropertyEntryAttributes(inheritedOwner.heapAddress, inherited);
+                if ((inheritedAttributes & HeapRecords.Attributes.ACCESSOR) || !(inheritedAttributes & HeapRecords.Attributes.WRITABLE)) {
+                    return this.writePropertyEntry(inheritedOwner, inherited, array, value, strict);
+                }
+            }
+            if (!this.heapRecords.objectIsExtensible(array.heapAddress)) {
+                if (strict) throw new TypeError("array is not extensible");
+                return value;
+            }
+        }
+        if (index >= this.arrayLength(array) && !this.isArgumentsObject(array) && !this.isArrayLengthWritable(array)) {
+            if (strict) throw new TypeError("array length is not writable");
+            return value;
+        }
+        var mappingEnvironment = this.heapRecords.arrayReserved(array.heapAddress);
+        if (mappingEnvironment && mappingEnvironment !== HeapRecords.ArgumentsLayout.UNMAPPED_ENVIRONMENT &&
+                !this.arrayHas(array, index)) this.detachArgumentMapping(array, index);
+        var mappedCell = this.argumentsMappedCell(array, index);
+        this.ensureArrayCapacity(array, index + 1);
+        this.writeHeapValue(this.heapRecords.arrayElementCell(array.heapAddress, index),
+                            value);
+        if (mappedCell) this.writeHeapValue(mappedCell, value);
+        if (index >= this.arrayLength(array)) {
+            this.heapRecords.setArrayLength(array.heapAddress, index + 1);
+            array.arrayStructureVersion++;
+        }
+        return value;
+    };
+
+    Runtime.prototype.arrayToHost = function (array) {
+        var result = [];
+        var length = this.arrayLength(array);
+        var index = 0;
+        while (index < length) {
+            if (this.arrayHas(array, index)) result[index] = this.arrayGet(array, index);
+            index++;
+        }
+        return result;
+    };
+
+    Runtime.prototype.joinArrayValues = function (array, separator) {
+        /* Array.join is unusually hot in source-generating guest programs.
+         * Resolve the backing vector once, then use the ordinary named
+         * value-cell accessors.  Re-entering arrayLength/arrayGet for every
+         * element repeats record validation and native-memory reads. */
+        var vector = this.heapRecords.arrayElements(array.heapAddress);
+        var length = this.heapRecords.vectorLength(vector);
+        var parts = new Array(length);
+        var index = 0;
+        while (index < length) {
+            var cell = this.heapRecords.vectorCellWithinLength(vector, index);
+            if (this.valueCells.tagAt(cell) === 0) {
+                parts[index] = "";
+            } else {
+                var value = this.readHeapValue(cell);
+                parts[index] = value === undefined || value === null ?
+                               "" : this.toString(value);
+            }
+            index++;
+        }
+        return parts.join(separator);
+    };
+
+    Runtime.prototype.replaceArray = function (array, values) {
+        var oldVector = this.heapRecords.arrayElements(array.heapAddress);
+        var capacity = values.length < 4 ? 4 : values.length;
+        var vector = this.heapRecords.allocateValueVector(capacity);
+        this.heapRecords.setArrayElements(array.heapAddress, vector);
+        array.arrayStructureVersion++;
+        var index = 0;
+        while (index < values.length) {
+            if (index in values) this.writeHeapValue(
+                this.heapRecords.vectorCell(vector, index), values[index]);
+            index++;
+        }
+        this.heapRecords.setVectorLength(vector, values.length);
+        this.linearHeap.freeRecord(oldVector, "array replacement");
+        return array;
+    };
+
+    /* A live function/frame can retain a context after its embedding handle
+     * is destroyed. Reconstruct metadata from that heap context; substituting
+     * the caller's context changes globals and publishes dangling frame roots.
+     * Borrowed handles are not registered as additional collector roots. */
+    Runtime.prototype.contextForHeapAddress = function (address) {
+        if (!address) return null;
+        var index = 0;
+        while (index < this.contexts.length) {
+            if (this.contexts[index].heapAddress === address) return this.contexts[index];
+            index++;
+        }
+        this.linearHeap.requireRecord(address, Heap.Types.CONTEXT);
+        if (!this.adoptContext) {
+            throw new Error("embedding cannot recover retained context " + address);
+        }
+        return this.adoptContext(address);
+    };
+
+    Runtime.prototype.registerContext = function (context) {
+        if (this.nativeInterpreter) {
+            var records = this.heapRecords;
+            records.setContextNext(context.heapAddress,
+                records.engineGCContextHead(
+                    this.nativeInterpreter.stateAddress));
+            records.setEngineGCContextHead(
+                this.nativeInterpreter.stateAddress, context.heapAddress);
+        }
+        this.contexts.push(context);
+    };
+
+    Runtime.prototype.prepareContextAllocation = function () {
+        /* A native execution may reserve a free heap region between calls.
+         * Context construction is host-side heap work, so publish the unused
+         * tail before allocating its global and property records. */
+        if (this.nativeInterpreter) {
+            this.nativeInterpreter.releaseAllocatorOwnership();
+        }
+        /* Plan the whole construction before publishing a partial context.
+         * Record allocation cannot collect midway through cloning globals.
+         * The common case is a constant-time tail check; only pressure probes
+         * the reusable-region index and may collect at this safe boundary. */
+        var bytes = HeapRecords.contextAllocationBytes(this.contextGlobalPropertyCount());
+        var heap = this.linearHeap;
+        if (heap.allocationLimit - heap.bump < bytes && heap.largestFreeBlockSize() < bytes) {
+            this.gcPending = true;
+            this.gcSafePoint();
+        }
+    };
+
+    Runtime.prototype.registerProgram = function (program, enclosingSource,
+                                                   enclosingSourceAddress, compactStorage) {
+        if (program && program.heapAddress) {
+            this.linearHeap.requireRecord(program.heapAddress,
+                                          Heap.Types.PROGRAM);
+            return program.heapAddress;
+        }
+        var index = 0;
+        this.ensureLinearHeap();
+        program.heapBytecodeAddress =
+            this.heapRecords.allocateBytecode(program.code || [], !!compactStorage);
+        program.heapConstantsAddress = this.heapRecords.allocateValueVector(
+            program.constants ? program.constants.length : 0);
+        program.heapConstantRegistersAddress =
+            this.internProgramIntegerVector(program.constantRegisters || [],
+                program.constants ? program.constants.length : 0);
+        program.heapBindingRegistersAddress = program.bindingRegisters ?
+            this.internProgramIntegerVector(program.bindingRegisters,
+                program.bindingRegisters.length) : 0;
+        program.heapParameterSlotsAddress = this.internProgramIntegerVector(
+            program.parameterSlots || [],
+            program.parameterSlots ? program.parameterSlots.length : 0);
+        var metadataIndex = this.freeProgramMetadataIndices.length ?
+            this.freeProgramMetadataIndices.pop() : this.programObjects.length;
+        var metadataId = metadataIndex + 1;
+        var sourceAddress = program.source ? this.internProgramSource(
+            program.source, enclosingSource, enclosingSourceAddress) : 0;
+        var address = this.heapRecords.allocateProgram(
+            program.heapBytecodeAddress, program.heapConstantsAddress, {
+            constantRegisters: program.heapConstantRegistersAddress,
+            bindingRegisters: program.heapBindingRegistersAddress,
+            parameterSlots: program.heapParameterSlotsAddress,
+            registerCount: program.registerCount || 0,
+            argumentsSlot: program.argumentsSlot === undefined ?
+                           -1 : program.argumentsSlot,
+            thisSlot: program.thisSlot === undefined ? -1 : program.thisSlot,
+            functionNameSlot: program.functionNameSlot === undefined ?
+                              -1 : program.functionNameSlot,
+            metadata: metadataId,
+            flags: (program.usesArguments ? 1 : 0) |
+                   (program.strict ? 2 : 0) |
+                   (program.evalCode ? 4 : 0),
+            bindingCount: program.bindings ? program.bindings.length : 0,
+            source: sourceAddress,
+            debugReference: program.heapDebugReference || 0
+        });
+        if (program.bindings && this.heapRecords.programBindingCount(address) !==
+                program.bindings.length) {
+            throw new Error("guest program binding layout was not preserved");
+        }
+        this.programObjects[metadataIndex] = program;
+        this.programAddresses[metadataIndex] = address;
+        program.heapAddress = address;
+        this.programMetadata["$" + address] = program;
+        if (!program.bindingRegisters && program.bindings && program.bindings.length) {
+            var bindingNames = this.heapRecords.allocateValueVector(program.bindings.length);
+            this.heapRecords.setProgramBindingNames(address, bindingNames);
+            var bindingIndex = 0;
+            while (bindingIndex < program.bindings.length) {
+                var bindingName = program.bindings[bindingIndex];
+                if (typeof bindingName === "string") {
+                    this.valueCells.writeReferenceAt(this.heapRecords.vectorCell(
+                        bindingNames, bindingIndex), this.internStringAddress(bindingName));
+                }
+                bindingIndex++;
+            }
+            /* Capacity is not live length. Without this publication the
+             * collector traces none of the binding-name strings, and native
+             * name lookup rejects the table as an incomplete layout. */
+            this.heapRecords.setVectorLength(bindingNames, program.bindings.length);
+        }
+        var argumentConstants = this.programArgumentConstants(program);
+        index = 0;
+        while (program.constants && index < program.constants.length) {
+            var value = program.constants[index];
+            var cell = this.heapRecords.vectorCell(
+                program.heapConstantsAddress, index);
+            if (value && typeof value === "object" && value.code && value.constants) {
+                this.valueCells.writeReferenceAt(cell, this.registerProgram(
+                    value, program.source || enclosingSource,
+                    sourceAddress || enclosingSourceAddress, this.compactProgramStorage));
+            } else if (value && typeof value === "object" &&
+                       typeof value.length === "number") {
+                if (argumentConstants["$" + index]) {
+                    this.valueCells.writeReferenceAt(cell,
+                        this.internProgramArgumentList(value));
+                } else this.writeHeapValue(cell, this.arrayFrom(value));
+            } else this.writeConstantHeapValue(cell, value);
+            index++;
+        }
+        this.heapRecords.setVectorLength(program.heapConstantsAddress,
+            program.constants ? program.constants.length : 0);
+        /* Entry programs are normally executed immediately: do not build a
+         * compact pool only to expand it on entry. Retained nested functions
+         * use canonical compact storage and lazily prepare execution views. */
+        if (compactStorage) this.heapRecords.narrowProgramConstants(program.heapConstantsAddress);
+        return address;
+    };
+
+    Runtime.prototype.programMetadataInternPool = function () {
+        var generation = this.nativeInterpreter ?
+            this.heapRecords.engineGCGeneration(this.nativeInterpreter.stateAddress) :
+            this.gcGeneration;
+        if (generation !== this.programMetadataInternGeneration) {
+            this.programMetadataInterns = {};
+            this.programMetadataInternGeneration = generation;
+        }
+        return this.programMetadataInterns;
+    };
+
+    /* A constant used as an ordinary value must stay mutable and independent,
+     * even if the same hand-built program also uses it as a CALL descriptor.
+     * Standard compiler products only put register lists in these slots, but
+     * registration also accepts embedder-built bytecode. */
+    Runtime.prototype.programArgumentConstants = function (program) {
+        var argumentsOnly = {}, ordinaryValues = {}, code = program.code || [];
+        var pc = 0;
+        while (pc < code.length) {
+            var opcode = code[pc], width = Bytecode.WIDTHS[opcode];
+            if (!width) return {};
+            if (opcode === Bytecode.CALL) argumentsOnly["$" + code[pc + 4]] = true;
+            else if (opcode === Bytecode.CONSTRUCT) argumentsOnly["$" + code[pc + 3]] = true;
+            else if (opcode === Bytecode.CONST) ordinaryValues["$" + code[pc + 2]] = true;
+            pc += width;
+        }
+        for (var key in ordinaryValues) {
+            if (own(ordinaryValues, key)) delete argumentsOnly[key];
+        }
+        return argumentsOnly;
+    };
+
+    Runtime.prototype.internProgramIntegerVector = function (values, length) {
+        var normalized = [], index = 0;
+        while (index < length) {
+            normalized[index] = values[index] === undefined ? -1 : values[index];
+            index++;
+        }
+        var pool = this.programMetadataInternPool();
+        var key = "$map:" + normalized.join(",");
+        var address = pool[key];
+        if (address) return address;
+        address = this.heapRecords.allocateIntegerVectorFromValues(normalized);
+        this.linearHeap.setFlags(address,
+            HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG);
+        pool[key] = address;
+        return address;
+    };
+
+    Runtime.prototype.internProgramArgumentList = function (values) {
+        var index = 0;
+        while (index < values.length) {
+            var value = values[index++];
+            if (typeof value !== "number" || value !== (value | 0)) {
+                return this.arrayFrom(values).heapAddress;
+            }
+        }
+        var pool = this.programMetadataInternPool();
+        var key = "$arguments:" + Array.prototype.join.call(values, ",");
+        var address = pool[key];
+        if (address) return address;
+        if (this.compactProgramStorage) {
+            address = this.heapRecords.allocateIntegerVector(values.length);
+        } else {
+            address = this.heapRecords.allocateArray(
+                this.arrayPrototype ? this.arrayPrototype.heapAddress : 0, values.length);
+        }
+        index = 0;
+        while (index < values.length) {
+            if (this.compactProgramStorage) {
+                this.heapRecords.setIntegerVectorValue(address, index, values[index]);
+            } else this.valueCells.writePrimitiveAt(
+                this.heapRecords.arrayElementCell(address, index), values[index]);
+            index++;
+        }
+        if (!this.compactProgramStorage) this.heapRecords.setArrayLength(address, values.length);
+        pool[key] = address;
+        return address;
+    };
+
+    Runtime.prototype.writableProgramVector = function (program, kind) {
+        var records = this.heapRecords;
+        var source = kind === 0 ? records.programConstantRegisters(program.heapAddress) :
+            kind === 1 ? records.programBindingRegisters(program.heapAddress) :
+                         records.programParameterSlots(program.heapAddress);
+        if (!(this.linearHeap.flags(source) &
+                HeapRecords.KernelConstants.VECTOR_SHARED_METADATA_FLAG)) return source;
+        var length = records.integerVectorLength(source);
+        var target = records.allocateIntegerVector(length), index = 0;
+        while (index < length) {
+            records.setIntegerVectorValue(target, index,
+                records.integerVectorValue(source, index));
+            index++;
+        }
+        if (kind === 0) {
+            records.setProgramConstantRegisters(program.heapAddress, target);
+            program.heapConstantRegistersAddress = target;
+        } else if (kind === 1) {
+            records.setProgramBindingRegisters(program.heapAddress, target);
+            program.heapBindingRegistersAddress = target;
+        } else {
+            records.setProgramParameterSlots(program.heapAddress, target);
+            program.heapParameterSlotsAddress = target;
+        }
+        return target;
+    };
+
+    Runtime.prototype.writableProgramBytecode = function (program) {
+        var records = this.heapRecords, address = program.heapBytecodeAddress;
+        if (!(this.linearHeap.flags(address) &
+                HeapRecords.KernelConstants.BYTECODE_COMPACT_FLAG)) return address;
+        var writable = !this.nativeOperandPredecode ? records.bytecodeExecutionCache(address) : 0;
+        if (!writable) writable = records.allocateBytecode(program.code);
+        records.setProgramBytecode(program.heapAddress, writable);
+        program.heapBytecodeAddress = writable;
+        return writable;
+    };
+
+    Runtime.prototype.retainProgram = function (program) {
+        var address = this.registerProgram(program);
+        var alreadyRetained = this.retainedProgramAddresses["$" + address];
+        this.retainedProgramAddresses["$" + address] = address;
+        if (!alreadyRetained && this.nativeInterpreter) {
+            this.nativeInterpreter.registerPersistentRoot(address);
+        }
+        return program;
+    };
+
+    Runtime.prototype.releaseProgram = function (program) {
+        if (program && program.heapAddress) {
+            if (this.retainedProgramAddresses["$" + program.heapAddress] &&
+                    this.nativeInterpreter) {
+                this.nativeInterpreter.unregisterPersistentRoot(
+                    program.heapAddress);
+            }
+            delete this.retainedProgramAddresses["$" + program.heapAddress];
+        }
+    };
+
+    Runtime.prototype.createHeapStateSnapshot = function (rootAddress) {
+        this.ensureLinearHeap();
+        this.linearHeap.requireRecord(rootAddress);
+        var visited = {};
+        var queue = [rootAddress];
+        var addresses = [];
+        var immutableRoots = [];
+        var queueIndex = 0;
+        while (queueIndex < queue.length) {
+            var address = queue[queueIndex++];
+            var identity = "$" + address;
+            if (visited[identity]) continue;
+            visited[identity] = true;
+            var type = this.linearHeap.recordType(address);
+            /* Source, bytecode and atoms are immutable. Interpreter frames
+             * and engine/platform state belong to the execution containing
+             * the embedder call, not to the context being snapshotted. */
+            if (type === Heap.Types.STRING || type === Heap.Types.PROGRAM ||
+                    type === Heap.Types.BYTECODE) {
+                /* Saved cells may stop referring to these immutable records
+                 * while the context runs (for example after a deletion).
+                 * Retain their identities even though no byte copy is needed. */
+                immutableRoots.push(address);
+                continue;
+            }
+            if (type === Heap.Types.FRAME ||
+                type === Heap.Types.HANDLER ||
+                type === Heap.Types.ENGINE_STATE ||
+                type === Heap.Types.PLATFORM_SERVICES) continue;
+            addresses.push(address);
+            this.heapRecords.visitReferences(address, function (target) {
+                if (!visited["$" + target]) queue.push(target);
+            });
+        }
+        addresses.sort(function (left, right) { return left - right; });
+        /* Saved contexts retain superseded private backings too. Their
+         * addresses must remain record boundaries until the snapshot dies;
+         * otherwise eager retirement can reuse/coalesce the saved regions. */
+        var pinnedPropertyRecords = [];
+        var pinIndex = 0;
+        while (pinIndex < addresses.length) {
+            var pinnedAddress = addresses[pinIndex++];
+            var pinnedType = this.linearHeap.recordType(pinnedAddress);
+            if (pinnedType === Heap.Types.PROPERTY_STORAGE ||
+                    pinnedType === Heap.Types.PROPERTY_INDEX) {
+                this.linearHeap.setFlags(pinnedAddress,
+                    this.linearHeap.flags(pinnedAddress) |
+                    HeapRecords.PropertyRecordSnapshotPin);
+                pinnedPropertyRecords.push(pinnedAddress);
+            }
+        }
+        var regions = [];
+        var addressIndex = 0;
+        while (addressIndex < addresses.length) {
+            var start = addresses[addressIndex++];
+            var length = this.linearHeap.recordSize(start);
+            while (addressIndex < addresses.length &&
+                   addresses[addressIndex] === start + length) {
+                length += this.linearHeap.recordSize(
+                    addresses[addressIndex++]);
+            }
+            regions.push({address: start, length: length});
+        }
+        var handles = [];
+        var index = 0;
+        while (index < this.heapObjects.length) {
+            var handle = this.heapObjects[index++];
+            if (handle && visited["$" + handle.heapAddress]) {
+                handles.push({handle: handle,
+                    propertyVersion: handle.propertyVersion,
+                    valueVersion: handle.valueVersion,
+                    arrayStructureVersion: handle.arrayStructureVersion});
+            }
+        }
+        var externalBackings = this.heapRecords.externalBufferBackings(addresses);
+        var regionBytes = 0;
+        for (index = 0; index < regions.length; index++) regionBytes += regions[index].length;
+        var snapshotBytes = this.heapRecords.layoutExternalBufferSnapshot(externalBackings, regionBytes);
+        var snapshotMemory = this.linearHeap.memory.createRegionSnapshot(regions, snapshotBytes - regionBytes);
+        try {
+            this.heapRecords.copyExternalBufferDataToSnapshot(snapshotMemory,
+                externalBackings);
+        } catch (error) {
+            this.linearHeap.memory.destroySnapshot(snapshotMemory);
+            throw error;
+        }
+        var snapshot = {
+            memory: snapshotMemory,
+            externalBackings: externalBackings,
+            regions: regions, addresses: addresses,
+            roots: addresses.concat(immutableRoots),
+            handles: handles, pinnedPropertyRecords: pinnedPropertyRecords,
+            destroyed: false
+        };
+        this.heapStateSnapshots.push(snapshot);
+        return snapshot;
+    };
+
+    Runtime.prototype.restoreHeapStateSnapshot = function (snapshot) {
+        if (!snapshot || snapshot.destroyed) {
+            throw new Error("invalid guest heap snapshot");
+        }
+        if (this.activeExecutions.length) {
+            throw new Error("cannot restore a running guest heap");
+        }
+        this.linearHeap.memory.restoreRegionSnapshot(
+            snapshot.memory, snapshot.regions);
+        this.heapRecords.restoreExternalBufferSnapshotContents(snapshot.externalBackings, snapshot.memory);
+        /* Storage epochs and GC marks have rolled back. They cannot guard
+         * weak views captured on the abandoned execution timeline. This also
+         * covers handles first adopted after the snapshot was created. */
+        if (this.nativeInterpreter) this.heapRecords.clearEnginePropertyCache(
+            this.nativeInterpreter.stateAddress);
+        if (this.threadedCompiler) this.threadedCompiler.invalidateHeapViews();
+        var addressIndex = 0;
+        while (addressIndex < snapshot.addresses.length) {
+            var handle = this.heapHandles["$" + snapshot.addresses[addressIndex++]];
+            if (handle) handle.propertyEntries = {};
+        }
+        var index = 0;
+        while (index < snapshot.handles.length) {
+            var state = snapshot.handles[index++];
+            state.handle.propertyVersion = state.propertyVersion;
+            state.handle.valueVersion = state.valueVersion;
+            state.handle.arrayStructureVersion = state.arrayStructureVersion;
+        }
+    };
+
+    Runtime.prototype.destroyHeapStateSnapshot = function (snapshot) {
+        if (!snapshot || snapshot.destroyed) return;
+        this.linearHeap.memory.destroySnapshot(snapshot.memory);
+        snapshot.memory = null;
+        snapshot.externalBackings = null;
+        snapshot.destroyed = true;
+        var retainedPins = {};
+        var snapshotIndex = 0;
+        while (snapshotIndex < this.heapStateSnapshots.length) {
+            var retained = this.heapStateSnapshots[snapshotIndex++];
+            if (retained.destroyed) continue;
+            var retainedIndex = 0;
+            while (retainedIndex < retained.pinnedPropertyRecords.length) {
+                retainedPins["$" + retained.pinnedPropertyRecords[retainedIndex++]] = true;
+            }
+        }
+        var pinIndex = 0;
+        while (pinIndex < snapshot.pinnedPropertyRecords.length) {
+            var address = snapshot.pinnedPropertyRecords[pinIndex++];
+            if (!retainedPins["$" + address]) {
+                this.linearHeap.setFlags(address, this.linearHeap.flags(address) &
+                    ~HeapRecords.PropertyRecordSnapshotPin);
+            }
+        }
+        snapshot.pinnedPropertyRecords = [];
+        snapshot.addresses = [];
+        snapshot.roots = [];
+        snapshot.regions = [];
+        snapshot.handles = [];
+    };
+
+    Runtime.prototype.programAddress = function (program) {
+        if (program && program.heapAddress) {
+            this.linearHeap.requireRecord(program.heapAddress,
+                                          Heap.Types.PROGRAM);
+            return program.heapAddress;
+        }
+        return this.registerProgram(program);
+    };
+
+    /* Materialize only the semantic adapter needed when heap-native bytecode
+     * reaches the transitional JavaScript interpreter. The Program record and
+     * its vectors remain authoritative; this object does not allocate or
+     * register a second guest program. */
+    Runtime.prototype.adoptHeapProgram = function (address) {
+        var key = "$" + address;
+        var existing = this.programMetadata[key];
+        if (existing) {
+            var currentBytecode = this.heapRecords.programBytecode(address);
+            if (currentBytecode !== existing.heapBytecodeAddress) {
+                existing.heapBytecodeAddress = currentBytecode;
+                var currentLength = this.heapRecords.bytecodeLength(currentBytecode);
+                existing.code.length = currentLength;
+                for (var wordIndex = 0; wordIndex < currentLength; wordIndex++) {
+                    existing.code[wordIndex] = this.heapRecords.bytecodeWord(currentBytecode, wordIndex);
+                }
+            }
+            return existing;
+        }
+        this.linearHeap.requireRecord(address, Heap.Types.PROGRAM);
+        var records = this.heapRecords;
+        var bytecode = records.programBytecode(address);
+        var codeLength = records.bytecodeLength(bytecode);
+        var code = new Array(codeLength);
+        var index = 0;
+        while (index < codeLength) {
+            code[index] = records.bytecodeWord(bytecode, index);
+            index++;
+        }
+        var runtime = this;
+        function integerVector(vector) {
+            if (!vector) return null;
+            var length = records.integerVectorLength(vector);
+            var values = new Array(length);
+            var vectorIndex = 0;
+            while (vectorIndex < length) {
+                values[vectorIndex] = records.integerVectorValue(vector, vectorIndex);
+                vectorIndex++;
+            }
+            return values;
+        }
+        var constantsAddress = records.executionProgramConstants(address);
+        var constantLength = records.vectorLength(constantsAddress);
+        var constants = new Array(constantLength);
+        index = 0;
+        while (index < constantLength) {
+            var cell = records.vectorCell(constantsAddress, index);
+            if (this.valueCells.tagAt(cell) === ValueCells.Tags.REFERENCE) {
+                var reference = this.valueCells.referenceAddressAt(cell);
+                if (this.linearHeap.recordType(reference) ===
+                    Heap.Types.PROGRAM) {
+                    constants[index] = this.adoptHeapProgram(reference);
+                } else if (this.linearHeap.recordType(reference) === Heap.Types.INTEGER_VECTOR) {
+                    constants[index] = integerVector(reference);
+                } else constants[index] = this.readHeapReference(reference, cell);
+            } else constants[index] = this.readHeapValue(cell);
+            index++;
+        }
+        var bindingCount = records.programBindingCount(address);
+        var parameterSlots = integerVector(
+            records.programParameterSlots(address)) || [];
+        var program = {
+            heapAddress: address,
+            heapBytecodeAddress: bytecode,
+            heapConstantsAddress: constantsAddress,
+            heapConstantRegistersAddress:
+                records.programConstantRegisters(address),
+            heapBindingRegistersAddress:
+                records.programBindingRegisters(address),
+            heapParameterSlotsAddress:
+                records.programParameterSlots(address),
+            code: code,
+            constants: constants,
+            constantRegisters: integerVector(
+                records.programConstantRegisters(address)) || [],
+            bindingRegisters: integerVector(
+                records.programBindingRegisters(address)),
+            parameterSlots: parameterSlots,
+            parameters: new Array(parameterSlots.length),
+            bindings: bindingCount ? new Array(bindingCount) : null,
+            bindingSlots: {},
+            registerCount: records.programRegisterCount(address),
+            argumentsSlot: records.programArgumentsSlot(address),
+            thisSlot: records.programThisSlot(address),
+            functionNameSlot: records.programFunctionNameSlot(address),
+            usesArguments: !!(records.programFlags(address) & 1),
+            strict: !!(records.programFlags(address) & 2),
+            evalCode: !!(records.programFlags(address) & 4),
+            globalDeclarations: [],
+            filename: "<guest-heap-program>",
+            name: "",
+            source: records.programSource(address) ?
+                this.readHeapString(records.programSource(address)) : null
+        };
+        var bindingNames = records.programBindingNames(address);
+        if (bindingNames !== 0 && program.bindings) {
+            for (var bindingIndex = 0; bindingIndex < bindingCount; bindingIndex++) {
+                var bindingCell = records.vectorCell(bindingNames, bindingIndex);
+                if (this.valueCells.tagAt(bindingCell) === ValueCells.Tags.REFERENCE) {
+                    var bindingName = this.readHeapString(this.valueCells.referenceAddressAt(bindingCell));
+                    program.bindings[bindingIndex] = bindingName;
+                    program.bindingSlots["$" + bindingName] = bindingIndex;
+                }
+            }
+        }
+        this.programMetadata[key] = program;
+        return program;
+    };
+
+    Runtime.prototype.spillFrame = function (frame) {
+        if (!frame || !frame.heapAddress) return;
+        this.heapRecords.setFramePC(frame.heapAddress, frame.pc);
+        var count = this.heapRecords.frameRegisterCount(frame.heapAddress);
+        var index = 0;
+        while (index < count) {
+            this.writeHeapValue(this.heapRecords.frameRegisterCell(
+                frame.heapAddress, index), frame.registers[index]);
+            index++;
+        }
+    };
+
+    Runtime.prototype.reloadFrame = function (frame) {
+        if (!frame || !frame.heapAddress) return;
+        frame.pc = this.heapRecords.framePC(frame.heapAddress);
+        var count = this.heapRecords.frameRegisterCount(frame.heapAddress);
+        var index = 0;
+        while (index < count) {
+            frame.registers[index] = this.readHeapValue(
+                this.heapRecords.frameRegisterCell(frame.heapAddress, index));
+            index++;
+        }
+    };
+
+    Runtime.prototype.reloadFrameRegister = function (frame, register) {
+        frame.registers[register] = this.readHeapValue(
+            this.heapRecords.frameRegisterCell(frame.heapAddress, register));
+    };
+
+    Runtime.prototype.spillFrameRegister = function (frame, register) {
+        this.writeHeapValue(
+            this.heapRecords.frameRegisterCell(frame.heapAddress, register),
+            frame.registers[register]);
+    };
+
+    Runtime.prototype.spillFramePC = function (frame) {
+        this.heapRecords.setFramePC(frame.heapAddress, frame.pc);
+    };
+
+    Runtime.prototype.unregisterContext = function (context) {
+        var survivors = [];
+        var index = 0;
+        while (index < this.contexts.length) {
+            if (this.contexts[index] !== context) survivors.push(this.contexts[index]);
+            index++;
+        }
+        this.contexts = survivors;
+        if (this.nativeInterpreter) {
+            var records = this.heapRecords;
+            var contextHead = 0;
+            index = this.contexts.length;
+            while (index > 0) {
+                var liveContext = this.contexts[--index].heapAddress;
+                records.setContextNext(liveContext, contextHead);
+                contextHead = liveContext;
+            }
+            records.setEngineGCContextHead(
+                this.nativeInterpreter.stateAddress, contextHead);
+        }
+    };
+
+    Runtime.prototype.internString = function (value) {
+        return this.readHeapString(this.internStringAddress(value));
+    };
+
+    Runtime.prototype.internStringAddress = function (value) {
+        value = String(value);
+        var key = "$" + value;
+        var address = this.stringAddresses[key];
+        if (!address) {
+            this.ensureLinearHeap();
+            address = this.heapRecords.allocateString(value);
+            this.decodedStrings["$" + address] = value;
+            this.stringAddresses[key] = address;
+        }
+        return address;
+    };
+
+    Runtime.prototype.readHeapString = function (address) {
+        var key = "$" + address;
+        var value = this.decodedStrings[key];
+        if (value === undefined) {
+            value = this.heapRecords.readString(address);
+            this.decodedStrings[key] = value;
+        }
+        return value;
+    };
+
+    Runtime.prototype.internProgramSource = function (
+            source, enclosingSource, enclosingAddress) {
+        var key = "$" + source;
+        var address = this.stringAddresses[key];
+        if (address) return address;
+        if (enclosingAddress && enclosingSource) {
+            var start = enclosingSource.indexOf(source);
+            if (start >= 0) {
+                address = this.heapRecords.allocateStringSlice(
+                    enclosingAddress, start, source.length);
+                this.stringAddresses[key] = address;
+                this.decodedStrings["$" + address] = source;
+                return address;
+            }
+        }
+        return this.internStringAddress(source);
+    };
+
+    /* Finalize immutable backing sharing at the snapshot boundary. Function
+     * sources already use compact views during construction; this catches
+     * atoms allocated before their containing source became available. It
+     * does not relocate records, change atom identity, or strip source text.
+     * Largest-first ordering ensures owners never become views themselves. */
+    Runtime.prototype.shareSnapshotStringBackings = function () {
+        var records = this.heapRecords;
+        var heap = this.linearHeap;
+        var candidates = [], address = Heap.FIRST_RECORD;
+        var minimumBytes = HeapRecords.KernelConstants.STRING_SLICE_RECORD_BYTES;
+        /* A minimum-sized view cannot improve on an equally small flat
+         * record. Keep character-table entries and other tiny atoms inline;
+         * indirect access would cost time without reducing their storage. */
+        while (address < heap.bump) {
+            var header = heap.inspectRecordHeader(address);
+            var size = header.size;
+            if (header.type === Heap.Types.FREE) heap.clearFreeRecordPayload(address);
+            if (header.type === Heap.Types.STRING &&
+                    size > minimumBytes && !records.stringIsRope(address) &&
+                    !records.stringIsSlice(address)) {
+                candidates.push(records.prepareFlatStringSearch(address));
+            }
+            address += size;
+        }
+        candidates.sort(function (a, b) {
+            return b.length - a.length || a.address - b.address;
+        });
+        var owners = [], index = 0, shared = 0;
+        while (index < candidates.length) {
+            var candidate = candidates[index++];
+            var ownerIndex = 0, matched = false;
+            while (ownerIndex < owners.length && !matched) {
+                var owner = owners[ownerIndex++];
+                var start = records.findPreparedFlatString(owner, candidate);
+                if (start >= 0) {
+                    records.shareStringBackingInPlace(
+                        candidate.address, owner.address, start);
+                    matched = true;
+                    shared++;
+                }
+            }
+            if (!matched) owners.push(candidate);
+        }
+        return shared;
+    };
+
+    Runtime.prototype.computedStringAddress = function (value) {
+        value = String(value);
+        var key = "$" + value;
+        var address = this.stringAddresses[key];
+        if (!address) {
+            this.ensureLinearHeap();
+            address = this.heapRecords.allocateString(value);
+            this.stringAddresses[key] = address;
+            this.decodedStrings["$" + address] = value;
+            this.noteAllocation(1);
+        }
+        return address;
+    };
+
+    Runtime.prototype.noteAllocation = function (units) {
+        this.gcAllocationDebt += units > 0 ? units : 1;
+        if (this.gcAllocationDebt >= this.gcThreshold) this.gcPending = true;
+    };
+
+    Runtime.prototype.noteNativeHeapBump = function (bump) {
+        /* Native allocation cannot call back into the host collector while
+         * registers and frame links are live. Request collection with ample
+         * headroom; the interpreter services it only after publishing the
+         * native frame at the next ordinary yield. */
+        if (bump >= this.gcHeapPressureBump) {
+            this.gcPending = true;
+        }
+    };
+
+    Runtime.prototype.countOpcode = function (opcode, functionName) {
+        var counts = this.profileOpcodeCounts;
+        if (!counts) return;
+        counts[opcode] = (counts[opcode] || 0) + 1;
+        this.profileInstructionCount++;
+        functionName = functionName || "<program>";
+        this.profileFunctionCounts["$" + functionName] =
+            (this.profileFunctionCounts["$" + functionName] || 0) + 1;
+        if (this.profileInstructionCount >= this.profileNextReport) {
+            this.reportProfile();
+            this.profileNextReport += 1000000;
+        }
+    };
+
+    Runtime.prototype.hostCallValueKind = function (value) {
+        if (value && value.guestType) return value.guestType;
+        if (value === null) return "null";
+        if (value === undefined) return "undefined";
+        var kind = typeof value;
+        if (kind === "number") {
+            if (value === (value | 0)) return "number-int32";
+            if (value >= 0 && value <= 4294967295 &&
+                value === Math.floor(value)) return "number-uint32";
+            return "number-double";
+        }
+        return kind;
+    };
+
+    Runtime.prototype.hostCallLocation = function (frame, pc) {
+        var program = frame && frame.program;
+        var location = program ? Bytecode.findSourceLocation(
+            program.sourceLocations, pc === undefined ? -1 : pc) : null;
+        var filename = location && location.filename ||
+                       program && program.filename || "<guest>";
+        var line = location && location.line || 1;
+        var column = location && location.column || 1;
+        return filename + ":" + line + ":" + column;
+    };
+
+    Runtime.prototype.logHostCallTransition = function (
+            transition, callable, receiver, args, frame, pc) {
+        if (!this.logHostCalls) return;
+        this.hostCallLogCount++;
+        var argumentKinds = [];
+        var index = 0;
+        args = args || [];
+        while (index < args.length) {
+            argumentKinds.push(this.hostCallValueKind(args[index++]));
+        }
+        var name = callable && callable.name || "<anonymous>";
+        var line = "guest VM host call #" + this.hostCallLogCount +
+            ": " + transition + " " + name + " at " +
+            this.hostCallLocation(frame, pc) + " receiver=" +
+            this.hostCallValueKind(receiver) + " args=(" +
+            argumentKinds.join(",") + ")";
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) {
+            console.log(line);
+        }
+    };
+
+    Runtime.prototype.reportProfile = function () {
+        if (!this.profileOpcodeCounts) return;
+        var names = root.GuestVMBytecode && root.GuestVMBytecode.NAMES;
+        if (!names && typeof require === "function") names = require("./bytecode.js").NAMES;
+        var parts = [];
+        var opcode = 1;
+        while (opcode < this.profileOpcodeCounts.length) {
+            if (this.profileOpcodeCounts[opcode]) {
+                parts.push((names && names[opcode] ? names[opcode] : opcode) + "=" +
+                           this.profileOpcodeCounts[opcode]);
+            }
+            opcode++;
+        }
+        var line = "guest VM profile: instructions=" + this.profileInstructionCount +
+                   " " + parts.join(" ");
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
+        var functions = [];
+        var functionKey;
+        for (functionKey in this.profileFunctionCounts) {
+            if (own(this.profileFunctionCounts, functionKey)) {
+                functions.push({name: functionKey.substring(1),
+                                count: this.profileFunctionCounts[functionKey]});
+            }
+        }
+        functions.sort(function (left, right) { return right.count - left.count; });
+        var functionParts = [];
+        var functionIndex = 0;
+        while (functionIndex < functions.length && functionIndex < 12) {
+            functionParts.push(functions[functionIndex].name + "=" +
+                               functions[functionIndex].count);
+            functionIndex++;
+        }
+        var functionLine = "guest VM profile functions: " + functionParts.join(" ");
+        if (typeof print === "function") print(functionLine);
+        else if (typeof console !== "undefined" && console.log) console.log(functionLine);
+        if (this.nativeInterpreter) this.nativeInterpreter.reportProfile();
+    };
+
+    Runtime.prototype.gcSafePoint = function () {
+        /* Compiler/program records do not create ordinary object handles,
+         * but still consume heap and weak metadata. Include their actual
+         * record allocations in the existing debt policy, without adding a
+         * callback to every allocator operation or collecting mid-build. */
+        if (this.linearHeap && this.linearHeap.allocationCount -
+                this.gcRecordAllocationCheckpoint >= this.gcThreshold) {
+            this.gcPending = true;
+        }
+        if (this.gcPending && !this.gcCollecting && this.compiledDepth === 0) {
+            this.collect();
+        }
+    };
+
+    Runtime.prototype.synchronousExecutionBudget = function () {
+        /* A synchronous embedder has no competing guest work to schedule.
+         * Native execution already yields on semantic services and allocation
+         * pressure, so a small artificial slice would only force expensive
+         * frame materialization at otherwise unnecessary host boundaries. */
+        return this.threadedCompiler || this.nativeInterpreter ?
+               Infinity : 1000000;
+    };
+
+    Runtime.prototype.retain = function (value) {
+        this.assertOwned(value);
+        var persistentAddress = value && value.heapAddress ?
+            value.heapAddress : typeof value === "string" ?
+                this.internStringAddress(value) : 0;
+        var index = 0;
+        while (index < this.hostRoots.length) {
+            if (this.hostRoots[index] === RELEASED_ROOT) {
+                this.hostRoots[index] = value;
+                this.hostRootPersistentAddresses[index] = persistentAddress;
+                if (persistentAddress && this.nativeInterpreter) {
+                    this.nativeInterpreter.registerPersistentRoot(
+                        persistentAddress);
+                }
+                return index + 1;
+            }
+            index++;
+        }
+        this.hostRoots.push(value);
+        this.hostRootPersistentAddresses.push(persistentAddress);
+        if (persistentAddress && this.nativeInterpreter) {
+            this.nativeInterpreter.registerPersistentRoot(persistentAddress);
+        }
+        return this.hostRoots.length;
+    };
+
+    Runtime.prototype.retained = function (handle) {
+        var index = integerHandle(handle, this.hostRoots.length);
+        var value = this.hostRoots[index];
+        if (value === RELEASED_ROOT) throw new Error("guest host root has been released");
+        return value;
+    };
+
+    Runtime.prototype.release = function (handle) {
+        var index = integerHandle(handle, this.hostRoots.length);
+        if (this.hostRoots[index] === RELEASED_ROOT) {
+            throw new Error("guest host root has already been released");
+        }
+        var persistentAddress = this.hostRootPersistentAddresses[index] || 0;
+        if (persistentAddress && this.nativeInterpreter) {
+            this.nativeInterpreter.unregisterPersistentRoot(persistentAddress);
+        }
+        this.hostRootPersistentAddresses[index] = 0;
+        this.hostRoots[index] = RELEASED_ROOT;
+    };
+
+    Runtime.prototype.installBuiltins = function () {
+        var runtime = this;
+        /* The Object constructor and Object.create expose this record on both
+         * execution backends. It is guest-heap state even when Node supplies
+         * the low-level JavaScript backend. */
+        this.objectPrototype = this.makeObject();
+        /* ES5.1 15.3.4 requires Function.prototype itself to be callable. It
+         * is bootstrapped before the normal function prototype exists, then
+         * linked to Object.prototype like every other function object. */
+        this.functionPrototype = null;
+        this.functionPrototype = this.makeNativeFunction(
+            "Function.prototype", function () { return undefined; });
+        this.heapRecords.setObjectPrototype(
+            this.functionPrototype.heapAddress, this.objectPrototype.heapAddress);
+        this.stringPrototype = this.makeObject();
+        this.numberPrototype = this.makeObject();
+        this.booleanPrototype = this.makeObject();
+        this.regexpPrototype = null;
+        if (this.heapNativeBuiltins) {
+            /* ES5.1 15.10.6: the prototype is itself an empty RegExp,
+             * including its internal class and instance properties. */
+            this.regexpPrototype = this.makeRegExp("", "");
+            this.heapRecords.setObjectPrototype(this.regexpPrototype.heapAddress,
+                this.objectPrototype.heapAddress);
+        }
+        this.strictArgumentsThrower = this.makeNativeFunction(
+            "ThrowTypeError", function () {
+                throw new TypeError("restricted arguments property");
+            }, "intrinsic", NativeIntrinsics.THROW_TYPE_ERROR);
+        this.defineDataProperty(this.strictArgumentsThrower, "length", 0, 0);
+        if (this.functionPrototype) {
+            this.defineInternalValue(this.functionPrototype,
+                "\x00StrictArgumentsThrower", this.strictArgumentsThrower);
+        }
+        this.primitiveValueKey = "\x00PrimitiveValue";
+        /* The primitive prototypes are themselves boxed primitive values
+         * (15.5.4, 15.6.4, 15.7.4), not plain objects. Use the same internal
+         * slot as ordinary wrappers so both interpreter backends agree. */
+        this.defineInternalValue(this.stringPrototype, this.primitiveValueKey, "");
+        this.defineInternalValue(this.numberPrototype, this.primitiveValueKey, 0);
+        this.defineInternalValue(this.booleanPrototype, this.primitiveValueKey, false);
+        /* ES5.1 15.5.4: String.prototype is the empty String value and exposes
+         * its immutable, non-enumerable length as an own data property. */
+        this.defineDataProperty(this.stringPrototype, "length", 0, 0);
+        if (this.objectPrototype) {
+            this.heapRecords.setObjectPrototype(
+                this.globalObject.heapAddress, this.objectPrototype.heapAddress);
+        }
+        this.setGlobal("undefined", undefined);
+        this.setGlobal("NaN", NaN);
+        this.setGlobal("Infinity", Infinity);
+        ErrorSupport.install(this);
+        this.installDateBuiltins();
+        this.setGlobal("assertEqual", this.makeNativeFunction("assertEqual",
+            function (receiver, args) {
+                if (args[0] !== args[1]) {
+                    throw new Error((args.length > 2 ? args[2] + ": " : "") +
+                                    "expected " + args[1] + ", got " + args[0]);
+                }
+                runtime.assertions++;
+                return undefined;
+            }));
+        this.setGlobal("print", this.makeHostFunction("print",
+            function (receiver, args) {
+                var text = args.length ? String(args[0]) : "";
+                if (typeof print === "function") print(text);
+                else console.log(text);
+                return undefined;
+            }));
+        this.setGlobal("guestCollect", this.makeNativeFunction("guestCollect",
+            function () {
+                return runtime.collect();
+            }));
+        this.setGlobal("guestBackingStoreCount", this.makeNativeFunction(
+            "guestBackingStoreCount", function () {
+                return runtime.bufferSupport ?
+                       runtime.bufferSupport.liveBackingCount() : 0;
+            }));
+        this.setGlobal("parseInt", this.makeNativeFunction("parseInt",
+            function (receiver, args) {
+                return parseInt(runtime.toString(args[0]), args.length > 1 ? runtime.toNumber(args[1]) : undefined);
+            }, "intrinsic", NativeIntrinsics.PARSE_INT));
+        this.setGlobal("parseFloat", this.makeNativeFunction("parseFloat",
+            function (receiver, args) {
+                return parseFloat(runtime.toString(args[0]));
+            }, "intrinsic", NativeIntrinsics.PARSE_FLOAT));
+        this.setGlobal("isNaN", this.makeNativeFunction("isNaN",
+            function (receiver, args) {
+                return isNaN(runtime.toNumber(args[0]));
+            }, "intrinsic", NativeIntrinsics.IS_NAN));
+        this.setGlobal("isFinite", this.makeNativeFunction("isFinite",
+            function (receiver, args) {
+                /* The semantic implementation also runs inside a guest VM
+                 * during self-hosted embedding. Do not require an outer
+                 * global isFinite callback after guest ToNumber completes. */
+                var number = runtime.toNumber(args[0]);
+                return number === number && number !== Infinity && number !== -Infinity;
+            }));
+        this.setGlobal("escape", this.makeNativeFunction("escape",
+            function (receiver, args) {
+                return legacyEscape(args.length ? args[0] : undefined);
+            }));
+        this.setGlobal("unescape", this.makeNativeFunction("unescape",
+            function (receiver, args) {
+                return legacyUnescape(args.length ? args[0] : undefined);
+            }, "intrinsic", NativeIntrinsics.LEGACY_UNESCAPE));
+        function installURIFunction(name, encode, component) {
+            var callable = runtime.makeNativeFunction(name,
+                function (receiver, args) {
+                    var value = args.length ? args[0] : undefined;
+                    return encode ? encodeURIValue(value, component) :
+                                    decodeURIValue(value, component);
+                }, "intrinsic", name === "encodeURIComponent" ?
+                    NativeIntrinsics.ENCODE_URI_COMPONENT :
+                    name === "decodeURIComponent" ?
+                    NativeIntrinsics.DECODE_URI_COMPONENT :
+                    name === "decodeURI" ? NativeIntrinsics.DECODE_URI :
+                    NativeIntrinsics.NONE);
+            runtime.setGlobal(name, callable);
+        }
+        installURIFunction("encodeURI", true, false);
+        installURIFunction("encodeURIComponent", true, true);
+        installURIFunction("decodeURI", false, false);
+        installURIFunction("decodeURIComponent", false, true);
+        this.stringMethods = {};
+        this.stringMethods.charAt = this.makeNativeFunction("String.charAt",
+            function (receiver, args) {
+                return runtime.toString(receiver).charAt(Number(args[0]) || 0);
+            }, "intrinsic", NativeIntrinsics.STRING_CHAR_AT);
+        this.stringMethods.charCodeAt = this.makeNativeFunction("String.charCodeAt",
+            function (receiver, args) {
+                return runtime.toString(receiver).charCodeAt(Number(args[0]) || 0);
+            }, "intrinsic", NativeIntrinsics.STRING_CHAR_CODE_AT);
+        this.stringMethods.indexOf = this.makeNativeFunction("String.indexOf",
+            function (receiver, args) {
+                return runtime.toString(receiver).indexOf(String(args[0]),
+                    args.length > 1 ? Number(args[1]) : 0);
+            }, "intrinsic", NativeIntrinsics.STRING_INDEX_OF);
+        this.stringMethods.lastIndexOf = this.makeNativeFunction("String.lastIndexOf",
+            function (receiver, args) {
+                var text = runtime.toString(receiver);
+                return text.lastIndexOf(String(args[0]),
+                    args.length > 1 ? Number(args[1]) : text.length);
+            }, "intrinsic", NativeIntrinsics.STRING_LAST_INDEX_OF);
+        this.stringMethods.substring = this.makeNativeFunction("String.substring",
+            function (receiver, args) {
+                return args.length > 1 ? runtime.toString(receiver).substring(Number(args[0]), Number(args[1])) :
+                                         runtime.toString(receiver).substring(Number(args[0]));
+            }, "intrinsic", NativeIntrinsics.STRING_SUBSTRING);
+        this.stringMethods.substr = this.makeNativeFunction("String.substr",
+            function (receiver, args) {
+                return args.length > 1 ? runtime.toString(receiver).substr(Number(args[0]),
+                    Number(args[1])) : runtime.toString(receiver).substr(Number(args[0]));
+            }, "intrinsic", NativeIntrinsics.STRING_SUBSTR);
+        this.stringMethods.toLowerCase = this.makeNativeFunction("String.toLowerCase",
+            function (receiver) { return runtime.toString(receiver).toLowerCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_LOWER_CASE);
+        this.stringMethods.split = this.makeNativeFunction("String.split",
+            function (receiver, args) {
+                var separator = args.length ? args[0] : undefined;
+                if (separator && separator.guestType === "regexp") {
+                    separator = runtime.hostRegExp(separator);
+                } else if (separator !== undefined) {
+                    separator = String(separator);
+                }
+                var parts = args.length > 1 ?
+                    runtime.toString(receiver).split(separator, Number(args[1])) :
+                    runtime.toString(receiver).split(separator);
+                return runtime.arrayFrom(parts);
+            }, "intrinsic", NativeIntrinsics.STRING_SPLIT);
+        this.stringMethods.match = this.makeNativeFunction("String.match",
+            function (receiver, args) {
+                var regexp = args.length ? args[0] : undefined;
+                if (regexp && regexp.guestType === "regexp") {
+                    regexp = runtime.hostRegExp(regexp);
+                } else {
+                    regexp = new RegExp(regexp === undefined ? "" :
+                                        String(regexp));
+                }
+                var match = runtime.toString(receiver).match(regexp);
+                if (!match) return null;
+                var result = runtime.arrayFrom(match);
+                if (match.index !== undefined) {
+                    runtime.setProperty(result, "index", match.index);
+                    runtime.setProperty(result, "input", match.input);
+                }
+                return result;
+            });
+        this.stringMethods.replace = this.makeNativeFunction("String.replace",
+            function (receiver, args) {
+                var search = args[0];
+                var replacementInput = runtime.toString(receiver);
+                var regexpSearch = false;
+                if (search && search.guestType === "regexp") {
+                    search = runtime.hostRegExp(search);
+                    regexpSearch = true;
+                }
+                var replacement = args[1];
+                var replaced;
+                if (!regexpSearch) {
+                    var searchText = String(search);
+                    var matchIndex = replacementInput.indexOf(searchText);
+                    if (matchIndex < 0) return replacementInput;
+                    var prefix = replacementInput.substring(0, matchIndex);
+                    var suffix = replacementInput.substring(
+                        matchIndex + searchText.length);
+                    var replacementText;
+                    if (replacement &&
+                        (replacement.guestType === "function" ||
+                         replacement.guestType === "bytecodeFunction")) {
+                        replacementText = runtime.toString(
+                            runtime.invokePropertyFunction(replacement,
+                                undefined,
+                                [searchText, matchIndex, replacementInput]));
+                    } else {
+                        replacementText = expandStringReplacement(
+                            replacement, searchText, prefix, suffix);
+                    }
+                    return prefix + replacementText + suffix;
+                }
+                if (replacement && (replacement.guestType === "function" ||
+                                    replacement.guestType === "bytecodeFunction")) {
+                    replaced = replacementInput.replace(search, function () {
+                        var callbackArguments = [];
+                        var callbackIndex = 0;
+                        while (callbackIndex < arguments.length) {
+                            callbackArguments.push(arguments[callbackIndex++]);
+                        }
+                        return runtime.toString(runtime.invokePropertyFunction(
+                            replacement, undefined, callbackArguments));
+                    });
+                } else {
+                    replaced = replacementInput.replace(search, String(replacement));
+                }
+                return replaced;
+            }, "intrinsic", NativeIntrinsics.STRING_REPLACE);
+        this.stringMethods.toUpperCase = this.makeNativeFunction("String.toUpperCase",
+            function (receiver) { return runtime.toString(receiver).toUpperCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_UPPER_CASE);
+        /* ES5.1 permits the locale methods to use the ordinary case mapping.
+         * Keep them distinct callable objects but share the native
+         * implementation; no host locale service or Intl API is required. */
+        this.stringMethods.toLocaleLowerCase = this.makeNativeFunction(
+            "String.toLocaleLowerCase",
+            function (receiver) { return runtime.toString(receiver).toLowerCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_LOWER_CASE);
+        this.stringMethods.toLocaleUpperCase = this.makeNativeFunction(
+            "String.toLocaleUpperCase",
+            function (receiver) { return runtime.toString(receiver).toUpperCase(); },
+            "intrinsic", NativeIntrinsics.STRING_TO_UPPER_CASE);
+        this.stringMethods.trim = this.makeNativeFunction("String.trim",
+            function (receiver) { return runtime.toString(receiver).replace(/^\s+|\s+$/g, ""); });
+        if (this.stringPrototype) {
+            var stringMethodName;
+            for (stringMethodName in this.stringMethods) {
+                if (own(this.stringMethods, stringMethodName)) {
+                    this.defineBuiltinProperty(this.stringPrototype, stringMethodName,
+                                     this.stringMethods[stringMethodName]);
+                }
+            }
+        }
+        this.stringMethods.toString = this.makeNativeFunction("String.toString",
+            function (receiver) { return runtime.stringValue(receiver); },
+            "intrinsic", NativeIntrinsics.STRING_VALUE_OF);
+        this.stringMethods.valueOf = this.makeNativeFunction("String.valueOf",
+            function (receiver) { return runtime.stringValue(receiver); },
+            "intrinsic", NativeIntrinsics.STRING_VALUE_OF);
+        this.defineBuiltinProperty(this.stringPrototype, "toString",
+                         this.stringMethods.toString);
+        this.defineBuiltinProperty(this.stringPrototype, "valueOf",
+                         this.stringMethods.valueOf);
+        this.arrayMethods = {};
+        /* ES5.1 15.4.4: the prototype itself has Array internal methods and
+         * a writable length, with Object.prototype as its parent. */
+        this.arrayPrototype = null;
+        this.arrayPrototype = this.makeArray(0);
+        this.heapRecords.setObjectPrototype(this.arrayPrototype.heapAddress,
+            this.objectPrototype.heapAddress);
+        this.arrayMethods.push = this.makeNativeFunction("Array.push",
+            function (receiver, args) {
+                if (!receiver || receiver.guestType !== "array") {
+                    var object = runtime.toObject(receiver);
+                    var length = runtime.toNumber(runtime.getProperty(object, "length")) >>> 0;
+                    var argument = 0;
+                    while (argument < args.length) {
+                        runtime.setProperty(object, String(length++), args[argument++], true);
+                    }
+                    runtime.setProperty(object, "length", length, true);
+                    return length;
+                }
+                var index = 0;
+                while (index < args.length) {
+                    runtime.arraySet(receiver, runtime.arrayLength(receiver),
+                                     args[index++]);
+                }
+                return runtime.arrayLength(receiver);
+            }, "intrinsic", NativeIntrinsics.ARRAY_PUSH);
+        this.arrayMethods.sort = this.makeNativeFunction("Array.sort",
+            function (receiver, args) {
+                var values = runtime.arrayToHost(receiver);
+                var comparator = args[0];
+                if (comparator !== undefined) {
+                    if (!comparator || (comparator.guestType !== "function" &&
+                                        comparator.guestType !== "bytecodeFunction")) {
+                        throw new TypeError("Array.sort comparator is not callable");
+                    }
+                    values.sort(function (left, right) {
+                        return Number(runtime.invokePropertyFunction(
+                            comparator, undefined, [left, right])) || 0;
+                    });
+                } else values.sort();
+                runtime.replaceArray(receiver, values);
+                return receiver;
+            });
+        this.arrayMethods.reverse = this.makeNativeFunction("Array.reverse",
+            function (receiver) {
+                var values = runtime.arrayToHost(receiver);
+                values.reverse();
+                runtime.replaceArray(receiver, values);
+                return receiver;
+            }, "intrinsic", NativeIntrinsics.ARRAY_REVERSE);
+        this.arrayMethods.unshift = this.makeNativeFunction("Array.unshift",
+            function (receiver, args) {
+                var values = runtime.arrayToHost(receiver);
+                var index = args.length - 1;
+                while (index >= 0) values.unshift(args[index--]);
+                runtime.replaceArray(receiver, values);
+                return runtime.arrayLength(receiver);
+            }, "intrinsic", NativeIntrinsics.ARRAY_UNSHIFT);
+        this.arrayMethods.shift = this.makeNativeFunction("Array.shift",
+            function (receiver) {
+                var values = runtime.arrayToHost(receiver);
+                var result = values.shift();
+                runtime.replaceArray(receiver, values);
+                return result;
+            }, "intrinsic", NativeIntrinsics.ARRAY_SHIFT);
+        this.arrayMethods.pop = this.makeNativeFunction("Array.pop",
+            function (receiver) {
+                var values = runtime.arrayToHost(receiver);
+                var result = values.pop();
+                runtime.replaceArray(receiver, values);
+                return result;
+            }, "intrinsic", NativeIntrinsics.ARRAY_POP);
+        this.arrayMethods.concat = this.makeNativeFunction("Array.concat",
+            function (receiver, args) {
+                var result = runtime.arrayFrom(runtime.arrayToHost(receiver));
+                var argumentIndex = 0;
+                while (argumentIndex < args.length) {
+                    var value = args[argumentIndex++];
+                    if (value && value.guestType === "array") {
+                        var elementIndex = 0;
+                        while (elementIndex < runtime.arrayLength(value)) {
+                            runtime.arraySet(result, runtime.arrayLength(result),
+                                runtime.arrayGet(value, elementIndex++));
+                        }
+                    } else runtime.arraySet(result, runtime.arrayLength(result), value);
+                }
+                return result;
+            }, "intrinsic", NativeIntrinsics.ARRAY_CONCAT);
+        this.arrayMethods.slice = this.makeNativeFunction("Array.slice",
+            function (receiver, args) {
+                if (!receiver || receiver.guestType !== "array") {
+                    var object = runtime.toObject(receiver);
+                    var length = runtime.toNumber(runtime.getProperty(object, "length")) >>> 0;
+                    var first = args.length ? runtime.toNumber(args[0]) : 0;
+                    first = first !== first ? 0 : first < 0 ? Math.ceil(first) : Math.floor(first);
+                    first = first < 0 ? Math.max(length + first, 0) : Math.min(first, length);
+                    var last = args.length < 2 || args[1] === undefined ? length : runtime.toNumber(args[1]);
+                    last = last !== last ? 0 : last < 0 ? Math.ceil(last) : Math.floor(last);
+                    last = last < 0 ? Math.max(length + last, 0) : Math.min(last, length);
+                    var result = runtime.makeArrayLiteral(Math.max(last - first, 0));
+                    var output = 0;
+                    while (first < last) {
+                        if (runtime.hasProperty(object, String(first))) {
+                            runtime.arraySet(result, output, runtime.getProperty(object, String(first)));
+                        }
+                        first++;
+                        output++;
+                    }
+                    return result;
+                }
+                var start = args.length ? Number(args[0]) : 0;
+                var values = runtime.arrayToHost(receiver);
+                var end = args.length > 1 ? Number(args[1]) : values.length;
+                return runtime.arrayFrom(values.slice(start, end));
+            }, "intrinsic", NativeIntrinsics.ARRAY_SLICE);
+        this.arrayMethods.splice = this.makeNativeFunction("Array.splice",
+            function (receiver, args) {
+                var values = runtime.arrayToHost(receiver);
+                var length = values.length;
+                var start = args.length ? Number(args[0]) : 0;
+                start = start < 0 ? Math.ceil(start) : Math.floor(start);
+                if (start < 0) start = Math.max(length + start, 0);
+                else if (start > length) start = length;
+                var deleteCount = args.length < 2 ? length - start : Number(args[1]);
+                deleteCount = deleteCount < 0 ? 0 : Math.floor(deleteCount);
+                if (deleteCount > length - start) deleteCount = length - start;
+                var spliceArguments = [start, deleteCount];
+                var argumentIndex = 2;
+                while (argumentIndex < args.length) {
+                    spliceArguments.push(args[argumentIndex++]);
+                }
+                var removed = Array.prototype.splice.apply(values, spliceArguments);
+                runtime.replaceArray(receiver, values);
+                return runtime.arrayFrom(removed);
+            }, "intrinsic", NativeIntrinsics.ARRAY_SPLICE);
+        this.arrayMethods.join = this.makeNativeFunction("Array.join",
+            function (receiver, args) {
+                var separator = args.length && args[0] !== undefined ?
+                                String(args[0]) : ",";
+                return runtime.joinArrayValues(receiver, separator);
+            }, "intrinsic", NativeIntrinsics.ARRAY_JOIN);
+        this.arrayMethods.forEach = this.makeNativeFunction("Array.forEach",
+            function (receiver, args) {
+                var callback = args[0];
+                if (!callback || (callback.guestType !== "function" &&
+                                  callback.guestType !== "bytecodeFunction")) {
+                    throw new TypeError("Array.forEach callback is not callable");
+                }
+                var thisArgument = args.length > 1 ? args[1] : undefined;
+                var length = runtime.arrayLength(receiver);
+                var index = 0;
+                while (index < length) {
+                    if (runtime.arrayHas(receiver, index)) {
+                        runtime.invokePropertyFunction(callback, thisArgument,
+                            [runtime.arrayGet(receiver, index), index, receiver]);
+                    }
+                    index++;
+                }
+                return undefined;
+            });
+        this.arrayMethods.indexOf = this.makeNativeFunction("Array.indexOf",
+            function (receiver, args) {
+                var length = runtime.arrayLength(receiver);
+                if (!length) return -1;
+                var start = args.length > 1 ? Number(args[1]) : 0;
+                if (start !== start) start = 0;
+                else if (start !== 0 && start !== Infinity &&
+                         start !== -Infinity) {
+                    start = start < 0 ? Math.ceil(start) : Math.floor(start);
+                }
+                if (start >= length || start === Infinity) return -1;
+                if (start < 0) start = Math.max(length + start, 0);
+                var sought = args.length ? args[0] : undefined;
+                while (start < length) {
+                    if (runtime.arrayHas(receiver, start) &&
+                        runtime.arrayGet(receiver, start) === sought) {
+                        return start;
+                    }
+                    start++;
+                }
+                return -1;
+            }, "intrinsic", NativeIntrinsics.ARRAY_INDEX_OF);
+        this.objectMethods = {};
+        this.objectMethods.isPrototypeOf = this.makeNativeFunction(
+            "Object.isPrototypeOf", function (receiver, args) {
+                var value = args[0];
+                if (!value || !value.guestType) return false;
+                var object = runtime.toObject(receiver);
+                var current = runtime.heapRecords.objectPrototype(value.heapAddress);
+                while (current) {
+                    if (current === object.heapAddress) return true;
+                    current = runtime.heapRecords.objectPrototype(current);
+                }
+                return false;
+            }, "intrinsic", NativeIntrinsics.OBJECT_IS_PROTOTYPE_OF);
+        this.objectMethods.hasOwnProperty = this.makeNativeFunction(
+            "Object.hasOwnProperty", function (receiver, args) {
+                return runtime.hasOwnProperty(receiver, String(args[0]));
+            }, "intrinsic", NativeIntrinsics.OBJECT_HAS_OWN_PROPERTY);
+        this.objectMethods.toString = this.makeNativeFunction(
+            "Object.toString", function (receiver) {
+                if (receiver === undefined) return "[object Undefined]";
+                if (receiver === null) return "[object Null]";
+                if (receiver && receiver.guestType === "array") {
+                    if (runtime.heapRecords.arrayReserved(receiver.heapAddress)) return "[object Arguments]";
+                    return "[object Array]";
+                }
+                if (receiver && receiver.guestType === "regexp") {
+                    return "[object RegExp]";
+                }
+                if (receiver && (receiver.guestType === "function" ||
+                                 receiver.guestType === "bytecodeFunction")) {
+                    return "[object Function]";
+                }
+                var boxedReceiver = runtime.primitiveWrapperValue(receiver);
+                if (receiver && receiver.guestType === "object") {
+                    var classFlags = runtime.linearHeap.flags(receiver.heapAddress);
+                    if (classFlags & HeapRecords.ObjectClassFlags.DATE) return "[object Date]";
+                    if (classFlags & HeapRecords.ObjectClassFlags.ERROR) return "[object Error]";
+                }
+                if (boxedReceiver.found) {
+                    if (typeof boxedReceiver.value === "string") {
+                        return "[object String]";
+                    }
+                    if (typeof boxedReceiver.value === "number") {
+                        return "[object Number]";
+                    }
+                    if (typeof boxedReceiver.value === "boolean") {
+                        return "[object Boolean]";
+                    }
+                }
+                if (typeof receiver === "string") return "[object String]";
+                if (typeof receiver === "number") return "[object Number]";
+                if (typeof receiver === "boolean") return "[object Boolean]";
+                return "[object Object]";
+            }, "intrinsic", NativeIntrinsics.OBJECT_TO_STRING);
+        this.objectMethods.valueOf = this.makeNativeFunction(
+            "Object.valueOf", function (receiver) {
+                if (receiver === null || receiver === undefined) {
+                    throw new TypeError("Object.valueOf receiver is null or undefined");
+                }
+                return receiver;
+            }, "intrinsic", NativeIntrinsics.OBJECT_VALUE_OF);
+        if (this.objectPrototype) {
+            this.defineDataProperty(this.objectPrototype, "isPrototypeOf",
+                this.objectMethods.isPrototypeOf,
+                HeapRecords.Attributes.WRITABLE | HeapRecords.Attributes.CONFIGURABLE);
+            this.defineBuiltinProperty(this.objectPrototype, "hasOwnProperty",
+                             this.objectMethods.hasOwnProperty);
+            this.defineBuiltinProperty(this.objectPrototype, "toString",
+                             this.objectMethods.toString);
+            this.defineBuiltinProperty(this.objectPrototype, "valueOf",
+                             this.objectMethods.valueOf);
+        }
+        if (this.arrayPrototype) {
+            var arrayMethodName;
+            for (arrayMethodName in this.arrayMethods) {
+                if (own(this.arrayMethods, arrayMethodName)) {
+                    this.defineBuiltinProperty(this.arrayPrototype, arrayMethodName,
+                                     this.arrayMethods[arrayMethodName]);
+                }
+            }
+            this.arrayMethods.toString = this.makeNativeFunction(
+                "Array.toString", function (receiver) {
+                    var join = runtime.getProperty(receiver, "join");
+                    if (join && (join.guestType === "function" ||
+                                 join.guestType === "bytecodeFunction")) {
+                        return runtime.invokePropertyFunction(
+                            join, receiver, []);
+                    }
+                    return runtime.invokePropertyFunction(
+                        runtime.objectMethods.toString, receiver, []);
+                }, "intrinsic", NativeIntrinsics.ARRAY_TO_STRING);
+            this.defineBuiltinProperty(this.arrayPrototype, "toString",
+                             this.arrayMethods.toString);
+        }
+        var objectConstructor = this.makeNativeFunction("Object",
+            function (receiver, args) {
+                var value = args.length ? args[0] : undefined;
+                if (value && value.guestType) return value;
+                if (value === null || value === undefined) {
+                    return runtime.makeObject();
+                }
+                return runtime.toObject(value);
+            }, "intrinsic", NativeIntrinsics.OBJECT_CONSTRUCTOR);
+        objectConstructor.constructCallback = function (args) {
+            var value = args.length ? args[0] : undefined;
+            if (value && value.guestType) return value;
+            if (value === null || value === undefined) {
+                return runtime.makeObject();
+            }
+            return runtime.toObject(value);
+        };
+        if (this.objectPrototype) {
+            this.defineDataProperty(objectConstructor, "prototype",
+                                    this.objectPrototype, 0);
+            this.defineBuiltinProperty(this.objectPrototype, "constructor",
+                             objectConstructor);
+        }
+        this.defineBuiltinProperty(objectConstructor, "defineProperty",
+            this.makeNativeFunction("Object.defineProperty",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType) {
+                        throw new TypeError("Object.defineProperty target is not an object");
+                    }
+                    var key = runtime.propertyKey(args[1]);
+                    var descriptor = args[2];
+                    if (!descriptor || !descriptor.guestType) {
+                        throw new TypeError("property descriptor is not an object");
+                    }
+                    return runtime.definePropertyFromDescriptor(object, key, descriptor);
+                }, "intrinsic", NativeIntrinsics.OBJECT_DEFINE_PROPERTY));
+        this.defineBuiltinProperty(objectConstructor, "create",
+            this.makeNativeFunction("Object.create", function (receiver, args) {
+                return runtime.makeObjectWithPrototype(args[0]);
+            }, "intrinsic", NativeIntrinsics.OBJECT_CREATE));
+        this.defineBuiltinProperty(objectConstructor, "getPrototypeOf",
+            this.makeNativeFunction("Object.getPrototypeOf",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "Object.getPrototypeOf target is not an object");
+                    }
+                    var prototype = runtime.heapRecords.objectPrototype(
+                        object.heapAddress);
+                    return prototype ? runtime.readHeapReference(prototype) : null;
+                }));
+        this.defineBuiltinProperty(objectConstructor, "getOwnPropertyDescriptor",
+            this.makeNativeFunction("Object.getOwnPropertyDescriptor",
+                function (receiver, args) {
+                    var object = args[0];
+                    var key = runtime.propertyKey(args[1]);
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "property descriptor target is not an object");
+                    }
+                    var descriptor = runtime.makeObject();
+                    var property = runtime.heapOwnProperty(object, key, false);
+                    if (object.guestType === "object") {
+                        var wrapped = runtime.primitiveWrapperValue(object);
+                        if (wrapped.found && typeof wrapped.value === "string") {
+                            if (key === "length") return runtime.populateDataDescriptor(descriptor,
+                                wrapped.value.length, PropertySemantics.virtualAttributes(
+                                    PropertySemantics.virtualKinds.STRING_LENGTH, 0));
+                            if (isArrayIndex(key) && Number(key) < wrapped.value.length) {
+                                return runtime.populateDataDescriptor(descriptor, wrapped.value.charAt(Number(key)),
+                                    PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.STRING_INDEX, 0));
+                            }
+                        }
+                    }
+                    if (object.guestType === "array" && key === "length" &&
+                        !runtime.isArgumentsObject(object)) {
+                        return runtime.populateDataDescriptor(descriptor, runtime.arrayLength(object),
+                            PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.ARRAY_LENGTH,
+                                runtime.isArrayLengthWritable(object) ? 1 : 0));
+                    }
+                    if ((object.guestType === "array" ||
+                         object.guestType === "buffer" ||
+                         object.guestType === "typedArray") &&
+                        isArrayIndex(key) &&
+                        !property &&
+                        runtime.hasOwnProperty(object, key)) {
+                        return runtime.populateDataDescriptor(descriptor, runtime.getProperty(object, key),
+                            PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.INDEXED_ELEMENT, 0));
+                    }
+                    if (!property) return undefined;
+                    var attributes = runtime.heapRecords.ownPropertyEntryAttributes(
+                        object.heapAddress, property);
+                    if (attributes & HeapRecords.Attributes.ACCESSOR) {
+                        runtime.defineDataProperty(descriptor, "get",
+                            runtime.readHeapValue(
+                                runtime.heapRecords.resolvedOwnPropertyEntryValueCell(
+                                    object.heapAddress, property)), HeapRecords.Attributes.DEFAULT);
+                        var setter = runtime.heapRecords.ownPropertyEntrySetter(
+                            object.heapAddress, property);
+                        runtime.defineDataProperty(descriptor, "set", setter ?
+                            runtime.readHeapReference(setter) : undefined, HeapRecords.Attributes.DEFAULT);
+                    } else {
+                        var descriptorValueCell = runtime.heapRecords.resolvedOwnPropertyEntryValueCell(
+                            object.heapAddress, property);
+                        if (object.guestType === "array" && isArrayIndex(key)) {
+                            var mapped = runtime.argumentsMappedCell(object, Number(key));
+                            if (mapped) descriptorValueCell = mapped;
+                        }
+                        runtime.defineDataProperty(descriptor, "value",
+                            runtime.readHeapValue(descriptorValueCell), HeapRecords.Attributes.DEFAULT);
+                        runtime.defineDataProperty(descriptor, "writable",
+                            !!(attributes & HeapRecords.Attributes.WRITABLE), HeapRecords.Attributes.DEFAULT);
+                    }
+                    runtime.defineDataProperty(descriptor, "enumerable",
+                        !!(attributes & HeapRecords.Attributes.ENUMERABLE), HeapRecords.Attributes.DEFAULT);
+                    runtime.defineDataProperty(descriptor, "configurable",
+                        !!(attributes & HeapRecords.Attributes.CONFIGURABLE), HeapRecords.Attributes.DEFAULT);
+                    return descriptor;
+                }, "intrinsic", NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_DESCRIPTOR));
+        this.defineBuiltinProperty(objectConstructor, "preventExtensions",
+            this.makeNativeFunction("Object.preventExtensions",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "Object.preventExtensions target is not an object");
+                    }
+                    runtime.heapRecords.preventObjectExtensions(
+                        object.heapAddress);
+                    return object;
+                }, "intrinsic", NativeIntrinsics.OBJECT_PREVENT_EXTENSIONS));
+        this.defineBuiltinProperty(objectConstructor, "isExtensible",
+            this.makeNativeFunction("Object.isExtensible",
+                function (receiver, args) {
+                    var object = args[0];
+                    if (!object || !object.guestType || !object.heapAddress) {
+                        throw new TypeError(
+                            "Object.isExtensible target is not an object");
+                    }
+                    return runtime.heapRecords.objectIsExtensible(
+                        object.heapAddress);
+                }, "intrinsic", NativeIntrinsics.OBJECT_IS_EXTENSIBLE));
+        this.defineBuiltinProperty(objectConstructor, "getOwnPropertyNames",
+            this.makeNativeFunction("Object.getOwnPropertyNames",
+                function (receiver, args) {
+                    if (!args[0] || !args[0].guestType) {
+                        throw new TypeError(
+                            "Object.getOwnPropertyNames target is not an object");
+                    }
+                    return runtime.ownPropertyNames(args[0]);
+                }, "intrinsic", NativeIntrinsics.OBJECT_GET_OWN_PROPERTY_NAMES));
+        this.defineBuiltinProperty(objectConstructor, "keys",
+            this.makeNativeFunction("Object.keys", function (receiver, args) {
+                if (!args[0] || !args[0].guestType) {
+                    throw new TypeError("Object.keys target is not an object");
+                }
+                return runtime.keys(args[0]);
+            }, "intrinsic", NativeIntrinsics.OBJECT_KEYS));
+        this.setGlobal("Object", objectConstructor);
+        this.functionMethods = {};
+        this.functionMethods.call = this.makeNativeFunction("Function.call",
+            function (receiver, args) {
+                if (!receiver || (receiver.guestType !== "function" &&
+                                  receiver.guestType !== "bytecodeFunction")) {
+                    throw new TypeError("Function.call receiver is not callable");
+                }
+                return runtime.invokePropertyFunction(receiver,
+                    args.length ? args[0] : undefined, args.slice(1));
+            }, "intrinsic", NativeIntrinsics.FUNCTION_CALL);
+        this.functionMethods.call.intrinsicKind = "functionCall";
+        this.functionMethods.apply = this.makeNativeFunction("Function.apply",
+            function (receiver, args) {
+                if (!receiver || (receiver.guestType !== "function" &&
+                                  receiver.guestType !== "bytecodeFunction")) {
+                    throw new TypeError("Function.apply receiver is not callable");
+                }
+                var list = args.length > 1 ? args[1] : undefined;
+                var argumentsList = [];
+                if (list !== undefined && list !== null) {
+                    if (!list.guestType) {
+                        throw new TypeError("apply arguments must be an object");
+                    }
+                    var length = runtime.toNumber(
+                        runtime.getProperty(list, "length")) >>> 0;
+                    var index = 0;
+                    while (index < length) {
+                        argumentsList.push(runtime.getProperty(list,
+                            String(index)));
+                        index++;
+                    }
+                }
+                return runtime.invokePropertyFunction(receiver,
+                    args.length ? args[0] : undefined, argumentsList);
+            }, "intrinsic", NativeIntrinsics.FUNCTION_APPLY);
+        this.functionMethods.apply.intrinsicKind = "functionApply";
+        this.functionMethods.bind = this.makeNativeFunction("Function.bind",
+            function (receiver, args) {
+                if (!receiver || (receiver.guestType !== "function" &&
+                                  receiver.guestType !== "bytecodeFunction")) {
+                    throw new TypeError("Function.bind receiver is not callable");
+                }
+                var target = receiver;
+                var boundReceiver = args.length ? args[0] : undefined;
+                var boundArguments = runtime.arrayFrom(args.slice(1));
+                var boundFunction = runtime.makeNativeFunction(
+                    "bound " + (target.name || ""),
+                    function (ignoredReceiver, callArguments) {
+                        var storedTarget = runtime.getProperty(
+                            boundFunction, "\x00boundTarget");
+                        var storedReceiver = runtime.getProperty(
+                            boundFunction, "\x00boundReceiver");
+                        var combined = runtime.arrayToHost(runtime.getProperty(
+                            boundFunction, "\x00boundArguments"));
+                        var callIndex = 0;
+                        while (callIndex < callArguments.length) {
+                            combined.push(callArguments[callIndex++]);
+                        }
+                        return runtime.invokePropertyFunction(storedTarget,
+                            storedReceiver, combined);
+                    });
+                runtime.setProperty(boundFunction, "\x00boundTarget", target);
+                runtime.setProperty(boundFunction, "\x00boundReceiver", boundReceiver);
+                runtime.setProperty(boundFunction, "\x00boundArguments", boundArguments);
+                runtime.defineDataProperty(boundFunction, "length",
+                    Math.max(Number(runtime.getProperty(target, "length")) -
+                        runtime.arrayLength(boundArguments), 0), 0);
+                runtime.poisonFunctionProperties(boundFunction);
+                return boundFunction;
+            }, "intrinsic", NativeIntrinsics.FUNCTION_BIND);
+        this.functionMethods.toString = this.makeNativeFunction("Function.toString",
+            function (receiver) {
+                if (receiver.guestType === "bytecodeFunction" && receiver.source) {
+                    return receiver.source;
+                }
+                return "function " + (receiver.name || "") + "() { [native code] }";
+            }, "intrinsic", NativeIntrinsics.FUNCTION_TO_STRING);
+        if (this.functionPrototype) {
+            /* Fixed builtin installation order is part of the bootstrap
+             * contract. Classic JScript's DontEnum bug omits an own toString
+             * from for-in, so host enumeration cannot define this catalog. */
+            var functionMethodNames = ["call", "apply", "bind", "toString"];
+            var functionMethodIndex = 0;
+            while (functionMethodIndex < functionMethodNames.length) {
+                var functionMethodName = functionMethodNames[functionMethodIndex++];
+                this.defineBuiltinProperty(this.functionPrototype, functionMethodName,
+                                 this.functionMethods[functionMethodName]);
+            }
+        }
+        this.numberMethods = {};
+        this.numberMethods.valueOf = this.makeNativeFunction("Number.valueOf",
+            function (receiver) { return runtime.numberValue(receiver); });
+        this.numberMethods.toString = this.makeNativeFunction("Number.toString",
+            function (receiver, args) {
+                return runtime.numberValue(receiver).toString(
+                    args.length ? runtime.toNumber(args[0]) : 10);
+            }, "intrinsic", NativeIntrinsics.NUMBER_TO_STRING);
+        this.numberMethods.toFixed = this.makeNativeFunction("Number.toFixed",
+            function (receiver, args) {
+                return runtime.numberValue(receiver).toFixed(
+                    args.length ? runtime.toNumber(args[0]) : 0);
+            }, "intrinsic", NativeIntrinsics.NUMBER_TO_FIXED);
+        this.numberMethods.toPrecision = this.makeNativeFunction(
+            "Number.toPrecision", function (receiver, args) {
+                var value = runtime.numberValue(receiver);
+                if (!args.length || args[0] === undefined) {
+                    return value.toString();
+                }
+                var precision = Number(args[0]);
+                if (precision !== Math.floor(precision) ||
+                    precision < 1 || precision > 21) {
+                    throw new RangeError("precision out of range");
+                }
+                return value.toPrecision(precision);
+            }, "intrinsic", NativeIntrinsics.NUMBER_TO_PRECISION);
+        this.defineBuiltinProperty(this.numberPrototype, "valueOf",
+                         this.numberMethods.valueOf);
+        this.defineBuiltinProperty(this.numberPrototype, "toString",
+                         this.numberMethods.toString);
+        this.defineBuiltinProperty(this.numberPrototype, "toFixed",
+                         this.numberMethods.toFixed);
+        this.defineBuiltinProperty(this.numberPrototype, "toPrecision",
+                         this.numberMethods.toPrecision);
+        this.regexpMethods = {};
+        this.regexpMethods.test = this.makeNativeFunction("RegExp.test",
+            function (receiver, args) {
+                return runtime.hostRegExp(receiver).test(String(args[0]));
+            }, "intrinsic", NativeIntrinsics.REGEXP_TEST);
+        this.regexpMethods.exec = this.makeNativeFunction("RegExp.exec",
+            function (receiver, args) {
+                var match = runtime.hostRegExp(receiver).exec(String(args[0]));
+                if (!match) return null;
+                var result = runtime.arrayFrom(match);
+                runtime.setProperty(result, "index", match.index);
+                runtime.setProperty(result, "input", match.input);
+                return result;
+            });
+        if (this.regexpPrototype) {
+            var regexpMethodName;
+            for (regexpMethodName in this.regexpMethods) {
+                if (own(this.regexpMethods, regexpMethodName)) {
+                    this.defineBuiltinProperty(this.regexpPrototype, regexpMethodName,
+                                     this.regexpMethods[regexpMethodName]);
+                }
+            }
+        }
+        function regexpArguments(args, constructing) {
+            var patternValue = args.length ? args[0] : undefined;
+            var flagsValue = args.length > 1 ? args[1] : undefined;
+            if (patternValue && patternValue.guestType === "regexp") {
+                if (flagsValue !== undefined) {
+                    throw new TypeError("flags supplied with a RegExp pattern");
+                }
+                if (!constructing) return {same: patternValue};
+                return {
+                    pattern: runtime.heapRecords.regexpPattern(
+                        patternValue.heapAddress),
+                    flags: runtime.heapRecords.regexpFlags(
+                        patternValue.heapAddress)
+                };
+            }
+            var pattern = patternValue === undefined ? "" :
+                runtime.toString(patternValue);
+            var flags = flagsValue === undefined ? "" :
+                runtime.toString(flagsValue);
+            var seenGlobal = false;
+            var seenIgnoreCase = false;
+            var seenMultiline = false;
+            var flagIndex = 0;
+            while (flagIndex < flags.length) {
+                var flag = flags.charAt(flagIndex++);
+                if (flag === "g" && !seenGlobal) seenGlobal = true;
+                else if (flag === "i" && !seenIgnoreCase) seenIgnoreCase = true;
+                else if (flag === "m" && !seenMultiline) seenMultiline = true;
+                else throw new SyntaxError("invalid regular expression flags");
+            }
+            return {pattern: pattern, flags: flags};
+        }
+        var regexpConstructor = this.makeNativeFunction("RegExp",
+            function (receiver, args) {
+                var parsed = regexpArguments(args, false);
+                return parsed.same || runtime.makeRegExp(
+                    parsed.pattern, parsed.flags);
+            }, "intrinsic", NativeIntrinsics.REGEXP_CONSTRUCTOR);
+        regexpConstructor.constructCallback = function (args) {
+            var parsed = regexpArguments(args, true);
+            return runtime.makeRegExp(parsed.pattern, parsed.flags);
+        };
+        if (this.regexpPrototype) {
+            this.defineDataProperty(regexpConstructor, "prototype", this.regexpPrototype, 0);
+            this.defineBuiltinProperty(this.regexpPrototype, "constructor", regexpConstructor);
+        }
+        this.setGlobal("RegExp", regexpConstructor);
+        var stringConstructor = this.makeNativeFunction("String",
+            function (receiver, args) {
+                return args.length ? runtime.toString(args[0]) : "";
+            }, "intrinsic", NativeIntrinsics.STRING_CONSTRUCTOR);
+        stringConstructor.constructCallback = function (args) {
+            var stringValue = args.length ? runtime.toString(args[0]) : "";
+            var wrapper = runtime.makePrimitiveWrapper(
+                stringValue, runtime.stringPrototype);
+            runtime.defineDataProperty(wrapper, "length", stringValue.length, 0);
+            return wrapper;
+        };
+        this.defineDataProperty(stringConstructor, "prototype", this.stringPrototype, 0);
+        this.defineBuiltinProperty(this.stringPrototype, "constructor", stringConstructor);
+        this.defineBuiltinProperty(stringConstructor, "fromCharCode", this.makeNativeFunction(
+            "String.fromCharCode", function (receiver, args) {
+                var characters = [];
+                var codeIndex = 0;
+                while (codeIndex < args.length) {
+                    /* Convert in argument order, then assemble UTF-16 code
+                     * units without relying on a host's variadic apply or
+                     * its argument-count/stack limit. ToInt32's low 16 bits
+                     * are exactly ToUint16, including NaN and infinities. */
+                    characters[codeIndex] = String.fromCharCode(
+                        runtime.toNumber(args[codeIndex]) & 65535);
+                    codeIndex++;
+                }
+                return characters.join("");
+            }, "intrinsic", NativeIntrinsics.STRING_FROM_CHAR_CODE));
+        this.setGlobal("String", stringConstructor);
+        var numberConstructor = this.makeNativeFunction("Number",
+            function (receiver, args) {
+                return args.length ? runtime.toNumber(args[0]) : 0;
+            }, "intrinsic", NativeIntrinsics.NUMBER_CONSTRUCTOR);
+        numberConstructor.constructCallback = function (args) {
+            return runtime.makePrimitiveWrapper(
+                args.length ? runtime.toNumber(args[0]) : 0,
+                runtime.numberPrototype);
+        };
+        this.defineDataProperty(numberConstructor, "prototype", this.numberPrototype, 0);
+        this.defineBuiltinProperty(this.numberPrototype, "constructor", numberConstructor);
+        /* ES5.1 15.7.3. These values are guest primitive cells attached to
+         * the guest constructor object; they are not borrowed objects from
+         * the host's Number constructor. */
+        this.defineDataProperty(numberConstructor, "MAX_VALUE",
+                                1.7976931348623157e308, 0);
+        this.defineDataProperty(numberConstructor, "MIN_VALUE", 5e-324, 0);
+        this.defineDataProperty(numberConstructor, "NaN", NaN, 0);
+        this.defineDataProperty(numberConstructor, "NEGATIVE_INFINITY",
+                                -Infinity, 0);
+        this.defineDataProperty(numberConstructor, "POSITIVE_INFINITY",
+                                Infinity, 0);
+        this.setGlobal("Number", numberConstructor);
+        this.booleanMethods = {};
+        this.booleanMethods.toString = this.makeNativeFunction("Boolean.toString",
+            function (receiver) {
+                return runtime.booleanValue(receiver) ? "true" : "false";
+            });
+        this.booleanMethods.valueOf = this.makeNativeFunction("Boolean.valueOf",
+            function (receiver) { return runtime.booleanValue(receiver); });
+        this.defineBuiltinProperty(this.booleanPrototype, "toString",
+                         this.booleanMethods.toString);
+        this.defineBuiltinProperty(this.booleanPrototype, "valueOf",
+                         this.booleanMethods.valueOf);
+        var booleanConstructor = this.makeNativeFunction("Boolean",
+            function (receiver, args) {
+                return args.length ? runtime.truthy(args[0]) : false;
+            }, "intrinsic", NativeIntrinsics.BOOLEAN_CONSTRUCTOR);
+        booleanConstructor.constructCallback = function (args) {
+            return runtime.makePrimitiveWrapper(
+                args.length ? runtime.truthy(args[0]) : false,
+                runtime.booleanPrototype);
+        };
+        this.defineDataProperty(booleanConstructor, "prototype", this.booleanPrototype, 0);
+        this.defineBuiltinProperty(this.booleanPrototype, "constructor", booleanConstructor);
+        this.setGlobal("Boolean", booleanConstructor);
+        var arrayConstructor = this.makeNativeFunction("Array",
+            function (receiver, args) {
+                var array = runtime.makeArray();
+                if (args.length === 1 && typeof args[0] === "number") {
+                    var length = Number(args[0]);
+                    if (length < 0 || length !== Math.floor(length)) {
+                        throw new RangeError("invalid array length");
+                    }
+                    runtime.ensureArrayCapacity(array, length);
+                    runtime.heapRecords.setArrayLength(array.heapAddress, length);
+                } else {
+                    var index = 0;
+                    while (index < args.length) runtime.arraySet(array, index, args[index++]);
+                }
+                return array;
+            }, "intrinsic", NativeIntrinsics.ARRAY_CONSTRUCTOR);
+        this.defineDataProperty(arrayConstructor, "isArray",
+            this.makeNativeFunction("Array.isArray", function (receiver, args) {
+                return !!args[0] && args[0].guestType === "array" &&
+                    !runtime.isArgumentsObject(args[0]);
+            }, "intrinsic", NativeIntrinsics.ARRAY_IS_ARRAY), HeapRecords.Attributes.WRITABLE |
+                HeapRecords.Attributes.CONFIGURABLE);
+        if (this.arrayPrototype) {
+            this.defineDataProperty(arrayConstructor, "prototype", this.arrayPrototype, 0);
+            this.defineBuiltinProperty(this.arrayPrototype, "constructor", arrayConstructor);
+        }
+        this.setGlobal("Array", arrayConstructor);
+        var math = this.makeObject();
+        function mathMethod(name, callback, intrinsicId) {
+            runtime.defineBuiltinProperty(math, name,
+                runtime.makeNativeFunction("Math." + name, callback,
+                    "intrinsic", intrinsicId || NativeIntrinsics.NONE));
+        }
+        this.defineDataProperty(math, "E", Math.E, 0);
+        this.defineDataProperty(math, "LN2", Math.LN2, 0);
+        this.defineDataProperty(math, "LN10", Math.LN10, 0);
+        this.defineDataProperty(math, "LOG2E", Math.LOG2E, 0);
+        this.defineDataProperty(math, "LOG10E", Math.LOG10E, 0);
+        this.defineDataProperty(math, "PI", Math.PI, 0);
+        this.defineDataProperty(math, "SQRT1_2", Math.SQRT1_2, 0);
+        this.defineDataProperty(math, "SQRT2", Math.SQRT2, 0);
+        mathMethod("abs", function (receiver, args) {
+            return Math.abs(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_ABS);
+        mathMethod("acos", function (receiver, args) { return Math.acos(runtime.toNumber(args[0])); });
+        mathMethod("asin", function (receiver, args) { return Math.asin(runtime.toNumber(args[0])); });
+        mathMethod("atan", function (receiver, args) {
+            return Math.atan(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_ATAN);
+        mathMethod("atan2", function (receiver, args) {
+            return Math.atan2(runtime.toNumber(args[0]), runtime.toNumber(args[1]));
+        }, NativeIntrinsics.MATH_ATAN2);
+        mathMethod("ceil", function (receiver, args) {
+            return Math.ceil(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_CEIL);
+        mathMethod("floor", function (receiver, args) {
+            return Math.floor(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_FLOOR);
+        mathMethod("round", function (receiver, args) {
+            return Math.round(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_ROUND);
+        mathMethod("sqrt", function (receiver, args) {
+            return Math.sqrt(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_SQRT);
+        mathMethod("sin", function (receiver, args) {
+            return Math.sin(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_SIN);
+        mathMethod("cos", function (receiver, args) {
+            return Math.cos(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_COS);
+        mathMethod("exp", function (receiver, args) { return Math.exp(runtime.toNumber(args[0])); });
+        mathMethod("log", function (receiver, args) {
+            return Math.log(runtime.toNumber(args[0]));
+        }, NativeIntrinsics.MATH_LOG);
+        mathMethod("pow", function (receiver, args) {
+            return Math.pow(runtime.toNumber(args[0]), runtime.toNumber(args[1]));
+        }, NativeIntrinsics.MATH_POW);
+        mathMethod("random", function () { return Math.random(); },
+                   NativeIntrinsics.MATH_RANDOM);
+        mathMethod("min", function (receiver, args) {
+            var numbers = [], index = 0;
+            while (index < args.length) numbers.push(runtime.toNumber(args[index++]));
+            return Math.min.apply(Math, numbers);
+        }, NativeIntrinsics.MATH_MIN);
+        mathMethod("max", function (receiver, args) {
+            var numbers = [], index = 0;
+            while (index < args.length) numbers.push(runtime.toNumber(args[index++]));
+            return Math.max.apply(Math, numbers);
+        }, NativeIntrinsics.MATH_MAX);
+        mathMethod("tan", function (receiver, args) { return Math.tan(runtime.toNumber(args[0])); },
+            NativeIntrinsics.MATH_TAN);
+        this.setGlobal("Math", math);
+    };
+
+    Runtime.prototype.installDateBuiltins = function () {
+        var runtime = this;
+        var dateValueKey = "\x00DateValue";
+        this.dateValueKey = dateValueKey;
+        this.datePrototype = this.makeObject();
+        this.linearHeap.setFlags(this.datePrototype.heapAddress, HeapRecords.ObjectClassFlags.DATE);
+        this.defineInternalValue(this.datePrototype, dateValueKey, NaN);
+        function dateValue(receiver) {
+            return Number(runtime.getProperty(receiver, dateValueKey));
+        }
+        function method(name, field, intrinsicId) {
+            runtime.defineBuiltinProperty(runtime.datePrototype, name,
+                runtime.makeNativeFunction("Date." + name,
+                    function (receiver) {
+                        if (!field) return dateValue(receiver);
+                        return DateSupport.field(dateValue(receiver), field);
+                    }, "intrinsic", intrinsicId || NativeIntrinsics.NONE));
+        }
+        method("getDate", "Date", NativeIntrinsics.DATE_GET_DATE);
+        method("getMonth", "Month", NativeIntrinsics.DATE_GET_MONTH);
+        method("getFullYear", "FullYear",
+               NativeIntrinsics.DATE_GET_FULL_YEAR);
+        method("getHours", "Hours", NativeIntrinsics.DATE_GET_HOURS);
+        method("getMinutes", "Minutes", NativeIntrinsics.DATE_GET_MINUTES);
+        method("getSeconds", "Seconds", NativeIntrinsics.DATE_GET_SECONDS);
+        method("getMilliseconds", "Milliseconds",
+               NativeIntrinsics.DATE_GET_MILLISECONDS);
+        method("getDay", "Day", NativeIntrinsics.DATE_GET_DAY);
+        method("getTime", null, NativeIntrinsics.DATE_GET_TIME);
+        method("valueOf", null, NativeIntrinsics.DATE_GET_TIME);
+        method("getUTCDate", "Date");
+        method("getUTCMonth", "Month");
+        method("getUTCFullYear", "FullYear");
+        method("getUTCHours", "Hours");
+        method("getUTCMinutes", "Minutes");
+        method("getUTCSeconds", "Seconds");
+        method("getUTCMilliseconds", "Milliseconds");
+        method("getUTCDay", "Day");
+        function dateStringMethod(name) {
+            runtime.defineBuiltinProperty(runtime.datePrototype, name,
+                runtime.makeNativeFunction("Date." + name,
+                    function (receiver) {
+                        return DateSupport.toString(dateValue(receiver));
+                    }));
+        }
+        dateStringMethod("toString");
+        dateStringMethod("toDateString");
+        dateStringMethod("toTimeString");
+        dateStringMethod("toLocaleString");
+        dateStringMethod("toLocaleDateString");
+        dateStringMethod("toLocaleTimeString");
+        dateStringMethod("toUTCString");
+        dateStringMethod("toISOString");
+        runtime.defineBuiltinProperty(runtime.datePrototype, "toJSON",
+            runtime.makeNativeFunction("Date.toJSON", function (receiver) {
+                var value = dateValue(receiver);
+                return value === value ? DateSupport.toString(value) : null;
+            }));
+        function dateSetter(name, field, utc) {
+            runtime.defineBuiltinProperty(runtime.datePrototype, name,
+                runtime.makeNativeFunction("Date." + name,
+                    function (receiver, args) {
+                        var value = DateSupport.setField(
+                            dateValue(receiver), field, args, utc);
+                        runtime.defineInternalValue(receiver, dateValueKey, value);
+                        return value;
+                    }));
+        }
+        dateSetter("setTime", "Time", true);
+        dateSetter("setMilliseconds", "Milliseconds", false);
+        dateSetter("setUTCMilliseconds", "Milliseconds", true);
+        dateSetter("setSeconds", "Seconds", false);
+        dateSetter("setUTCSeconds", "Seconds", true);
+        dateSetter("setMinutes", "Minutes", false);
+        dateSetter("setUTCMinutes", "Minutes", true);
+        dateSetter("setHours", "Hours", false);
+        dateSetter("setUTCHours", "Hours", true);
+        dateSetter("setDate", "Date", false);
+        dateSetter("setUTCDate", "Date", true);
+        dateSetter("setMonth", "Month", false);
+        dateSetter("setUTCMonth", "Month", true);
+        dateSetter("setFullYear", "FullYear", false);
+        dateSetter("setUTCFullYear", "FullYear", true);
+        this.defineBuiltinProperty(this.datePrototype, "getTimezoneOffset",
+            this.makeNativeFunction("Date.getTimezoneOffset", function () {
+                return DateSupport.localTimezoneOffset();
+            }, "intrinsic", NativeIntrinsics.DATE_GET_TIMEZONE_OFFSET));
+        var dateConstructor = this.makeNativeFunction("Date", function () {
+            return String(DateSupport.construct([], runtime.nowMilliseconds ?
+                runtime.nowMilliseconds() : 0));
+        }, "intrinsic", NativeIntrinsics.DATE_CONSTRUCTOR);
+        dateConstructor.constructCallback = function (args) {
+            var date = runtime.makeObject();
+            runtime.heapRecords.setObjectPrototype(
+                date.heapAddress, runtime.datePrototype.heapAddress);
+            runtime.linearHeap.setFlags(date.heapAddress, HeapRecords.ObjectClassFlags.DATE);
+            runtime.defineInternalValue(date, dateValueKey, DateSupport.construct(
+                args, runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0));
+            return date;
+        };
+        this.defineDataProperty(dateConstructor, "prototype", this.datePrototype, 0);
+        this.defineBuiltinProperty(this.datePrototype, "constructor", dateConstructor);
+        this.defineBuiltinProperty(dateConstructor, "now",
+            this.makeNativeFunction("Date.now", function () {
+                return runtime.nowMilliseconds ? runtime.nowMilliseconds() : 0;
+            }, "intrinsic", NativeIntrinsics.DATE_NOW));
+        this.defineBuiltinProperty(dateConstructor, "parse",
+            this.makeNativeFunction("Date.parse", function (receiver, args) {
+                return DateSupport.parse(runtime.toString(args[0]));
+            }));
+        this.defineBuiltinProperty(dateConstructor, "UTC",
+            this.makeNativeFunction("Date.UTC", function (receiver, args) {
+                if (!args.length) return NaN;
+                var year = runtime.toNumber(args[0]);
+                if (year === year && year >= 0 && year <= 99) year += 1900;
+                return DateSupport.timeClip(DateSupport.makeTime(
+                    year,
+                    args.length > 1 ? runtime.toNumber(args[1]) : 0,
+                    args.length > 2 ? runtime.toNumber(args[2]) : 1,
+                    args.length > 3 ? runtime.toNumber(args[3]) : 0,
+                    args.length > 4 ? runtime.toNumber(args[4]) : 0,
+                    args.length > 5 ? runtime.toNumber(args[5]) : 0,
+                    args.length > 6 ? runtime.toNumber(args[6]) : 0));
+            }));
+        this.setGlobal("Date", dateConstructor);
+    };
+
+    Runtime.prototype.installRawFFI = function (bridge) {
+        bridge = bridge || new HostFFI();
+        if (!bridge.isMMVM && !bridge.snapshotBindings) {
+            throw new Error("raw guest FFI requires the js_min.exe host");
+        }
+        this.hostFFI = bridge;
+        this.setGlobal("get_dlsym", this.makeNativeFunction("get_dlsym",
+            function () {
+                return bridge.getDlsym();
+            }, "intrinsic", NativeIntrinsics.GET_DLSYM));
+        this.setGlobal("ffi_call", this.makeNativeFunction("ffi_call",
+            function (receiver, args) {
+                if (!args.length) throw new TypeError("ffi_call requires a pointer");
+                var pointer = args[0];
+                var callArguments = [];
+                var index = 1;
+                while (index < args.length) {
+                    callArguments.push(args[index]);
+                    index++;
+                }
+                return bridge.call(pointer, callArguments);
+            }, "intrinsic", NativeIntrinsics.FFI_CALL));
+        var memory = this.linearHeap.memory;
+        memory.setNativeCaller(function (pointer, args) {
+            return bridge.snapshotBindings ? bridge.callRaw(pointer, args, memory) :
+                bridge.call(pointer, args);
+        });
+        if (this.nativeInterpreter) {
+            this.nativeInterpreter.setDlsymPointer(bridge.getDlsym());
+            this.nativeInterpreter.setGettimeofdayPointer(
+                bridge.snapshotBindings ? 0 : bridge.resolve("gettimeofday"));
+        }
+        this.setGlobal("peek8", this.makeNativeFunction("peek8",
+            function (receiver, args) { return bridge.peek8(args[0]); },
+            "intrinsic", NativeIntrinsics.PEEK8));
+        this.setGlobal("poke8", this.makeNativeFunction("poke8",
+            function (receiver, args) { return bridge.poke8(args[0], args[1]); },
+            "intrinsic", NativeIntrinsics.POKE8));
+        this.setGlobal("peek32", this.makeNativeFunction("peek32",
+            function (receiver, args) { return bridge.peek32(args[0]); },
+            "intrinsic", NativeIntrinsics.PEEK32));
+        this.setGlobal("poke32", this.makeNativeFunction("poke32",
+            function (receiver, args) { return bridge.poke32(args[0], args[1]); },
+            "intrinsic", NativeIntrinsics.POKE32));
+        /* Optional raw-memory acceleration. The portable implementation may
+         * decline; the caller then performs its ordinary ordered stores.
+         * Native execution validates dense int32 cells before any write. */
+        this.setGlobal("__guestVMTryCopyInt32Array", this.makeNativeFunction(
+            "__guestVMTryCopyInt32Array", function () { return false; },
+            "intrinsic", NativeIntrinsics.TRY_COPY_INT32_ARRAY));
+        this.setGlobal("quit", this.makeHostFunction("quit",
+            function (receiver, args) {
+                quit(args.length ? Number(args[0]) : 0);
+                return undefined;
+            }));
+    };
+
+    /* Private ABI used by the self-hosted compiler to turn its ordinary guest
+     * descriptor objects into authoritative heap bytecode.  The native
+     * interpreter will implement these IDs without entering host JavaScript.
+     * The callbacks below define the reference-backend semantics. */
+    Runtime.prototype.installProgramBuilder = function () {
+        var runtime = this;
+        /* Private embedder diagnostic; not part of ECMAScript's API. Native
+         * execution handles this directly and never calls this host fallback. */
+        this.setGlobal("__guestVMOpcodeCounterWord", this.makeNativeFunction(
+            "__guestVMOpcodeCounterWord", function (receiver, args) {
+                var index = args[0];
+                if (!runtime.profileOpcodeCounts || !runtime.nativeInterpreter ||
+                    typeof index !== "number" || index !== (index | 0) ||
+                    index < 0 || index >= HeapRecords.KernelConstants.ENGINE_OPCODE_COUNT) {
+                    return undefined;
+                }
+                return runtime.heapRecords.engineOpcodeCount(
+                    runtime.nativeInterpreter.stateAddress, index) | 0;
+            }, "intrinsic", NativeIntrinsics.OPCODE_COUNTER_WORD));
+        this.setGlobal("__guestVMGCStress", this.makeNativeFunction(
+            "__guestVMGCStress", function (receiver, args) {
+                if (args.length) {
+                    var interval = args[0] === true ?
+                        HeapRecords.KernelConstants.GC_STRESS_DEFAULT_INTERVAL :
+                        Number(args[0]);
+                    if (interval < 0 || interval > 2147483647 ||
+                        interval !== Math.floor(interval)) {
+                        throw new RangeError("GC stress interval must be a nonnegative int32");
+                    }
+                    runtime.gcThreshold = interval ? 256 : 16384;
+                    if (runtime.nativeInterpreter) {
+                        runtime.heapRecords.setEngineGCStressInterval(
+                            runtime.nativeInterpreter.stateAddress, interval);
+                    }
+                    return interval;
+                }
+                return runtime.collectionCount;
+            }, "intrinsic", NativeIntrinsics.GC_STRESS_CONTROL));
+        function integer(value, name) {
+            value = Number(value);
+            if (value !== Math.floor(value)) {
+                throw new TypeError(name + " must be an integer");
+            }
+            return value;
+        }
+        function programFor(callable) {
+            if (!callable || callable.guestType !== "bytecodeFunction") {
+                throw new TypeError("program handle is not callable bytecode");
+            }
+            runtime.assertOwned(callable);
+            return callable.program;
+        }
+        this.setGlobal("__guestVMInstallEvalCompiler",
+            this.makeNativeFunction("__guestVMInstallEvalCompiler",
+                function (receiver, args) {
+                    var compiler = args[0];
+                    var indirectCompiler = args[1];
+                    var functionCompiler = args[2];
+                    if (functionCompiler && functionCompiler.guestType !== "bytecodeFunction") {
+                        throw new TypeError("Function compiler must be guest bytecode");
+                    }
+                    if (!compiler || compiler.guestType !==
+                            "bytecodeFunction") {
+                        throw new TypeError(
+                            "eval compiler must be guest bytecode");
+                    }
+                    if (!indirectCompiler || indirectCompiler.guestType !==
+                            "bytecodeFunction") {
+                        throw new TypeError(
+                            "indirect eval compiler must be guest bytecode");
+                    }
+                    if (runtime.evalCompilerRoot) {
+                        runtime.release(runtime.evalCompilerRoot);
+                    }
+                    if (runtime.indirectEvalCompilerRoot) {
+                        runtime.release(runtime.indirectEvalCompilerRoot);
+                    }
+                    runtime.evalCompilerRoot = runtime.retain(compiler);
+                    runtime.indirectEvalCompilerRoot =
+                        runtime.retain(indirectCompiler);
+                    if (runtime.functionCompilerRoot) runtime.release(runtime.functionCompilerRoot);
+                    runtime.functionCompilerRoot = functionCompiler ? runtime.retain(functionCompiler) : 0;
+                    if (runtime.nativeInterpreter) {
+                        runtime.nativeInterpreter.setEvalCompilers(
+                            compiler, indirectCompiler, functionCompiler);
+                    }
+                    return undefined;
+                }));
+        this.setGlobal("__guestVMProgramCreate", this.makeNativeFunction(
+            "__guestVMProgramCreate", function (receiver, args) {
+                var debugReference = 0;
+                if (args.length > 14 && args[14] !== null && args[14] !== undefined) {
+                    runtime.assertOwned(args[14]);
+                    if (args[14].guestType !== "array") throw new TypeError("program debug data must be a guest array");
+                    debugReference = args[14].heapAddress;
+                    runtime.linearHeap.requireRecord(debugReference, Heap.Types.ARRAY);
+                }
+                var codeLength = integer(args[0], "code length");
+                var constantLength = integer(args[1], "constant length");
+                var bindingLength = integer(args[2], "binding-register length");
+                var parameterLength = integer(args[3], "parameter length");
+                var bindingCount = integer(args[9], "binding count");
+                if (codeLength < 0 || constantLength < 0 || bindingLength < 0 ||
+                    parameterLength < 0 || bindingCount < 0) {
+                    throw new RangeError("negative program length");
+                }
+                var program = {
+                    code: new Array(codeLength),
+                    constants: new Array(constantLength),
+                    constantRegisters: new Array(constantLength),
+                    bindingRegisters: bindingLength ? new Array(bindingLength) : null,
+                    parameters: new Array(parameterLength),
+                    parameterSlots: new Array(parameterLength),
+                    registerCount: integer(args[4], "register count"),
+                    argumentsSlot: integer(args[5], "arguments slot"),
+                    thisSlot: integer(args[6], "this slot"),
+                    functionNameSlot: integer(args[7], "function-name slot"),
+                    usesArguments: !!args[8],
+                    strict: !!args[10],
+                    evalCode: !!args[11],
+                    source: args.length > 13 && args[13] !== null ?
+                        String(args[13]) : null,
+                    bindings: bindingCount ? new Array(bindingCount) : null,
+                    globalDeclarations: [],
+                    heapDebugReference: debugReference
+                };
+                var index = 0;
+                while (index < constantLength) {
+                    program.constants[index] = undefined;
+                    program.constantRegisters[index] = -1;
+                    index++;
+                }
+                index = 0;
+                while (program.bindingRegisters &&
+                       index < program.bindingRegisters.length) {
+                    program.bindingRegisters[index++] = -1;
+                }
+                index = 0;
+                while (index < parameterLength) program.parameterSlots[index++] = -1;
+                runtime.registerProgram(program);
+                var contextAnchor = args.length > 12 ? args[12] : null;
+                var homeContext = contextAnchor &&
+                    contextAnchor.guestType === "bytecodeFunction" ?
+                    contextAnchor.homeContext : null;
+                return runtime.makeGuestFunction(program, null, homeContext);
+            }, "intrinsic", NativeIntrinsics.PROGRAM_CREATE));
+        this.setGlobal("__guestVMProgramSetBindingName", this.makeNativeFunction(
+            "__guestVMProgramSetBindingName", function (receiver, args) {
+                var program = programFor(args[0]);
+                var index = integer(args[1], "binding index");
+                var names = runtime.heapRecords.programBindingNames(program.heapAddress);
+                if (!names || index < 0 || index >= program.bindings.length ||
+                        typeof args[2] !== "string") throw new TypeError("invalid program binding name");
+                runtime.valueCells.writeReferenceAt(runtime.heapRecords.vectorCell(names, index),
+                    runtime.internStringAddress(args[2]));
+                program.bindings[index] = args[2];
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_BINDING_NAME));
+        this.setGlobal("__guestVMProgramSetCode", this.makeNativeFunction(
+            "__guestVMProgramSetCode", function (receiver, args) {
+                var program = programFor(args[0]);
+                var index = integer(args[1], "code index");
+                var source = args[2];
+                var isArrayRange = source && source.guestType === "array";
+                var isTypedRange = source && source.guestType === "typedArray" &&
+                    runtime.typedArraySupport.viewKind(source) ===
+                        runtime.typedArraySupport.constructor.Kinds.INT32;
+                var isRange = isArrayRange || isTypedRange;
+                var count = isArrayRange ? runtime.arrayLength(source) :
+                    isTypedRange ? runtime.typedArraySupport.viewLength(source) : 1;
+                if (index < 0 || index > program.code.length ||
+                        count > program.code.length - index) {
+                    throw new RangeError("bytecode index is out of bounds");
+                }
+                var words = [], word = 0;
+                while (word < count) {
+                    words.push(integer(isRange ? runtime.getProperty(source,
+                        String(word)) : source, "bytecode word"));
+                    word++;
+                }
+                var bytecode = runtime.writableProgramBytecode(program);
+                word = 0;
+                while (word < count) {
+                    program.code[index + word] = words[word];
+                    runtime.heapRecords.setBytecodeWord(bytecode, index + word, words[word]);
+                    word++;
+                }
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_CODE));
+        this.setGlobal("__guestVMProgramSetConstant", this.makeNativeFunction(
+            "__guestVMProgramSetConstant", function (receiver, args) {
+                var program = programFor(args[0]);
+                var index = integer(args[1], "constant index");
+                var value = args[2];
+                if (index < 0 || index >= program.constants.length) {
+                    throw new RangeError("constant index is out of bounds");
+                }
+                if (value && value.guestType === "bytecodeFunction") {
+                    value = value.program;
+                    runtime.valueCells.writeReferenceAt(
+                        runtime.heapRecords.vectorCell(
+                            runtime.heapRecords.executionProgramConstants(program.heapAddress), index),
+                        runtime.programAddress(value));
+                } else {
+                    runtime.writeConstantHeapValue(
+                        runtime.heapRecords.vectorCell(
+                            runtime.heapRecords.executionProgramConstants(program.heapAddress), index), value);
+                }
+                program.constants[index] = value;
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_CONSTANT));
+        this.setGlobal("__guestVMProgramSetVector", this.makeNativeFunction(
+            "__guestVMProgramSetVector", function (receiver, args) {
+                var program = programFor(args[0]);
+                var kind = integer(args[1], "program vector kind");
+                var index = integer(args[2], "program vector index");
+                var value = integer(args[3], "program vector value");
+                var values;
+                var address;
+                if (kind === 0) {
+                    values = program.constantRegisters;
+                    address = program.heapConstantRegistersAddress;
+                } else if (kind === 1) {
+                    values = program.bindingRegisters;
+                    address = program.heapBindingRegistersAddress;
+                } else if (kind === 2) {
+                    values = program.parameterSlots;
+                    address = program.heapParameterSlotsAddress;
+                } else throw new RangeError("unknown program vector kind");
+                if (!values || index < 0 || index >= values.length) {
+                    throw new RangeError("program vector index is out of bounds");
+                }
+                values[index] = value;
+                address = runtime.writableProgramVector(program, kind);
+                runtime.heapRecords.setIntegerVectorValue(address, index, value);
+                return args[0];
+            }, "intrinsic", NativeIntrinsics.PROGRAM_SET_VECTOR));
+    };
+
+    Runtime.prototype.getGlobal = function (context, name) {
+        if (arguments.length === 1) {
+            name = context;
+            context = this.contexts.length ? this.contexts[0] : null;
+        }
+        var globalObject = context ? context.globalObject : this.globalObject;
+        if (!this.hasOwnProperty(globalObject, name)) {
+            throw new ReferenceError(name + " is not defined");
+        }
+        return this.getProperty(globalObject, name);
+    };
+
+    Runtime.prototype.locateError = function (error, program, pc) {
+        if (!error || (typeof error !== "object" && typeof error !== "function") ||
+            error.guestFilename || (error.properties && error.properties.$fileName)) {
+            return error;
+        }
+        var location = null;
+        if (program && program.sourceLocations && pc !== undefined) {
+            location = Bytecode.findSourceLocation(program.sourceLocations, pc);
+        }
+        if (!location && program) location = program.location;
+        if (!location) return error;
+        if (error.guestType && error.properties) {
+            var guestFilename = location.filename || program.filename || "<source>";
+            var guestLine = location.line || 1;
+            var guestColumn = location.column || 1;
+            var guestName = error.properties.$name || "Error";
+            var guestMessage = error.properties.$message || "";
+            error.properties.$fileName = guestFilename;
+            error.properties.$lineNumber = guestLine;
+            error.properties.$columnNumber = guestColumn;
+            error.properties.$stack = guestFilename + ":" + guestLine + ":" +
+                guestColumn + ": " + guestName +
+                (guestMessage ? ": " + guestMessage : "");
+            return error;
+        }
+        error.guestFilename = location.filename || program.filename || "<source>";
+        error.guestLine = location.line || 1;
+        error.guestColumn = location.column || 1;
+        var label = error.guestFilename + ":" + error.guestLine + ":" +
+                    error.guestColumn;
+        var description = error.name ? error.name + ": " + error.message : String(error);
+        try {
+            error.stack = label + ": " + description +
+                (error.stack ? "\n" + error.stack : "");
+        } catch (ignored) {}
+        return error;
+    };
+
+    Runtime.prototype.reportExceptionState = function (error, frame) {
+        if (!this.traceExceptions || !frame) return;
+        var line = "guest exception " +
+            (error.guestFilename || frame.program.filename || "<guest>") +
+            ":" + (error.guestLine || 1) + ":" +
+            (error.guestColumn || 1);
+        var bindings = frame.program.bindings || [];
+        var bindingSlots = frame.program.bindingSlots || {};
+        var index = 0;
+        while (index < bindings.length) {
+            var name = bindings[index++];
+            var value;
+            try {
+                var slot = bindingSlots["$" + name];
+                var bindingRegister = frame.program.bindingRegisters &&
+                    frame.program.bindingRegisters[slot];
+                if (bindingRegister !== undefined && bindingRegister >= 0) {
+                    value = this.readHeapValue(
+                        this.heapRecords.frameRegisterCell(
+                            frame.heapAddress, bindingRegister));
+                } else {
+                    value = this.getBinding(frame.context,
+                                            frame.environment, name);
+                }
+                if (value && value.guestType) {
+                    value = "<" + value.guestType + "@" +
+                            value.heapAddress + ">";
+                } else {
+                    value = String(value);
+                    if (value.length > 80) value = value.substring(0, 77) + "...";
+                }
+                line += " " + name + "=" + value;
+            } catch (ignored) {
+                line += " " + name + "=<unavailable>";
+            }
+        }
+        if (typeof print === "function") print(line);
+        else if (typeof console !== "undefined" && console.log) console.log(line);
+    };
+
+    Runtime.prototype.importCaughtException = function (error) {
+        if (!error || error.guestType ||
+            (typeof error !== "object" && typeof error !== "function")) {
+            return error;
+        }
+        var name = error.name || "Error";
+        var result = ErrorSupport.makeErrorObject(this, name,
+            error.message === undefined ? String(error) : String(error.message));
+        if (error.guestFilename !== undefined) {
+            this.setProperty(result, "fileName", error.guestFilename);
+            this.setProperty(result, "lineNumber", error.guestLine || 1);
+            this.setProperty(result, "columnNumber", error.guestColumn || 1);
+        }
+        if (error.stack !== undefined) {
+            this.setProperty(result, "stack", String(error.stack));
+        }
+        return result;
+    };
+
+    Runtime.prototype.setGlobal = function (context, name, value, strict) {
+        if (arguments.length === 2) {
+            value = name;
+            name = context;
+            context = null;
+        }
+        this.assertOwned(value);
+        var globalObject = context ? context.globalObject : this.globalObject;
+        if (strict && !this.hasProperty(globalObject, name)) {
+            throw new ReferenceError(name + " is not defined");
+        }
+        this.setProperty(globalObject, name, value, strict);
+        return value;
+    };
+
+    Runtime.prototype.globalCellAddress = function (context, name) {
+        var object = context ? context.globalObject : this.globalObject;
+        var property = this.heapOwnProperty(object, this.propertyKey(name), false);
+        return property ? this.heapRecords.resolvedOwnPropertyEntryValueCell(object.heapAddress, property) : 0;
+    };
+
+    Runtime.prototype.standaloneNativeBindings = function (context) {
+        var bindings = [];
+        var records = this.heapRecords;
+        var services = this.nativeInterpreter.platformServicesAddress;
+        function platformBinding(cell, symbol) {
+            bindings.push({cell: 0, payload: cell, raw: true,
+                           suppliedDlsym: false, symbol: symbol});
+        }
+        var dlsymCell = this.globalCellAddress(context, "NodeDlsymPointer");
+        if (dlsymCell) {
+            bindings.push({cell: dlsymCell,
+                payload: this.valueCells.int32PayloadAddressAt(dlsymCell),
+                suppliedDlsym: true, symbol: "dlsym"});
+        }
+        platformBinding(records.platformGettimeofdayPointerCellAddress(
+            services), "gettimeofday");
+        platformBinding(records.platformStrtodPointerCellAddress(services),
+                        "strtod");
+        platformBinding(records.platformMallocPointerCellAddress(services),
+                        "malloc");
+        platformBinding(records.platformCallocPointerCellAddress(services),
+                        "calloc");
+        platformBinding(records.platformFreePointerCellAddress(services),
+                        "free");
+        platformBinding(records.platformSnprintfPointerCellAddress(services),
+                        "snprintf");
+        platformBinding(records.platformMemsetPointerCellAddress(services),
+                        "memset");
+        var names;
+        var pointers;
+        try {
+            names = this.getGlobal(context, "NodeLibcSymbolNames");
+            pointers = this.getGlobal(context, "NodeLibcSymbols");
+        } catch (missingBindings) {
+            return bindings;
+        }
+        if (!names || !names.heapAddress || !pointers ||
+            !pointers.heapAddress) return bindings;
+        var property = this.heapRecords.lastOwnPropertyEntry(names.heapAddress);
+        while (property) {
+            var keyAddress = this.heapRecords.ownPropertyEntryKey(names.heapAddress, property);
+            var pointerProperty = this.heapRecords.findOwnPropertyEntry(
+                pointers.heapAddress, keyAddress);
+            if (pointerProperty) {
+                var pointerCell = this.heapRecords.resolvedOwnPropertyEntryValueCell(
+                    pointers.heapAddress, pointerProperty);
+                bindings.push({cell: pointerCell,
+                    payload: this.valueCells.int32PayloadAddressAt(pointerCell),
+                    suppliedDlsym: false,
+                    symbol: String(this.readHeapValue(
+                        this.heapRecords.resolvedOwnPropertyEntryValueCell(names.heapAddress, property)))});
+            }
+            property = this.heapRecords.previousOwnPropertyEntry(names.heapAddress, property);
+        }
+        bindings.sort(function (left, right) {
+            if (left.suppliedDlsym !== right.suppliedDlsym) {
+                return left.suppliedDlsym ? -1 : 1;
+            }
+            return left.symbol < right.symbol ? -1 :
+                   left.symbol > right.symbol ? 1 : left.cell - right.cell;
+        });
+        return bindings;
+    };
+
+    Runtime.prototype.standaloneArgumentCells = function (context) {
+        var runtime = this;
+        function payload(name) {
+            var cell = runtime.globalCellAddress(context, name);
+            if (!cell) throw new Error("missing standalone field " + name);
+            return runtime.valueCells.int32PayloadAddressAt(cell);
+        }
+        return {
+            argc: payload("__guestVMStandaloneArgc"),
+            argv: payload("__guestVMStandaloneArgv"),
+            imageBase: payload("__guestVMStandaloneImageBase"),
+            imageLength: payload("__guestVMStandaloneImageLength")
+        };
+    };
+
+    Runtime.prototype.assertOwned = function (value) {
+        if (value && value.guestType && value.ownerRuntime &&
+            value.ownerRuntime !== this) {
+            throw new TypeError("guest value belongs to a different JSRuntime");
+        }
+    };
+
+    Runtime.prototype.propertyKey = function (value) {
+        /* Primitive strings have value identity. Avoid re-interning the already
+         * canonical string constants used by almost every property opcode. */
+        return typeof value === "string" ? value : this.toString(value);
+    };
+
+    Runtime.prototype.getProperty = function (object, key, accessReceiver) {
+        if (arguments.length < 3) accessReceiver = object;
+        this.assertOwned(object);
+        if (object === null || object === undefined) {
+            throw new TypeError("cannot read property '" + key + "'");
+        }
+        if (!object.guestType && typeof object === "object" &&
+            (object.guestFilename || (object.name && object.message !== undefined))) {
+            key = this.propertyKey(key);
+            if (key === "fileName") return object.guestFilename;
+            if (key === "lineNumber") return object.guestLine;
+            if (key === "columnNumber") return object.guestColumn;
+            if (key === "name" || key === "message" || key === "stack") {
+                return object[key];
+            }
+        }
+        if (object.guestType === "buffer") {
+            return this.bufferSupport.getProperty(object, key);
+        }
+        if (object.guestType === "typedArray" || object.guestType === "arrayBuffer") {
+            return this.typedArraySupport.getProperty(object, key);
+        }
+        if (object.guestType === "array") {
+            if (isDirectArrayIndex(key)) return this.arrayGet(object, key, accessReceiver);
+            key = this.propertyKey(key);
+            if (key === "length" && !this.isArgumentsObject(object)) {
+                return this.arrayLength(object);
+            }
+            if (isArrayIndex(key)) return this.arrayGet(object, Number(key), accessReceiver);
+            var arrayProperty = this.heapOwnProperty(object, key, false);
+            if (arrayProperty) {
+                return this.readPropertyEntry(object, arrayProperty, accessReceiver);
+            }
+            var arrayPrototypeAddress =
+                this.heapRecords.objectPrototype(object.heapAddress);
+            if (arrayPrototypeAddress) {
+                var inheritedArrayValue = this.getProperty(
+                    this.readHeapReference(arrayPrototypeAddress), key,
+                    accessReceiver);
+                if (inheritedArrayValue !== undefined) {
+                    return inheritedArrayValue;
+                }
+            }
+            return !this.arrayPrototype && own(this.arrayMethods, key) ? this.arrayMethods[key] : undefined;
+        }
+        key = this.propertyKey(key);
+        this.internStringAddress(key);
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined) {
+            if (key === "length") return wrappedString.length;
+            if (isArrayIndex(key) && Number(key) < wrappedString.length) return wrappedString.charAt(Number(key));
+        }
+        if (object.guestType === "object" || object.guestType === "function" ||
+            object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
+            var property = this.heapOwnProperty(object, key, false);
+            if (property) {
+                return this.readPropertyEntry(object, property, accessReceiver);
+            }
+            if ((object.guestType === "function" ||
+                 object.guestType === "bytecodeFunction") && key === "length") {
+                return this.callableLength(object);
+            }
+            if (object.guestType === "regexp" && !this.regexpPrototype &&
+                own(this.regexpMethods, key)) return this.regexpMethods[key];
+            var prototypeAddress = this.heapRecords.objectPrototype(object.heapAddress);
+            if (prototypeAddress) {
+                var inherited = this.getProperty(
+                    this.readHeapReference(prototypeAddress), key,
+                    accessReceiver);
+                if (inherited !== undefined) return inherited;
+            }
+            if (!this.functionPrototype && (object.guestType === "function" ||
+                 object.guestType === "bytecodeFunction") &&
+                own(this.functionMethods, key)) return this.functionMethods[key];
+            /* Once intrinsics are installed, the actual prototype graph is
+             * authoritative. A method table must not resurrect a deleted
+             * property or invent inherited members on a null prototype. */
+            return this.objectPrototype ? undefined : guestMethod(this.objectMethods, key);
+        }
+        if (typeof object === "string") {
+            if (key === "length") return object.length;
+            if (isArrayIndex(key) && Number(key) < object.length) return object.charAt(Number(key));
+            if (this.stringPrototype) {
+                return this.getProperty(
+                    this.stringPrototype, key, accessReceiver);
+            }
+            return own(this.stringMethods, key) ?
+                this.stringMethods[key] : undefined;
+        }
+        if (typeof object === "number") {
+            return this.getProperty(
+                this.numberPrototype, key, accessReceiver);
+        }
+        if (typeof object === "boolean") {
+            return this.getProperty(
+                this.booleanPrototype, key, accessReceiver);
+        }
+        return undefined;
+    };
+
+    Runtime.prototype.hasOwnProperty = function (object, key) {
+        key = this.propertyKey(key);
+        if (!object || !object.guestType) return false;
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < wrappedString.length))) return true;
+        if (object.guestType === "array" && isArrayIndex(key)) {
+            return this.arrayHas(object, Number(key));
+        }
+        if (object.guestType === "array" && key === "length" &&
+            !this.isArgumentsObject(object)) return true;
+        if ((object.guestType === "function" ||
+             object.guestType === "bytecodeFunction") && key === "length") {
+            return true;
+        }
+        if (object.guestType === "buffer" && isArrayIndex(key)) {
+            return Number(key) < this.bufferSupport.viewLength(object);
+        }
+        if (object.guestType === "typedArray" && isArrayIndex(key)) {
+            return Number(key) < this.typedArraySupport.viewLength(object);
+        }
+        if (object.heapAddress) {
+            return !!this.heapOwnProperty(object, key, false);
+        }
+        return !!object.properties && own(object.properties, "$" + key);
+    };
+
+    Runtime.prototype.hasProperty = function (object, key) {
+        this.assertOwned(object);
+        if (!object || !object.guestType) {
+            throw new TypeError("right-hand side of 'in' is not an object");
+        }
+        key = this.propertyKey(key);
+        if (this.hasOwnProperty(object, key)) return true;
+        if (object.guestType === "array") {
+            if (key === "length") return true;
+            if (!this.arrayPrototype && own(this.arrayMethods, key)) return true;
+        } else if (object.guestType === "buffer") {
+            if (key === "length") return true;
+        } else if (object.guestType === "typedArray") {
+            if (key === "length" || key === "byteLength" ||
+                key === "byteOffset" || key === "buffer") return true;
+        } else if (object.guestType === "arrayBuffer") {
+            if (key === "byteLength") return true;
+        } else if (object.guestType === "regexp") {
+            if (!this.regexpPrototype && own(this.regexpMethods, key)) return true;
+        } else if (object.guestType === "function" ||
+                   object.guestType === "bytecodeFunction") {
+            if (!this.functionPrototype && own(this.functionMethods, key)) return true;
+        }
+        if (object.heapAddress) {
+            var prototypeAddress = this.heapRecords.objectPrototype(
+                object.heapAddress);
+            if (prototypeAddress) {
+                return this.hasProperty(
+                    this.readHeapReference(prototypeAddress), key);
+            }
+        }
+        return !this.objectPrototype && guestMethod(this.objectMethods, key) !== undefined;
+    };
+
+    Runtime.prototype.instanceOf = function (value, constructor) {
+        this.assertOwned(value);
+        this.assertOwned(constructor);
+        while (constructor && constructor.nativeIntrinsic === NativeIntrinsics.BOUND_FUNCTION) {
+            var closure = this.heapRecords.functionClosure(constructor.heapAddress);
+            constructor = this.readHeapValue(this.heapRecords.vectorCell(
+                closure, NativeIntrinsics.BoundFunctionLayout.TARGET));
+        }
+        if (!constructor ||
+            (constructor.guestType !== "function" &&
+             constructor.guestType !== "bytecodeFunction")) {
+            throw new TypeError("right-hand side of 'instanceof' is not callable");
+        }
+        if (constructor.typedArrayKind !== undefined) {
+            return !!value && value.guestType === "typedArray" &&
+                this.heapRecords.bufferViewKind(value.heapAddress) ===
+                    constructor.typedArrayKind;
+        }
+        if (constructor.arrayBufferConstructor) {
+            return !!value && value.guestType === "arrayBuffer";
+        }
+        var expected = this.getProperty(constructor, "prototype");
+        if (!expected || !expected.guestType) {
+            throw new TypeError("constructor prototype is not an object");
+        }
+        if (!value || !value.guestType || !value.heapAddress) return false;
+        var prototypeAddress = this.heapRecords.objectPrototype(
+            value.heapAddress);
+        while (prototypeAddress) {
+            if (prototypeAddress === expected.heapAddress) return true;
+            prototypeAddress = this.heapRecords.objectPrototype(
+                prototypeAddress);
+        }
+        return false;
+    };
+
+    Runtime.prototype.deleteProperty = function (object, key, strict) {
+        this.assertOwned(object);
+        key = this.propertyKey(key);
+        if (!object || !object.guestType) {
+            if (typeof object === "string" && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < object.length))) {
+                if (strict) throw new TypeError("String property is not configurable");
+                return false;
+            }
+            return true;
+        }
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < wrappedString.length))) {
+            if (strict) throw new TypeError("String property is not configurable");
+            return false;
+        }
+        if (object.guestType === "array" && key === "length" &&
+            !this.isArgumentsObject(object)) {
+            if (strict) throw new TypeError("property is not configurable");
+            return false;
+        }
+        if (object.guestType === "array" && isArrayIndex(key)) {
+            var namedElement = this.heapOwnProperty(object, key, false);
+            if (namedElement) {
+                if (!(this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, namedElement) &
+                      HeapRecords.Attributes.CONFIGURABLE)) {
+                    if (strict) throw new TypeError("array element is not configurable");
+                    return false;
+                }
+                this.heapRecords.deleteOwnPropertyEntry(object.heapAddress,
+                    this.internStringAddress(key));
+                object.propertyVersion++;
+            }
+            if (Number(key) >= this.arrayLength(object)) return true;
+            this.detachArgumentMapping(object, Number(key));
+            var arrayCell = this.heapRecords.arrayElementCell(
+                object.heapAddress, Number(key));
+            this.valueCells.writeAbsentAt(arrayCell);
+            return true;
+        }
+        if (object.heapAddress) {
+            var keyAddress = this.internStringAddress(key);
+            var removedProperty = this.heapRecords.findOwnPropertyEntry(
+                object.heapAddress, keyAddress);
+            if (removedProperty &&
+                !(this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, removedProperty) &
+                  HeapRecords.Attributes.CONFIGURABLE)) {
+                if (strict) throw new TypeError("property is not configurable");
+                return false;
+            }
+            delete object.propertyEntries["$" + keyAddress];
+            var deleted = this.heapRecords.deleteOwnPropertyEntry(
+                object.heapAddress, keyAddress);
+            if (deleted) object.propertyVersion++;
+            if (deleted) object.valueVersion++;
+            return deleted;
+        }
+        if (object.properties) delete object.properties["$" + key];
+        return true;
+    };
+
+    /* One representation adapter for Object.keys, own names and for-in's
+     * per-owner candidates. Inclusion policy is shared with native kernels. */
+    Runtime.prototype.collectOwnKeys = function (object, mode) {
+        this.assertOwned(object);
+        var values = [], index, indexedLength = 0, virtualLength = false;
+        var wrappedString = this.stringWrapperValue(object);
+        var wrapper = object && object.guestType === "object" &&
+            !!(this.linearHeap.flags(object.heapAddress) & HeapRecords.ObjectClassFlags.PRIMITIVE_WRAPPER);
+        if (object && object.guestType === "array") {
+            indexedLength = this.arrayLength(object);
+            virtualLength = !this.isArgumentsObject(object);
+            for (index = 0; index < indexedLength; index++) {
+                if (this.arrayHas(object, index)) {
+                    var indexedProperty = this.heapOwnProperty(object, String(index), false);
+                    var attributes = indexedProperty ? this.heapRecords.ownPropertyEntryAttributes(object.heapAddress,
+                        indexedProperty) : PropertySemantics.virtualAttributes(PropertySemantics.virtualKinds.INDEXED_ELEMENT, 0);
+                    if (PropertySemantics.includeEnumerationEntry(mode, attributes, 0, 0)) values.push(String(index));
+                }
+            }
+        } else {
+            if (wrappedString !== undefined) {
+                indexedLength = wrappedString.length;
+                virtualLength = true;
+            } else if (object && object.guestType === "buffer") indexedLength = this.bufferSupport.viewLength(object);
+            else if (object && object.guestType === "typedArray") indexedLength = this.typedArraySupport.viewLength(object);
+            for (index = 0; index < indexedLength; index++) values.push(String(index));
+        }
+        if (virtualLength && mode === PropertySemantics.enumerationModes.OWN_NAMES) values.push("length");
+        var key;
+        if (object && object.heapAddress) {
+            var property = this.heapRecords.lastOwnPropertyEntry(object.heapAddress);
+            var heapKeys = [];
+            while (property) {
+                var namedKey = this.heapRecords.readString(this.heapRecords.ownPropertyEntryKey(object.heapAddress, property));
+                var duplicate = (virtualLength && namedKey === "length") ||
+                    (isArrayIndex(namedKey) && Number(namedKey) < indexedLength);
+                if (PropertySemantics.includeEnumerationEntry(mode,
+                        this.heapRecords.ownPropertyEntryAttributes(object.heapAddress, property),
+                        wrapper && namedKey === this.primitiveValueKey ? 1 : 0, duplicate ? 1 : 0)) heapKeys.push(namedKey);
+                property = this.heapRecords.previousOwnPropertyEntry(object.heapAddress, property);
+            }
+            var heapKeyIndex = heapKeys.length - 1;
+            while (heapKeyIndex >= 0) values.push(heapKeys[heapKeyIndex--]);
+        } else if (object && object.properties) {
+            for (key in object.properties) {
+                if (own(object.properties, key) && key.charAt(0) === "$") {
+                    values.push(key.substring(1));
+                }
+            }
+        }
+        return this.arrayFrom(values);
+    };
+
+    Runtime.prototype.keys = function (object) {
+        return this.collectOwnKeys(object, PropertySemantics.enumerationModes.OWN_ENUMERABLE);
+    };
+
+    /* For-in is not Object.keys: inherited names participate, and a nearer
+     * non-enumerable property still suppresses a farther enumerable one. */
+    Runtime.prototype.enumerableKeys = function (object) {
+        if (object === null || object === undefined) return this.makeArray(0);
+        var current = this.toObject(object);
+        var values = [];
+        var seen = {};
+        while (current) {
+            var names = this.ownPropertyNames(current);
+            var index = 0;
+            while (index < this.arrayLength(names)) {
+                var key = this.arrayGet(names, index++);
+                if (!own(seen, "$" + key)) {
+                    seen["$" + key] = true;
+                    var enumerable = false;
+                    if (current.guestType === "array" && isArrayIndex(key) &&
+                        this.arrayHas(current, Number(key))) {
+                        enumerable = true;
+                    } else {
+                        var entry = this.heapRecords.findOwnPropertyEntry(
+                            current.heapAddress, this.internStringAddress(key));
+                        if (entry) enumerable = !!(this.heapRecords.ownPropertyEntryAttributes(
+                            current.heapAddress, entry) & HeapRecords.Attributes.ENUMERABLE);
+                    }
+                    if (enumerable) values.push(key);
+                }
+            }
+            var inherited = this.heapRecords.objectPrototype(current.heapAddress);
+            current = inherited ? this.readHeapReference(inherited) : null;
+        }
+        return this.arrayFrom(values);
+    };
+
+    Runtime.prototype.ownPropertyNames = function (object) {
+        var result = this.collectOwnKeys(object, PropertySemantics.enumerationModes.OWN_NAMES);
+        if ((object.guestType === "function" || object.guestType === "bytecodeFunction") &&
+                !this.heapOwnProperty(object, "length", false)) this.arraySet(result, this.arrayLength(result), "length");
+        return result;
+    };
+
+    Runtime.prototype.callableLength = function (callable) {
+        if (callable.guestType === "bytecodeFunction") {
+            var program = this.heapRecords.functionMetadata(
+                callable.heapAddress);
+            return this.heapRecords.integerVectorLength(
+                this.heapRecords.programParameterSlots(program));
+        }
+        return 0;
+    };
+
+    Runtime.prototype.typeOf = function (value) {
+        if (value === undefined) return "undefined";
+        if (value === null) return "object";
+        if (value && (value.guestType === "function" ||
+                      value.guestType === "bytecodeFunction")) return "function";
+        if (value && value.guestType) return "object";
+        return typeof value;
+    };
+
+    Runtime.prototype.typeOfGlobal = function (context, name) {
+        var globalObject = context ? context.globalObject : this.globalObject;
+        if (!this.hasOwnProperty(globalObject, name)) return "undefined";
+        return this.typeOf(this.getProperty(globalObject, name));
+    };
+
+    Runtime.prototype.primitiveWrapperValue = function (value) {
+        if (!value || !value.guestType ||
+            !this.hasOwnProperty(value, this.primitiveValueKey)) {
+            return {found: false, value: undefined};
+        }
+        return {found: true,
+                value: this.getProperty(value, this.primitiveValueKey)};
+    };
+
+    Runtime.prototype.numberValue = function (value) {
+        if (typeof value === "number") return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found && typeof boxed.value === "number") {
+            return boxed.value;
+        }
+        throw new TypeError("Number method receiver is not a number");
+    };
+
+    Runtime.prototype.stringValue = function (value) {
+        if (typeof value === "string") return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found && typeof boxed.value === "string") {
+            return boxed.value;
+        }
+        throw new TypeError("String method receiver is not a string");
+    };
+
+    Runtime.prototype.booleanValue = function (value) {
+        if (typeof value === "boolean") return value;
+        var boxed = this.primitiveWrapperValue(value);
+        if (boxed.found && typeof boxed.value === "boolean") {
+            return boxed.value;
+        }
+        throw new TypeError("Boolean method receiver is not a boolean");
+    };
+
+    Runtime.prototype.toObject = function (value) {
+        if (value === null || value === undefined) {
+            throw new TypeError("cannot convert null or undefined to object");
+        }
+        if (value && value.guestType) return value;
+        if (typeof value === "string") {
+            return this.makePrimitiveWrapper(value, this.stringPrototype);
+        }
+        if (typeof value === "number") {
+            return this.makePrimitiveWrapper(value, this.numberPrototype);
+        }
+        if (typeof value === "boolean") {
+            return this.makePrimitiveWrapper(value, this.booleanPrototype);
+        }
+        throw new TypeError("cannot convert value to object");
+    };
+
+    Runtime.prototype.toPrimitive = function (value, preferredType) {
+        if (!value || !value.guestType) return value;
+        var stringFirst = preferredType === "string";
+        if (!preferredType && this.dateValueKey !== undefined &&
+            this.hasOwnProperty(value, this.dateValueKey)) stringFirst = true;
+        var firstName = stringFirst ? "toString" : "valueOf";
+        var secondName = stringFirst ? "valueOf" : "toString";
+        var method = this.getProperty(value, firstName);
+        if (method && (method.guestType === "function" ||
+                       method.guestType === "bytecodeFunction")) {
+            var firstResult = this.invokePropertyFunction(method, value, []);
+            if (!firstResult || !firstResult.guestType) return firstResult;
+        }
+        method = this.getProperty(value, secondName);
+        if (method && (method.guestType === "function" ||
+                       method.guestType === "bytecodeFunction")) {
+            var secondResult = this.invokePropertyFunction(method, value, []);
+            if (!secondResult || !secondResult.guestType) return secondResult;
+        }
+        throw new TypeError("object cannot be converted to a primitive value");
+    };
+
+    Runtime.prototype.toNumber = function (value) {
+        if (value && value.guestType) value = this.toPrimitive(value, "number");
+        if (value === undefined) return NaN;
+        if (value === null) return 0;
+        if (value === false) return 0;
+        if (value === true) return 1;
+        if (typeof value === "number") return value;
+        if (typeof value === "string") value = trimESWhiteSpace(value);
+        return Number(value);
+    };
+
+    Runtime.prototype.toString = function (value) {
+        if (value === undefined) return "undefined";
+        if (value === null) return "null";
+        if (!value || !value.guestType) return String(value);
+        /* Error is currently installed by the embedding environment.  Keep
+         * its ES5 observable string form in the semantic runtime so both the
+         * Node and js_min hosts report guest failures alike. */
+        if (this.hasOwnProperty(value, "name") &&
+            this.hasOwnProperty(value, "message")) {
+            var name = this.getProperty(value, "name");
+            var message = this.getProperty(value, "message");
+            name = name === undefined ? "Error" : String(name);
+            message = message === undefined ? "" : String(message);
+            if (!name) return message;
+            if (!message) return name;
+            return name + ": " + message;
+        }
+        return this.toString(this.toPrimitive(value, "string"));
+    };
+
+    Runtime.prototype.setProperty = function (object, key, value, strict) {
+        this.assertOwned(object);
+        this.assertOwned(value);
+        if (object === null || object === undefined) {
+            throw new TypeError("cannot set property '" + key + "'");
+        }
+        if (object.guestType === "buffer") {
+            return this.bufferSupport.setProperty(object, key, value);
+        }
+        if (object.guestType === "typedArray" || object.guestType === "arrayBuffer") {
+            return this.typedArraySupport.setProperty(object, key, value);
+        }
+        if (object.guestType === "array") {
+            if (isDirectArrayIndex(key)) {
+                return this.arraySet(object, key, value, strict);
+            }
+            key = this.propertyKey(key);
+            if (isArrayIndex(key)) return this.arraySet(object, Number(key), value, strict);
+            return this.setNamedProperty(object, key, value, strict);
+        }
+        key = this.propertyKey(key);
+        if (!object.guestType) {
+            /* ES5.1 8.7.2: PutValue boxes primitive bases for descriptor
+             * lookup, but may only invoke an inherited setter. It cannot
+             * create a lasting property or write a data property. */
+            var wrapper = this.toObject(object);
+            var owner = wrapper;
+            var entry = this.heapOwnProperty(owner, key, false);
+            if (!entry) {
+                owner = this.findPrototypePropertyOwner(wrapper, key);
+                if (owner) entry = this.heapOwnProperty(owner, key, false);
+            }
+            if (entry && (this.heapRecords.ownPropertyEntryAttributes(
+                    owner.heapAddress, entry) & HeapRecords.Attributes.ACCESSOR)) {
+                this.writePropertyEntry(owner, entry, object, value, strict);
+            } else if (strict) {
+                throw new TypeError("cannot write property on primitive value");
+            }
+            return value;
+        }
+        var wrappedString = this.stringWrapperValue(object);
+        if (wrappedString !== undefined && (key === "length" ||
+                (isArrayIndex(key) && Number(key) < wrappedString.length))) {
+            if (strict) throw new TypeError("String property is not writable");
+            return value;
+        }
+        if (object.guestType === "object" || object.guestType === "function" ||
+            object.guestType === "bytecodeFunction" || object.guestType === "regexp") {
+            return this.setNamedProperty(object, key, value, strict);
+        }
+        throw new TypeError("property target is not an object");
+    };
+
+    Runtime.prototype.add = function (left, right) {
+        left = this.toPrimitive(left);
+        right = this.toPrimitive(right);
+        if (typeof left === "string" || typeof right === "string") {
+            return this.toString(left) + this.toString(right);
+        }
+        return this.toNumber(left) + this.toNumber(right);
+    };
+
+    Runtime.prototype.relational = function (left, right, operation) {
+        left = this.toPrimitive(left, "number");
+        right = this.toPrimitive(right, "number");
+        if (typeof left === "string" && typeof right === "string") {
+            if (operation === "less") return left < right;
+            if (operation === "lessEqual") return left <= right;
+            if (operation === "greater") return left > right;
+            return left >= right;
+        }
+        left = this.toNumber(left);
+        right = this.toNumber(right);
+        if (operation === "less") return left < right;
+        if (operation === "lessEqual") return left <= right;
+        if (operation === "greater") return left > right;
+        return left >= right;
+    };
+
+    Runtime.prototype.equal = function (left, right) {
+        if (left === right) return true;
+        if (left === null && right === undefined) return true;
+        if (left === undefined && right === null) return true;
+        if (typeof left === "number" && typeof right === "string") {
+            return left === this.toNumber(right);
+        }
+        if (typeof left === "string" && typeof right === "number") {
+            return this.toNumber(left) === right;
+        }
+        if (typeof left === "boolean") return this.equal(this.toNumber(left), right);
+        if (typeof right === "boolean") return this.equal(left, this.toNumber(right));
+        if (left && left.guestType && (!right || !right.guestType)) {
+            return this.equal(this.toPrimitive(left), right);
+        }
+        if (right && right.guestType && (!left || !left.guestType)) {
+            return this.equal(left, this.toPrimitive(right));
+        }
+        return false;
+    };
+
+    Runtime.prototype.call = function (callable, receiver, args, context) {
+        this.assertOwned(callable);
+        this.assertOwned(receiver);
+        if (!callable || callable.guestType !== "function") {
+            var callableKind = callable === null ? "null" : typeof callable;
+            var receiverKind = receiver && receiver.guestType ?
+                receiver.guestType : typeof receiver;
+            if (receiver && receiver.guestType === "typedArray") {
+                receiverKind += " kind " +
+                    this.heapRecords.bufferViewKind(receiver.heapAddress);
+            }
+            throw new TypeError("value is not callable (got " + callableKind +
+                                "; receiver " + receiverKind + ")");
+        }
+        if (callable.callMode === "host") {
+            throw new Error("external host function must be serviced by the embedder");
+        }
+        if (callable.errorConstructorName) {
+            return ErrorSupport.makeErrorObject(this,
+                callable.errorConstructorName,
+                args.length ? args[0] : undefined);
+        }
+        if (callable.errorToString) {
+            if (!receiver || !receiver.guestType) {
+                throw new TypeError(
+                    "Error.prototype.toString receiver is not an object");
+            }
+            var errorName = this.getProperty(receiver, "name");
+            var errorMessage = this.getProperty(receiver, "message");
+            errorName = errorName === undefined ? "Error" : String(errorName);
+            errorMessage = errorMessage === undefined ? "" : String(errorMessage);
+            if (!errorName) return errorMessage;
+            if (!errorMessage) return errorName;
+            return errorName + ": " + errorMessage;
+        }
+        return callable.callback(receiver, args, context || null);
+    };
+
+    Runtime.prototype.construct = function (callable, args, context) {
+        this.assertOwned(callable);
+        if (!callable || callable.guestType !== "function") {
+            throw new TypeError("value is not a constructor");
+        }
+        if (callable.callMode === "host") {
+            throw new Error("external host constructor must be serviced by the embedder");
+        }
+        if (callable.errorConstructorName) {
+            return ErrorSupport.makeErrorObject(this,
+                callable.errorConstructorName,
+                args.length ? args[0] : undefined);
+        }
+        var receiver = this.makeObject();
+        var value = callable.constructCallback ?
+            callable.constructCallback(args, context || null) :
+            callable.callback(receiver, args, context || null);
+        return value && value.guestType ? value : receiver;
+    };
+
+    Runtime.prototype.truthy = function (value) {
+        return !!value;
+    };
+
+    Runtime.prototype.markValue = function (value, generation) {
+        if (typeof value === "string") {
+            var stringAddress = this.stringAddresses["$" + value];
+            if (stringAddress) this.linearHeap.setMark(stringAddress, generation);
+            return;
+        }
+        if (!value || (value.guestType !== "object" && value.guestType !== "array" &&
+                       value.guestType !== "function" &&
+                       value.guestType !== "bytecodeFunction" && value.guestType !== "regexp" &&
+                       value.guestType !== "buffer" &&
+                       value.guestType !== "typedArray" &&
+                       value.guestType !== "arrayBuffer")) return;
+        if (value.gcMark === generation) return;
+        value.gcMark = generation;
+        if (value.heapAddress) this.linearHeap.setMark(value.heapAddress, generation);
+        if (value.guestType === "buffer" || value.guestType === "typedArray" ||
+            value.guestType === "arrayBuffer") {
+            if (value.guestType === "buffer") this.bufferSupport.markView(value, generation);
+            else this.typedArraySupport.markView(value, generation);
+            this.markValue(value.prototype, generation);
+        }
+        if (value.guestType === "array") {
+            this.linearHeap.setMark(
+                this.heapRecords.arrayElements(value.heapAddress), generation);
+            var elementIndex = 0;
+            while (elementIndex < this.arrayLength(value)) {
+                if (this.arrayHas(value, elementIndex)) {
+                    this.markValue(this.arrayGet(value, elementIndex), generation);
+                }
+                elementIndex++;
+            }
+        }
+        if (value.guestType === "bytecodeFunction") {
+            this.markEnvironment(this.functionClosure(value), generation);
+        }
+        if (value.heapAddress) {
+            var prototypeAddress = this.heapRecords.objectPrototype(value.heapAddress);
+            if (prototypeAddress) {
+                this.markValue(this.heapHandles["$" + prototypeAddress], generation);
+            }
+            /* The already-marked owner is a seed for markAuthoritativeHeap.
+             * Its record visitor traces storage, keys, values and setters.
+             * Duplicating that walk here couples root discovery to property
+             * layout and assumes every entry is an independently marked
+             * record, which is not true for packed inline entries. */
+        } else {
+            if (value.prototype) this.markValue(value.prototype, generation);
+            var properties = value.properties;
+            var key;
+            for (key in properties) {
+                if (own(properties, key)) this.markValue(properties[key], generation);
+            }
+        }
+    };
+
+    Runtime.prototype.markHeapCell = function (cell, generation) {
+        if (this.valueCells.tagAt(cell) !== ValueCells.Tags.REFERENCE) return;
+        var address = this.valueCells.referenceAddressAt(cell);
+        if (this.linearHeap.recordType(address) === Heap.Types.STRING) {
+            this.linearHeap.setMark(address, generation);
+            return;
+        }
+        this.markValue(this.heapHandles["$" + address], generation);
+    };
+
+    Runtime.prototype.releaseObjectRecords = function (object) {
+        var address = object.heapAddress;
+        this.heapRecords.releaseOwnPropertyStorage(address);
+        if (object.guestType === "array") {
+            this.linearHeap.freeRecord(this.heapRecords.arrayElements(address));
+        }
+        delete this.heapHandles["$" + address];
+        delete this.functionMetadata["$" + address];
+        this.linearHeap.freeRecord(address);
+    };
+
+    Runtime.prototype.markAuthoritativeHeap = function (generation) {
+        var runtime = this;
+        var pending = [];
+        function enqueue(address, source) {
+            if (!address) return;
+            try {
+                if (runtime.linearHeap.mark(address) === generation) return;
+            } catch (error) {
+                throw new Error(error.message +
+                    (source ? " referenced by " + source : ""));
+            }
+            runtime.linearHeap.setMark(address, generation);
+            pending.push(address);
+        }
+
+        /* Host semantic marking ran first. Put those records through the same
+         * graph traversal so references created solely by native bytecode are
+         * visible even when no host handle has ever existed for them. */
+        this.linearHeap.visitRecords(function (address, type, size, mark) {
+            if (type !== Heap.Types.FREE && mark === generation) {
+                pending.push(address);
+            }
+        });
+        visitRuntimeRecordRoots(this, enqueue);
+        var index;
+
+        index = 0;
+        while (index < pending.length) {
+            var owner = pending[index++];
+            var ownerType = this.linearHeap.recordType(owner);
+            this.heapRecords.visitReferences(owner, function (target) {
+                enqueue(target, "heap record " + owner + " (type " +
+                        ownerType + ")");
+            });
+        }
+    };
+
+    Runtime.prototype.seedNativeCollectorRoots = function (generation) {
+        var runtime = this;
+        function value(candidate, source, owner, slot) {
+            if (typeof candidate === "string") {
+                var stringAddress = runtime.stringAddresses["$" + candidate];
+                if (stringAddress) {
+                    runtime.linearHeap.setMark(stringAddress, generation);
+                }
+                return;
+            }
+            if (candidate && candidate.heapAddress) {
+                if (runtime.linearHeap.isFreeRecord(candidate.heapAddress)) {
+                    throw new Error("collector root contains freed reference: " +
+                        (source || "value") + (owner === undefined ? "" :
+                            " owner=" + owner + " slot=" + slot) + " type=" + candidate.guestType +
+                        " reference=" + candidate.heapAddress);
+                }
+                runtime.linearHeap.setMark(candidate.heapAddress, generation);
+            }
+        }
+        function environment(candidate) {
+            if (candidate && candidate.heapAddress) {
+                if (runtime.linearHeap.isFreeRecord(candidate.heapAddress)) {
+                    throw new Error("collector environment root is freed: " +
+                        candidate.heapAddress);
+                }
+                runtime.linearHeap.setMark(candidate.heapAddress, generation);
+            }
+        }
+        var visitor = {value: value, environment: environment, record: function (address) {
+            runtime.linearHeap.setMark(address, generation);
+        }};
+        value(this.bufferSupport.prototype);
+        value(this.typedArraySupport.arrayBufferPrototype,
+              "typedArraySupport.arrayBufferPrototype");
+        var typedPrototypeIndex = 0;
+        while (typedPrototypeIndex < this.typedArraySupport.prototypes.length) {
+            value(this.typedArraySupport.prototypes[typedPrototypeIndex],
+                  "typedArraySupport.prototypes[" + typedPrototypeIndex + "]");
+            typedPrototypeIndex++;
+        }
+        visitRuntimeRecordRoots(this, visitor.record);
+        visitEmbeddingRoots(this, visitor);
+
+    };
+
+    Runtime.prototype.rebuildWeakStringTables = function (generation) {
+        /* Interning establishes canonical identity while an atom is live; it
+         * must not make every atom an immortal runtime root.  This matters in
+         * particular for long-lived runtimes which compile many independent
+         * programs (the Test262 lexical tests create tens of thousands of
+         * distinct eval sources).  References from properties, programs,
+         * values and snapshots have already marked the strings they need.
+         * Retain table entries only for those live records, and allow all
+         * other strings and their host-side spelling keys to disappear. */
+        var oldAddresses = this.stringAddresses;
+        var oldDecoded = this.decodedStrings;
+        var liveAddresses = {};
+        var liveDecoded = {};
+        var key;
+        for (key in oldAddresses) {
+            if (!own(oldAddresses, key)) continue;
+            var address = oldAddresses[key];
+            if (this.linearHeap.collectorMark(address) !== generation) continue;
+            liveAddresses[key] = address;
+            var decoded = oldDecoded["$" + address];
+            if (decoded !== undefined) liveDecoded["$" + address] = decoded;
+        }
+        this.stringAddresses = liveAddresses;
+        this.decodedStrings = liveDecoded;
+    };
+
+    Runtime.prototype.verifyNativeFrameMarks = function (generation) {
+        var contextIndex = 0;
+        while (contextIndex < this.contexts.length) {
+            var execution = this.contexts[contextIndex++].execution;
+            if (!execution) continue;
+            var frameIndex = 0;
+            while (frameIndex < execution.frames.length) {
+                var frameAddress = execution.frames[frameIndex++].heapAddress;
+                var registerIndex = 0;
+                var registerCount = this.heapRecords.frameRegisterCount(
+                    frameAddress);
+                while (registerIndex < registerCount) {
+                    var cell = this.heapRecords.frameRegisterCell(
+                        frameAddress, registerIndex);
+                    if (this.valueCells.tagAt(cell) ===
+                        ValueCells.Tags.REFERENCE) {
+                        var reference = this.valueCells.referenceAddressAt(cell);
+                        if (this.linearHeap.isFreeRecord(reference)) {
+                            throw new Error("native frame contains freed reference: " +
+                                "frame=" + frameAddress + " register=" +
+                                registerIndex + " reference=" + reference);
+                        }
+                        if (this.linearHeap.mark(reference) !== generation) {
+                            throw new Error("native marker missed frame reference: " +
+                                "frame=" + frameAddress + " register=" +
+                                registerIndex + " reference=" + reference);
+                        }
+                    }
+                    registerIndex++;
+                }
+            }
+        }
+    };
+
+    Runtime.prototype.verifyNativeHeapGraph = function (generation) {
+        var runtime = this;
+        this.linearHeap.visitRecords(function (address, type, size, mark) {
+            if (type === Heap.Types.FREE || mark !== generation) return;
+            runtime.heapRecords.visitReferences(address, function (reference) {
+                if (runtime.linearHeap.isFreeRecord(reference)) {
+                    throw new Error("native marker retained a freed edge: " +
+                        "source=" + address + " type=" + type +
+                        " reference=" + reference);
+                }
+                if (runtime.linearHeap.mark(reference) !== generation) {
+                    throw new Error("native marker missed heap edge: source=" +
+                        address + " type=" + type + " reference=" +
+                        reference);
+                }
+            });
+        });
+    };
+
+    Runtime.prototype.releaseUnmarkedProgramMetadata = function (generation) {
+        var liveMetadata = {};
+        var index = 0;
+        while (index < this.programAddresses.length) {
+            var address = this.programAddresses[index];
+            if (address &&
+                this.linearHeap.collectorMark(address) !== generation) {
+                var program = this.programObjects[index];
+                if (program && program.heapAddress === address) {
+                    program.heapAddress = 0;
+                }
+                this.programObjects[index] = null;
+                this.programAddresses[index] = 0;
+                this.freeProgramMetadataIndices.push(index);
+            } else if (address && this.programMetadata["$" + address]) {
+                liveMetadata["$" + address] =
+                    this.programMetadata["$" + address];
+            }
+            index++;
+        }
+        var key;
+        for (key in this.programMetadata) {
+            if (own(this.programMetadata, key)) {
+                var metadataAddress = Number(key.substring(1));
+                if (this.linearHeap.collectorMark(metadataAddress) !==
+                    generation) {
+                    var metadataProgram = this.programMetadata[key];
+                    if (metadataProgram &&
+                        metadataProgram.heapAddress === metadataAddress) {
+                        metadataProgram.heapAddress = 0;
+                    }
+                } else liveMetadata[key] = this.programMetadata[key];
+            }
+        }
+        /* Replace, rather than mutate, this high-churn address dictionary.
+         * Firefox 1 retains considerable dictionary bookkeeping after delete;
+         * a fresh survivor map lets its host collector reclaim that storage. */
+        this.programMetadata = liveMetadata;
+    };
+
+    Runtime.prototype.collect = function () {
+        if (this.gcCollecting) return this.heapObjects.length;
+        this.gcCollecting = true;
+        try {
+            var collectionStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            if (this.nativeInterpreter) {
+                /* No guest allocation occurs during collection. Discard
+                 * derived allocator indexes now and rebuild them once from
+                 * the post-sweep graph, rather than copying and indexing
+                 * pre-collection free regions twice only to replace them. */
+                this.nativeInterpreter.prepareForCollection();
+            }
+            var heapBumpBeforeCollection = this.linearHeap.bump;
+            var preparationFinished = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            if (this.nativeInterpreter) {
+                var nativeGeneration = this.heapRecords.engineGCGeneration(
+                    this.nativeInterpreter.stateAddress);
+                if (nativeGeneration > this.gcGeneration) {
+                    this.gcGeneration = nativeGeneration;
+                }
+            }
+            this.gcGeneration++;
+            var generation = this.gcGeneration;
+            if (this.nativeInterpreter) {
+                this.heapRecords.setEngineGCGeneration(
+                    this.nativeInterpreter.stateAddress, generation);
+            }
+            var key;
+            var nativeMarking = this.heapSweeper &&
+                this.heapSweeper.marker.backend === "i386";
+            if (nativeMarking) {
+                this.seedNativeCollectorRoots(generation);
+                var markingStatus = this.heapSweeper.mark(generation);
+                if (markingStatus !== 0) {
+                    throw new Error(this.heapSweeper.describeMarkFailure(markingStatus));
+                }
+                if (this.verifyNativeHeap) {
+                    this.verifyNativeFrameMarks(generation);
+                    this.verifyNativeHeapGraph(generation);
+                }
+            } else {
+            this.markValue(this.globalObject, generation);
+            this.markValue(this.bufferSupport.prototype, generation);
+            this.markValue(this.typedArraySupport.arrayBufferPrototype,
+                           generation);
+            var typedPrototypeIndex = 0;
+            while (typedPrototypeIndex <
+                   this.typedArraySupport.prototypes.length) {
+                this.markValue(
+                    this.typedArraySupport.prototypes[typedPrototypeIndex++],
+                    generation);
+            }
+            var builtinTables = [this.stringMethods, this.arrayMethods,
+                this.objectMethods, this.functionMethods, this.numberMethods,
+                this.regexpMethods];
+            var builtinTableIndex = 0;
+            while (builtinTableIndex < builtinTables.length) {
+                var builtinTable = builtinTables[builtinTableIndex++];
+                for (key in builtinTable) {
+                    var builtinMethod = guestMethod(builtinTable, key);
+                    if (builtinMethod) this.markValue(builtinMethod, generation);
+                }
+            }
+            var collectingRuntime = this;
+            visitEmbeddingRoots(this, {
+                value: function (value) { collectingRuntime.markValue(value, generation); },
+                environment: function (environment) { collectingRuntime.markEnvironment(environment, generation); },
+                record: function (address) { collectingRuntime.linearHeap.setMark(address, generation); }
+            });
+            var contextIndex = 0;
+            while (contextIndex < this.contexts.length) {
+                var context = this.contexts[contextIndex++];
+                this.linearHeap.setMark(context.heapAddress, generation);
+                this.markValue(context.globalObject, generation);
+            }
+            if (this.nativeInterpreter) {
+                this.linearHeap.setMark(
+                    this.nativeInterpreter.stringSupportAddress, generation);
+            }
+            this.markAuthoritativeHeap(generation);
+            }
+            var markingFinished = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            var survivors = [];
+            var index = 0;
+            while (index < this.heapObjects.length) {
+                var heapObject = this.heapObjects[index];
+                if (heapObject.heapAddress &&
+                    this.linearHeap.collectorMark(heapObject.heapAddress) ===
+                        generation) {
+                    heapObject.gcMark = generation;
+                    survivors.push(heapObject);
+                }
+                index++;
+            }
+            this.heapObjects = survivors;
+            var handlesStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            var liveEnvironmentMetadata = {};
+            var environmentKey;
+            for (environmentKey in this.environmentMetadata) {
+                if (own(this.environmentMetadata, environmentKey)) {
+                    var environmentMetadata = this.environmentMetadata[environmentKey];
+                    if (this.linearHeap.collectorMark(
+                            environmentMetadata.handle.heapAddress) !==
+                        generation) {
+                    } else {
+                        environmentMetadata.gcMark = generation;
+                        liveEnvironmentMetadata[environmentKey] =
+                            environmentMetadata;
+                    }
+                }
+            }
+            this.environmentMetadata = liveEnvironmentMetadata;
+            var liveHeapHandles = {};
+            var liveFunctionMetadata = {};
+            var handleKey;
+            for (handleKey in this.heapHandles) {
+                if (own(this.heapHandles, handleKey)) {
+                    var heapHandle = this.heapHandles[handleKey];
+                    if (this.linearHeap.collectorMark(heapHandle.heapAddress) ===
+                            generation) {
+                        liveHeapHandles[handleKey] = heapHandle;
+                        if (this.functionMetadata[handleKey]) {
+                            liveFunctionMetadata[handleKey] =
+                                this.functionMetadata[handleKey];
+                        }
+                    }
+                }
+            }
+            this.heapHandles = liveHeapHandles;
+            this.functionMetadata = liveFunctionMetadata;
+            var metadataStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            this.releaseUnmarkedProgramMetadata(generation);
+            /* Filter weak atom/cache entries while dead records still retain
+             * their headers. Sweeping may coalesce adjacent dead records, at
+             * which point an old string address is no longer necessarily a
+             * record boundary. */
+            this.rebuildWeakStringTables(generation);
+            var nativeSweepStarted = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            var sweepResult;
+            if (this.heapSweeper &&
+                this.heapSweeper.compiled.backend === "i386") {
+                sweepResult = {records: null,
+                    bytes: this.heapSweeper.sweep(generation)};
+                var nativeIndexStarted = this.profileOpcodeCounts ?
+                    new Date().getTime() : 0;
+                if (this.verifyNativeHeap) {
+                    this.verifyNativeFrameMarks(generation);
+                }
+                this.rebuildFreeBlockIndex();
+            } else {
+                sweepResult = this.linearHeap.sweepUnmarked(generation);
+                var nativeIndexStarted = 0;
+            }
+            var sweepingFinished = this.profileOpcodeCounts ?
+                new Date().getTime() : 0;
+            this.gcAllocationDebt = 0;
+            this.gcRecordAllocationCheckpoint = this.linearHeap.allocationCount;
+            this.gcPending = false;
+            this.collectionCount++;
+            if (this.nativeInterpreter) {
+                this.heapRecords.resetEngineGCStress(
+                    this.nativeInterpreter.stateAddress);
+            }
+            /* A large live graph can leave the bump above the ordinary 75%
+             * pressure mark.  Do not collect that same live graph again at
+             * every native/semantic boundary.  Give it useful bump headroom;
+             * an allocation exit still forces a collection if fragmented
+             * free space or the remaining tail cannot satisfy a record. */
+            var postCollectionHeadroom = Math.max(Heap.GCPolicy.MINIMUM_HEADROOM_BYTES,
+                Math.floor(sweepResult.bytes / 2));
+            /* The native free-block indexer reports total free bytes while it
+             * is already walking the authoritative record stream.  Rewalking
+             * a large native heap through host peek calls here turns an
+             * otherwise short collection into a visible frame-time pause.
+             * Portable hosts retain the ordinary record-statistics path. */
+            var reusableBytes;
+            if (this.heapSweeper &&
+                this.heapSweeper.indexer.backend === "i386") {
+                reusableBytes = this.heapSweeper.reusableBytes >>> 0;
+            } else {
+                var occupancy = this.linearHeap.recordStatistics();
+                reusableBytes = occupancy.bytes[Heap.Types.FREE] || 0;
+            }
+            var liveBytes = this.linearHeap.bump - reusableBytes;
+            var nativeFragmentationRequiresGrowth =
+                this.nativeInterpreter &&
+                this.nativeInterpreter.needsLogicalHeapGrowth();
+            var exhaustedContiguousTail = this.linearHeap.bump >=
+                Math.floor(this.linearHeap.allocationLimit * 15 / 16);
+            var largestReusableBlock =
+                this.linearHeap.largestFreeBlockSize();
+            /* An exhausted tail is not itself evidence that the logical heap
+             * is too small. High-churn programs commonly leave a tiny live
+             * set plus one very large reusable arena. Grow for fragmentation
+             * only when no block holds even one sixteenth of the reclaimed
+             * bytes; otherwise native execution can consume those regions
+             * without touching new pages. */
+            var fragmentedReusableHeap = false;
+            if (exhaustedContiguousTail && reusableBytes > 0) {
+                if (largestReusableBlock <
+                        Math.floor(reusableBytes / 16)) {
+                    fragmentedReusableHeap = true;
+                }
+            }
+            if ((liveBytes >= Math.floor(
+                    this.linearHeap.allocationLimit * 2 / 3) ||
+                 nativeFragmentationRequiresGrowth ||
+                 fragmentedReusableHeap) &&
+                this.linearHeap.allocationLimit <
+                    this.linearHeap.maximumAllocationLimit) {
+                /* A large, persistent working set (for example demo8's
+                 * renderer) should not repeatedly collect the same live
+                 * graph at the current pressure line. Likewise, abundant
+                 * free bytes split into blocks smaller than the native
+                 * allocation region cannot service native execution cheaply.
+                 * An exhausted tail grows only when reclaimed bytes are split
+                 * so broadly that the largest block is less than one
+                 * sixteenth of their total. Grow only after collection proves
+                 * one of those conditions;
+                 * high-churn compiler/test workloads continue reusing the
+                 * original logical heap while suitable blocks remain. */
+                this.linearHeap.growToFit(
+                    this.linearHeap.allocationLimit + 1);
+            }
+            this.resetHeapPressureBump(
+                this.linearHeap.bump + postCollectionHeadroom);
+            if (this.profileOpcodeCounts) {
+                var freeDistribution =
+                    this.linearHeap.freeBlockDistribution();
+                if (typeof print === "function") {
+                    print("guest heap free distribution: " +
+                          freeDistribution);
+                } else if (typeof console !== "undefined" && console.log) {
+                    console.log("guest heap free distribution: " +
+                                freeDistribution);
+                }
+                var collectionLine = "guest heap collection " +
+                    this.collectionCount + ": bump=" +
+                    heapBumpBeforeCollection + "->" + this.linearHeap.bump +
+                    " reclaimedBytes=" + sweepResult.bytes +
+                    (sweepResult.records === null ? "" :
+                     " reclaimedRecords=" + sweepResult.records) +
+                    " freeBlocks=" +
+                    this.linearHeap.freeBlocks.length + " largestFree=" +
+                    this.linearHeap.largestFreeBlockSize() +
+                    " freeDistribution(min:count/bytes)=" +
+                    freeDistribution + " markMs=" +
+                    (markingFinished - preparationFinished) + " sweepMs=" +
+                    (sweepingFinished - markingFinished) + " nextPressure=" +
+                    this.gcHeapPressureBump + " liveBytes=" + liveBytes +
+                    " limit=" +
+                    this.linearHeap.allocationLimit + " preparationMs=" +
+                    (preparationFinished - collectionStarted) + " totalMs=" +
+                    (sweepingFinished - collectionStarted);
+                if (nativeSweepStarted) {
+                    collectionLine += " phasesMs=wrappers:" +
+                        (handlesStarted - markingFinished) +
+                        ",handles:" + (metadataStarted - handlesStarted) +
+                        ",metadata:" +
+                        (nativeSweepStarted - metadataStarted) +
+                        ",sweep:" +
+                        (nativeIndexStarted - nativeSweepStarted) +
+                        ",index:" +
+                        (sweepingFinished - nativeIndexStarted);
+                }
+                if (typeof print === "function") print(collectionLine);
+                else if (typeof console !== "undefined" && console.log) {
+                    console.log(collectionLine);
+                }
+            }
+            return survivors.length;
+        } finally {
+            this.gcCollecting = false;
+        }
+    };
+
+    /* Read-only diagnostics deliberately go through the record accessor layer.
+     * They expose authoritative guest state without making record offsets part
+     * of the embedding API. */
+    Runtime.prototype.inspectHeapRecord = function (address) {
+        this.ensureLinearHeap();
+        var type = this.linearHeap.recordType(address);
+        var names = ["free", "object", "array", "native-function",
+                     "bytecode-function", "environment", "property", "string",
+                     "number", "regexp", "buffer-view", "buffer-backing",
+                     "root-slot", "value-vector", "frame", "program", "bytecode",
+                     "context", "handler", "engine-state"];
+        var result = {address: address, type: type,
+                      typeName: names[type] || "unknown",
+                      size: this.linearHeap.recordSize(address),
+                      mark: this.linearHeap.mark(address),
+                      flags: this.linearHeap.flags(address)};
+        if (type === Heap.Types.FRAME) {
+            result.program = this.heapRecords.frameProgram(address);
+            result.environment = this.heapRecords.frameEnvironment(address);
+            result.caller = this.heapRecords.frameCaller(address);
+            result.pc = this.heapRecords.framePC(address);
+            result.returnSlot = this.heapRecords.frameReturnSlot(address);
+            result.registerCount = this.heapRecords.frameRegisterCount(address);
+            result.context = this.heapRecords.frameContext(address);
+        } else if (type === Heap.Types.PROGRAM) {
+            result.bytecode = this.heapRecords.programBytecode(address);
+            result.constants = this.heapRecords.programConstants(address);
+            result.constantRegisters =
+                this.heapRecords.programConstantRegisters(address);
+            result.bindingRegisters =
+                this.heapRecords.programBindingRegisters(address);
+            result.bindingNames = this.heapRecords.programBindingNames(address);
+            result.parameterSlots =
+                this.heapRecords.programParameterSlots(address);
+            result.registerCount =
+                this.heapRecords.programRegisterCount(address);
+            result.argumentsSlot =
+                this.heapRecords.programArgumentsSlot(address);
+            result.thisSlot = this.heapRecords.programThisSlot(address);
+            result.functionNameSlot =
+                this.heapRecords.programFunctionNameSlot(address);
+        } else if (type === Heap.Types.NATIVE_FUNCTION ||
+                   type === Heap.Types.BYTECODE_FUNCTION) {
+            result.closure = this.heapRecords.functionClosure(address);
+            result.metadata = this.heapRecords.functionMetadata(address);
+            result.homeContext = this.heapRecords.functionHomeContext(address);
+        }
+        return result;
+    };
+
+    Runtime.prototype.inspectHeapStatistics = function () {
+        this.ensureLinearHeap();
+        var statistics = this.linearHeap.recordStatistics();
+        var names = ["free", "object", "array", "native-function",
+            "bytecode-function", "environment", "property", "string",
+            "number", "regexp", "buffer-view", "buffer-backing",
+            "root-slot", "value-vector", "frame", "program", "bytecode",
+            "context", "handler", "engine-state", "platform-services"];
+        var types = {};
+        var type = 0;
+        while (type < statistics.counts.length) {
+            if (statistics.counts[type]) {
+                types[names[type] || String(type)] = {
+                    count: statistics.counts[type],
+                    bytes: statistics.bytes[type]
+                };
+            }
+            type++;
+        }
+        return {records: statistics.records, bytes: statistics.totalBytes,
+                types: types};
+    };
+
+    /* Read the published native stack at a yield, without materializing
+     * register arrays or decoding programs back into host objects. This is
+     * also useful to an embedder sampling a running bytecode workload. */
+    Runtime.prototype.inspectNativeFrames = function (maximumFrames) {
+        var frames = [];
+        if (!this.nativeInterpreter) return frames;
+        maximumFrames = maximumFrames === undefined ? Infinity : Number(maximumFrames);
+        if (!(maximumFrames >= 0) || maximumFrames !== Math.floor(maximumFrames)) {
+            throw new RangeError("invalid inspection frame limit");
+        }
+        var records = this.heapRecords;
+        var frame = records.engineCurrentFrame(this.nativeInterpreter.stateAddress);
+        var seen = {};
+        var sourcePreviewCharacters = 160;
+        while (frame && frames.length < maximumFrames && !own(seen, "$" + frame)) {
+            seen["$" + frame] = true;
+            var description = this.inspectHeapRecord(frame);
+            var program = description.program;
+            var metadata = this.programMetadata["$" + program];
+            description.name = metadata && metadata.name || "";
+            description.filename = metadata && metadata.filename || "<guest-heap-program>";
+            var source = records.programSource(program);
+            description.sourcePreview = source ?
+                this.readHeapString(source).substring(0, sourcePreviewCharacters) : "";
+            frames.push(description);
+            frame = description.caller;
+        }
+        return frames;
+    };
+
+    Runtime.prototype.inspectExecution = function (execution) {
+        var result = {status: execution.status,
+                      totalInstructions: execution.totalInstructions,
+                      frames: []};
+        var index = execution.frames.length - 1;
+        while (index >= 0) {
+            var hostFrame = execution.frames[index--];
+            var frame = this.inspectHeapRecord(hostFrame.heapAddress);
+            frame.name = hostFrame.program.name || "<script>";
+            frame.filename = hostFrame.program.filename || "<guest>";
+            frame.opcode = hostFrame.code[frame.pc];
+            result.frames.push(frame);
+        }
+        if (this.nativeInterpreter) {
+            result.nativeEngine = {
+                runs: this.nativeInterpreter.runCount,
+                instructions: this.nativeInterpreter.instructionCount,
+                semanticExits: this.nativeInterpreter.unsupportedExitCount
+            };
+        }
+        return result;
+    };
+
+    Runtime.prototype.destroy = function () {
+        var snapshotIndex = 0;
+        while (snapshotIndex < this.heapStateSnapshots.length) {
+            this.destroyHeapStateSnapshot(
+                this.heapStateSnapshots[snapshotIndex++]);
+        }
+        this.heapStateSnapshots = [];
+        if (this.nativeInterpreter) this.nativeInterpreter.destroy();
+        this.nativeInterpreter = null;
+        this.bufferSupport.destroy();
+        if (this.linearHeap) this.linearHeap.destroy();
+        this.linearHeap = null;
+        this.valueCells = null;
+        this.heapSweeper = null;
+        this.heapObjects = [];
+        this.hostRoots = [];
+        this.hostRootPersistentAddresses = [];
+        this.contexts = [];
+        this.stringAddresses = {};
+        this.decodedStrings = {};
+        this.hostRegExpCache = {};
+        this.hostRegExpCacheEntries = 0;
+        this.programObjects = [];
+        this.programAddresses = [];
+        this.freeProgramMetadataIndices = [];
+        this.programMetadata = {};
+        this.globalObject = null;
+        var compilationIndex = 0;
+        while (compilationIndex < this.nativeCompilations.length) {
+            this.nativeCompilations[compilationIndex++].destroy();
+        }
+        this.nativeCompilations = [];
+        this.activeRegisterFrames = [];
+        this.activeEnvironmentFrames = [];
+        this.activeRegisters = null;
+        this.gcPending = false;
+        this.gcCollecting = false;
+    };
+
+    Runtime.prototype.markEnvironment = function (environment, generation) {
+        var current = environment;
+        while (current) {
+            var metadata = this.environmentMetadata["$" + current.heapAddress];
+            if (metadata && metadata.gcMark === generation) return;
+            if (metadata) metadata.gcMark = generation;
+            this.linearHeap.setMark(current.heapAddress, generation);
+            var index = 0;
+            var count = this.heapRecords.environmentSlotCount(current.heapAddress);
+            while (index < count) {
+                this.markHeapCell(
+                    this.heapRecords.environmentCell(current.heapAddress, index),
+                    generation);
+                index++;
+            }
+            current = this.environmentParent(current);
+        }
+    };
+
+    Runtime.prototype.arrayFrom = function (values) {
+        var array = this.makeArray();
+        var index = 0;
+        while (index < values.length) {
+            if (index in values) this.arraySet(array, index, values[index]);
+            index++;
+        }
+        if (values.length && this.arrayLength(array) < values.length) {
+            this.ensureArrayCapacity(array, values.length);
+            this.heapRecords.setArrayLength(array.heapAddress, values.length);
+        }
+        return array;
+    };
+
+    function isArrayIndex(key) {
+        if (isDirectArrayIndex(key)) return true;
+        if (key === "") return false;
+        var number = Number(key);
+        return number >= 0 && number === Math.floor(number) && String(number) === key;
+    }
+
+    function isDirectArrayIndex(key) {
+        return typeof key === "number" && key >= 0 &&
+               key < 4294967295 && key === Math.floor(key);
+    }
+
+    function integerHandle(handle, length) {
+        handle = Number(handle);
+        if (handle !== Math.floor(handle) || handle < 1 || handle > length) {
+            throw new Error("invalid guest host root handle");
+        }
+        return handle - 1;
+    }
+
+    function normalizeGCThreshold(value) {
+        if (value === undefined) return 8192;
+        value = Number(value);
+        if (value < 1 || value !== Math.floor(value)) {
+            throw new RangeError("gcThreshold must be a positive integer");
+        }
+        return value;
+    }
+
+    /* Contexts publish scheduler-owned executions. Synchronous guest-library
+     * callbacks publish separate nested executions while their caller remains
+     * suspended. Both collector backends must enumerate the same owners. */
+    function visitRuntimeExecutions(runtime, visit) {
+        var index = 0;
+        while (index < runtime.contexts.length) {
+            var execution = runtime.contexts[index++].execution;
+            if (execution) visit(execution);
+        }
+        index = 0;
+        while (index < runtime.activeExecutions.length) {
+            visit(runtime.activeExecutions[index++]);
+        }
+    }
+
+    /* One owner walk for both collectors. Visitors determine how a root is
+     * marked, never which suspended frames/values count as roots. */
+    /* Heap-graph owners common to native seeding and portable traversal.
+     * Code/atom caches are intentionally absent: they are weak metadata. */
+    function visitRuntimeRecordRoots(runtime, visit) {
+        function record(address, source) { if (address) visit(address, source); }
+        record(runtime.globalObject ? runtime.globalObject.heapAddress : 0, "runtime global");
+        record(runtime.nativeCallbackRootHead, "registered native callbacks");
+        var index = 0;
+        while (index < runtime.contexts.length) {
+            record(runtime.contexts[index++].heapAddress, "registered context");
+        }
+        var key;
+        for (key in runtime.retainedProgramAddresses) {
+            if (own(runtime.retainedProgramAddresses, key)) {
+                record(runtime.retainedProgramAddresses[key], "retained program");
+            }
+        }
+        if (runtime.nativeInterpreter) {
+            record(runtime.nativeInterpreter.stateAddress, "native engine");
+            record(runtime.nativeInterpreter.platformServicesAddress, "platform services");
+            record(runtime.nativeInterpreter.stringSupportAddress, "runtime support");
+        }
+        index = 0;
+        while (index < runtime.heapStateSnapshots.length) {
+            var snapshot = runtime.heapStateSnapshots[index++];
+            if (!snapshot || snapshot.destroyed) continue;
+            var rootIndex = 0;
+            while (rootIndex < snapshot.roots.length) record(snapshot.roots[rootIndex++], "heap snapshot");
+        }
+        record(runtime.functionConstructionProgram, "constructing program");
+        record(runtime.functionConstructionCallable ? runtime.functionConstructionCallable.heapAddress : 0, "constructing callable");
+        record(runtime.functionConstructionPrototype ? runtime.functionConstructionPrototype.heapAddress : 0, "constructing prototype");
+    }
+    function visitEmbeddingRoots(runtime, visitor) {
+        var index = 0;
+        while (index < runtime.hostRoots.length) {
+            var root = runtime.hostRoots[index++];
+            if (root !== RELEASED_ROOT) visitor.value(root, "retained value");
+        }
+        index = 0;
+        while (index < runtime.activeRegisterFrames.length) {
+            var registers = runtime.activeRegisterFrames[index++];
+            var slot = 0;
+            while (slot < registers.length) {
+                visitor.value(registers[slot], "embedding register", index - 1, slot);
+                slot++;
+            }
+        }
+        index = 0;
+        while (index < runtime.activeEnvironmentFrames.length) {
+            visitor.environment(runtime.activeEnvironmentFrames[index++]);
+        }
+        visitRuntimeExecutions(runtime, function (execution) {
+            visitExecutionRoots(runtime, execution, visitor);
+        });
+    }
+
+    function visitExecutionRoots(runtime, execution, visitor) {
+        if (execution.hasInjectedHostException) {
+            visitor.value(execution.injectedHostException, "injected host exception");
+        }
+        var frameIndex = 0;
+        while (frameIndex < execution.frames.length) {
+            var frame = execution.frames[frameIndex++];
+            visitor.record(frame.heapAddress);
+            if (!runtime.nativeInterpreter || !frame.nativeHeapCurrent) {
+                var registerIndex = 0;
+                while (registerIndex < frame.registers.length) {
+                    visitor.value(frame.registers[registerIndex], "frame register",
+                        frame.heapAddress, registerIndex);
+                    registerIndex++;
+                }
+            }
+            visitor.environment(frame.environment);
+            visitor.value(frame.constructReceiver, "constructor receiver");
+        }
+        if (execution.pendingHostCall) {
+            visitor.value(execution.pendingHostCall.callable, "pending callable");
+            visitor.value(execution.pendingHostCall.receiver, "pending receiver");
+            var index = 0;
+            while (index < execution.pendingHostCall.args.length) {
+                visitor.value(execution.pendingHostCall.args[index++], "pending argument");
+            }
+        }
+    }
+
+    root.GuestVMRuntime = Runtime;
+    if (typeof module !== "undefined" && module.exports) module.exports = Runtime;
+}(this));

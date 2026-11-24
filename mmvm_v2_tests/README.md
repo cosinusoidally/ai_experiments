@@ -5,9 +5,23 @@ framebuffer benchmark developed against `mmvm_v2`. The interpreter and its C
 sources remain in the separate `mmvm_v2` repository.
 
 The existing JavaScript-only Node compatibility implementation is described in
-`NODE_COMPAT_PLAN.md`. The proposed guest JavaScript VM, guest-owned garbage
-collector and Buffer lifetime model, portable bytecode, generated-JavaScript
-backend, and optional i386 JIT are described in `GUEST_VM_PLAN.md`.
+`NODE_COMPAT_PLAN.md`. `GUEST_VM_PLAN.md` describes the interpreter-first guest
+JavaScript VM and later optional kernel AOT work. The implemented bootstrap now
+lives in `guest_vm/`; its `README.md` links to the maintainer design and embedder
+guide. It includes a regexp-free tokenizer, parser/compiler/verifier, register
+bytecode interpreter, explicit guest roots and collection, and guest Buffer
+views backed by native memory under `js_min.exe`.
+
+The [historical ECMAScript coverage runners](ECMA_TESTS.md) run the external
+ES1--ES5.1-era `ecma*` tests either in the standalone guest VM or directly in
+Node. Their [bring-up status](ECMA_TESTS_STATUS.md) records pass/fail totals
+and distinguishes standard coverage from SpiderMonkey-specific assumptions.
+
+The [2026-11-04 validation checkpoint](VALIDATION_STATUS.md) records fresh
+project/GC/snapshot checks, ECMA filename parity, Test262, live demos and
+known outstanding failures. The [current Octane comparison](OCTANE_COMPARISON_2026-11-04.md)
+records stock standalone scores, predecessor comparisons and the direct
+Node `--jitless` reference; older dated reports are historical checkpoints.
 
 ## Required checkout layout
 
@@ -200,6 +214,143 @@ Expected output:
 Hello, world!
 ```
 
+### Standalone snapshot hello
+
+The native guest can serialize a generic guest-side source runner, the native
+interpreter, and the guest heap into an ignored standalone image. Build the
+deliberately small ANSI C image loader and create the snapshot from this
+directory:
+
+```sh
+gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
+
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
+  --snapshot artifacts/snap
+```
+
+Alternatively, build the same i386/Linux image using stock Node and its
+builtin APIs (no npm, FFI addon or native-code execution by Node):
+
+```sh
+node guest_runner.js --vm-native --snapshot artifacts/snap
+```
+
+Node is a cross-build host here, not the snapshot's execution platform.
+The image still runs with the i386 `js_runner.exe` above. Its libc bindings
+are resolved when launched, not copied from the Node process. The Node,
+js_min and genuine self-hosted builds must produce identical files from the
+same sources/options. No application filename is needed to generate one.
+
+`guest_runner.js --vm-max-heap-mib N` exposes the runtime's maximum growable
+heap size (integer MiB, 64 through 1024). It does not eagerly allocate that
+much resident memory or change the 64 MiB initial heap. The default maximum
+remains 512 MiB. Pass the option when constructing a snapshot to configure
+that image's maximum; an already built standalone image retains its own
+reservation. This is useful for diagnosing large compilations, not a cache
+or an application-specific snapshot option.
+
+The resulting image can load arbitrary guest source through its libc-backed
+filesystem layer, tokenize, parse, compile, and execute it without
+SpiderMonkey or `LD_LIBRARY_PATH`:
+
+```sh
+./artifacts/js_runner.exe ./artifacts/snap hello.js
+```
+
+Expected standalone output:
+
+```text
+Hello, world!
+```
+
+`js_runner.c` only validates and privately maps the image, finds `dlsym`, and
+transfers `argc`/`argv` to its native entry point. The output comes from the
+guest-compiled `hello.js` bytecode executing in the native guest interpreter;
+it is not a C or bootstrap diagnostic. Images and executables stay in the
+ignored `artifacts/` directory. The file is non-sparse: it contains only
+initialized image and heap bytes, not the heap's reserved growth capacity. At
+startup, the image resolves `mmap` and `memcpy` through the supplied `dlsym`,
+reserves anonymous memory for that capacity, and copies the compact template
+into it. A program argument is optional when `--snapshot` is present; without
+one, the runner writes the image and exits. If a program is supplied, snapshot
+creation occurs before that application is opened, parsed, compiled, or
+installed in the guest heap, and the application runs only after the image has
+been written. Changing that application does not change the snapshot:
+independently generated images are byte-identical and each image accepts any
+supported program from `js_runner.exe`'s command line. Bootstrap-host values
+such as `DISPLAY`, `XAUTHORITY`, and `HOME` are deliberately absent from the
+image, and the temporary bootstrap `process` object has no `env` property. A
+program run after snapshot creation still receives the real current
+environment, while a program launched from the standalone image creates
+`process.env` from libc at launch time.
+
+The same image also runs the unchanged X11 demos 1 through 7; the guest runtime
+owns their RegExp execution, Number formatting, Buffer construction, parsing,
+property semantics, Array construction/capacity growth, `unshift`, and the
+zero-base cases of `Math.pow`. This is a correctness milestone rather than the
+final performance point. At the 2026-09-24 checkpoint, measured default
+256x192 rates ranged from about 2.9 FPS for demo3 to about 1.2--1.7 FPS for the
+rally demos. Demo2 rendered about 1.9--2.1 FPS, versus about 5--6 FPS through
+the ordinary js_min-hosted guest path. Unsupported native semantic exits still
+terminate with status 70.
+
+The self-hosted rebuild reconstructs this image from the VM sources without
+SpiderMonkey. The commands for that fixed-point test are:
+
+```sh
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" guest_runner.js --vm-native \
+  --snapshot artifacts/snap
+
+./artifacts/js_runner.exe artifacts/snap guest_runner.js --vm-native \
+  --snapshot artifacts/snap2
+cmp artifacts/snap artifacts/snap2
+```
+
+The previous implementation copied the untouched mapped input image. That
+was not a rebuild and its byte equality did not establish a self-hosting
+fixed point. The copy writer has been removed. Snapshot requests now execute
+the ordinary constructor/compiler/serializer pipeline, reloading the VM
+implementation from disk when running under a standalone bootstrap image.
+This is now a verified from-source fixed point. On 2026-10-07, the bootstrap
+build took 106.00 seconds and the guest-hosted rebuild took 229.44 seconds.
+Both independently serialized images were 16,266,056 bytes, fully allocated
+(not sparse), with SHA-256
+`a4cbe306e8cb3214fc3047acaae440d2ed6e59587677e9fa49de7456f95c8dc0`.
+The rebuilt image runs hello and an alternate workload and reads its current
+launch environment. No program argument is required when only generating an
+image. These timings are actual compilation/runtime-construction times, not
+the old copy/export timings. This establishes the self-hosted build, not
+completion of the remaining ES5.1 language bring-up. See
+[the standalone snapshot plan](guest_vm/STANDALONE_SNAPSHOT_PLAN.md).
+
+The high-level regression test builds its runner in a temporary ignored
+directory, generates the image twice, requires byte identity, executes hello
+and an alternate program, checks the launch environment, and requires a real
+compiler invocation during the runner-image fixed-point rebuild:
+
+```sh
+guest_vm/tests/run_standalone_snapshot_test.sh
+```
+
+Pass `both` to additionally compare a Node-built image against the js_min
+image. The default test remains usable without Node:
+
+```sh
+guest_vm/tests/run_standalone_snapshot_test.sh both
+```
+
+### Everyday JSON integration checks
+
+`./artifacts/js_runner.exe artifacts/snap json_runner.js` runs a bounded
+selection of unchanged external JSON tests. The same checks run with
+`../../mmvm_v2/artifacts/js_min.exe guest_runner.js json_runner.js` when
+`LD_LIBRARY_PATH` points to the Firefox libraries as above. Node is optional:
+`node json_runner.js --reference` uses stock Node JSON as a black-box control,
+while `node json_runner.js` checks our codec. See [JSON_CHECKS.md](JSON_CHECKS.md)
+for the selected coverage, remaining limitations and harness details.
+
 ### libc-only static web server
 
 `net.js` uses only libc through the MMVM FFI for its network and filesystem
@@ -214,6 +365,18 @@ LD_LIBRARY_PATH="$MOZJS_LIB" \
 Then request `http://127.0.0.1:8000/`. It supports GET and HEAD, binary files,
 `index.html`, generated directory listings, redirects, common MIME types, and
 Python-style access logs on stdout.
+
+The same unchanged server now runs inside the ECMAScript 5.1 guest VM:
+
+```sh
+mkdir -p artifacts/www
+LD_LIBRARY_PATH="$MOZJS_LIB" \
+  "$MMVM_ROOT/artifacts/js_min.exe" \
+  guest_runner.js net.js --directory artifacts/www 8000
+```
+
+`artifacts/www/` is an ignored temporary document root. Add `--bind
+127.0.0.1` when the server should accept only local connections.
 
 ### Node-compatible hello server
 
@@ -250,6 +413,17 @@ The compatibility filesystem module supplies synchronous and callback-based
 Compatibility-layer file callbacks are queued asynchronously, although the
 underlying libc regular-file operation runs on the event-loop thread because
 there is no native worker pool.
+
+The unchanged `node_web.js` also runs in the Win32 guest executable using
+XP-era Winsock APIs, with no Node installation or separate runtime modules:
+
+```bat
+guest_vm-win32.exe node_web.js --bind 127.0.0.1 --directory www 8000
+```
+
+Omit `--bind` to listen on all IPv4 interfaces. See
+[Windows networking](guest_vm/docs/windows-networking.md) for build commands,
+Wine acceptance results, XP testing instructions and current API limits.
 
 ### Reusable X11 modules
 

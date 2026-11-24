@@ -74,7 +74,9 @@ function assertCompilationRejected(action, expectedText) {
     try {
         action();
     } catch (error) {
-        rejected = String(error).indexOf(expectedText) >= 0;
+        var description = error && error.message !== undefined ?
+                          String(error.message) : String(error);
+        rejected = description.indexOf(expectedText) >= 0;
     }
     assertEqual(rejected, true, "rejection containing " + expectedText);
 }

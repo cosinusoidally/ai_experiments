@@ -1,0 +1,111 @@
+function Counter(start) {
+    this.value = start;
+}
+Counter.prototype.add = function (amount) {
+    this.value += amount;
+    return this.value;
+};
+
+var counter = new Counter(4);
+assertEqual(counter.add(3), 7, "constructor receiver and prototype method");
+assertEqual(counter.instanceofValue, undefined, "missing inherited property");
+assertEqual(typeof Counter, "function", "typeof guest function");
+assertEqual((~0) >>> 0, 4294967295, "bitwise not");
+
+var values = {first: 1, second: 2, third: 3};
+var names = "";
+for (var name in values) {
+    if (name === "second") continue;
+    names += name;
+}
+assertEqual(names, "firstthird", "for-in and continue");
+delete values.second;
+assertEqual(values.hasOwnProperty("second"), false, "delete property");
+
+/* A recursive traversal must see array elements through the string keys
+ * supplied by for-in, not just through integer bracket expressions. */
+function countNestedObjects(value) {
+    if (!value || typeof value === "string") return 0;
+    var count = typeof value === "object" ? 1 : 0, key;
+    for (key in value) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+            count += countNestedObjects(value[key]);
+        }
+    }
+    return count;
+}
+assertEqual(countNestedObjects({items: [{value: 1}, {value: 2}],
+    metadata: {active: true}}), 5, "recursive traversal of objects and arrays");
+
+var turns = 0;
+do {
+    turns++;
+} while (turns < 2);
+assertEqual(turns, 2, "do-while");
+
+var flags = 1;
+flags |= 4;
+flags &= 6;
+assertEqual(flags, 4, "compound bitwise assignment");
+var shifted = 3;
+shifted <<= 3;
+assertEqual(shifted, 24, "compound left shift assignment");
+shifted >>= 2;
+assertEqual(shifted, 6, "compound signed right shift assignment");
+shifted = -1;
+shifted >>>= 28;
+assertEqual(shifted, 15, "compound unsigned right shift assignment");
+
+function switchValue(value) {
+    var result = "";
+    switch (value) {
+    case 1:
+        result += "one";
+        break;
+    case 2:
+        result += "two";
+    default:
+        result += ":default";
+        break;
+    case 3:
+        result += "three";
+    }
+    return result;
+}
+assertEqual(switchValue(1), "one", "switch matching case and break");
+assertEqual(switchValue(2), "two:default", "switch fallthrough");
+assertEqual(switchValue(9), ":default", "switch default clause");
+assertEqual(switchValue(3), "three", "switch case after default");
+
+var inheritedMembership = {inherited: undefined};
+var membership = Object.create(inheritedMembership);
+membership.own = undefined;
+assertEqual("own" in membership, true, "in sees undefined own property");
+assertEqual("inherited" in membership, true, "in follows prototypes");
+assertEqual("missing" in membership, false, "in rejects missing property");
+
+function MembershipBase() {}
+function MembershipChild() {}
+MembershipChild.prototype = new MembershipBase();
+var membershipChild = new MembershipChild();
+assertEqual(membershipChild instanceof MembershipChild, true,
+            "instanceof matches direct prototype");
+assertEqual(membershipChild instanceof MembershipBase, true,
+            "instanceof follows prototype chain");
+assertEqual({} instanceof MembershipBase, false,
+            "instanceof rejects unrelated object");
+
+var labelledTotal = 0;
+outerLoop: for (var labelledOuter = 0; labelledOuter < 4; labelledOuter++) {
+    for (var labelledInner = 0; labelledInner < 4; labelledInner++) {
+        if (labelledInner === 1) continue outerLoop;
+        labelledTotal++;
+    }
+}
+assertEqual(labelledTotal, 4, "labelled continue targets its loop");
+labelledBlock: {
+    labelledTotal = 9;
+    break labelledBlock;
+    labelledTotal = 100;
+}
+assertEqual(labelledTotal, 9, "labelled break leaves its statement");

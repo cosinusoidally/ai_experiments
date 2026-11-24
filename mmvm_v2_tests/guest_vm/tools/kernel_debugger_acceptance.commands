@@ -1,0 +1,20 @@
+# Whole-command workflow using a real kernel and guest program.
+set args hello.js
+show args
+break interpreterKernel
+run
+assert budget == 2147483647
+print $eip
+x/2wx $ebp
+info args
+info locals
+backtrace
+frame 0
+list
+next
+stepi
+finish
+delete 1
+continue
+run
+quit

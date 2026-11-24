@@ -64,7 +64,9 @@ var NodeFs = {
         return names;
     },
 
-    readFileSync: function (path) {
+    readFileSync: function (path, options) {
+        var encoding = typeof options === "string" ? options :
+            options && options.encoding;
         path = String(path);
         var file = NodeLibc.fopen(path, "rb");
         if (!file) throw nodeFsError("open", path, NodeLibc.errno());
@@ -81,18 +83,22 @@ var NodeFs = {
             throw tellError;
         }
         var pointer = NodeMemory.allocate(length);
-        var bytes = [];
+        var result = Buffer.alloc(length);
+        var offset = 0;
         var remaining = length;
         while (remaining > 0) {
             var wanted = remaining > 65536 ? 65536 : remaining;
             var count = NodeLibc.fread(pointer, 1, wanted, file);
             if (count <= 0) break;
-            for (var i = 0; i < count; i++) bytes.push(peek8(pointer + i));
+            for (var i = 0; i < count; i++) {
+                result.writeUInt8(peek8(pointer + i), offset++);
+            }
             remaining -= count;
         }
         NodeMemory.free(pointer);
         NodeLibc.fclose(file);
-        return new Buffer(bytes);
+        if (offset !== length) result = result.slice(0, offset);
+        return encoding ? result.toString(encoding) : result;
     },
 
     stat: function (path, callback) {
@@ -119,10 +125,17 @@ var NodeFs = {
         });
     },
 
-    readFile: function (path, callback) {
+    readFile: function (path, options, callback) {
+        if (typeof options === "function") {
+            callback = options;
+            options = null;
+        }
+        if (typeof callback !== "function") {
+            throw new TypeError("readFile callback must be a function");
+        }
         NodeRuntime.enqueue(function () {
             var result;
-            try { result = NodeFs.readFileSync(path); }
+            try { result = NodeFs.readFileSync(path, options); }
             catch (error) {
                 callback(error);
                 return;

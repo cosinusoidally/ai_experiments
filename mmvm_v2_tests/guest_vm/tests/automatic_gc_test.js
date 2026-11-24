@@ -1,0 +1,142 @@
+(function (root) {
+    function runAutomaticGCTest(VM) {
+        var thresholdVM = new VM({gcThreshold: 4});
+        thresholdVM.run(
+            "var survivor = Buffer.alloc(4);" +
+            "survivor[0] = 77;" +
+            "for (var i = 0; i < 24; i++) {" +
+            "    var garbage = Buffer.alloc(64);" +
+            "    garbage[0] = i;" +
+            "}" +
+            "assertEqual(survivor[0], 77, 'automatic GC retained global');",
+            "automatic_gc_threshold.js");
+        if (thresholdVM.runtime.collectionCount < 1) {
+            throw new Error("allocation threshold did not trigger collection");
+        }
+        if (thresholdVM.runtime.bufferSupport.liveBackingCount() > 4) {
+            throw new Error("automatic GC retained too many unreachable buffers");
+        }
+        thresholdVM.run(
+            "function CollectingConstructor() {" +
+            " for (var n = 0; n < 24; n++) Buffer.alloc(32);" +
+            "}" +
+            "var constructed = new CollectingConstructor();" +
+            "assertEqual(constructed instanceof CollectingConstructor, true," +
+            " 'constructor receiver survives collection without a this read');",
+            "automatic_gc_constructor_receiver.js");
+        thresholdVM.destroy();
+
+        var stressVM = new VM({gcStress: true});
+        stressVM.run(
+            "function makeHolder(value) {" +
+            "    var bytes = Buffer.alloc(4);" +
+            "    bytes[0] = value;" +
+            "    return {bytes: bytes};" +
+            "}" +
+            "var holder = makeHolder(91);" +
+            "var arrays = 0;" +
+            "for (var j = 0; j < 12; j++) { arrays = [j, arrays]; }" +
+            "assertEqual(holder.bytes[0], 91, 'stress GC retained closure result');",
+            "automatic_gc_stress.js");
+        if (stressVM.runtime.collectionCount < 10) {
+            throw new Error("stress GC did not collect at allocation safe points");
+        }
+        stressVM.destroy();
+
+        var reuseVM = new VM({gcThreshold: 8, heapBytes: 128 * 1024});
+        reuseVM.run(
+            "var retained = {answer: 42};" +
+            "for (var k = 0; k < 2000; k++) {" +
+            "    var transient = {x: k, y: k + 1, z: k + 2};" +
+            "}" +
+            "assertEqual(retained.answer, 42, 'record reuse retained live object');",
+            "automatic_gc_record_reuse.js");
+        if (reuseVM.runtime.collectionCount < 10) {
+            throw new Error("record reuse test did not trigger repeated collections");
+        }
+        if (!reuseVM.runtime.linearHeap.freeBlocks.length) {
+            throw new Error("automatic GC did not return records to the guest heap");
+        }
+        reuseVM.run(
+            "var rotating = [1, 2, 3];" +
+            "var deletionTarget = {};" +
+            "for (var m = 0; m < 2000; m++) {" +
+            "    rotating.reverse();" +
+            "    deletionTarget.value = m;" +
+            "    delete deletionTarget.value;" +
+            "}" +
+            "assertEqual(rotating.length, 3, 'array replacement retained length');" +
+            "assertEqual(deletionTarget.value, undefined, 'property deletion persisted');",
+            "automatic_gc_replaced_records.js");
+        reuseVM.destroy();
+
+        var computedStringVM = new VM({gcThreshold: 32,
+                                       heapBytes: 128 * 1024});
+        computedStringVM.run(
+            "var latestText = '';" +
+            "for (var textIndex = 0; textIndex < 600; textIndex++) {" +
+            "    latestText = 'computed-' + textIndex;" +
+            "}" +
+            "assertEqual(latestText, 'computed-599'," +
+            "    'computed string survived collection');",
+            "automatic_gc_computed_strings.js");
+        if (computedStringVM.runtime.collectionCount < 10) {
+            throw new Error("computed strings did not exercise repeated collection");
+        }
+        computedStringVM.destroy();
+
+        var callbackVM = new VM({threadedCompile: true,
+                                 gcThreshold: 8,
+                                 heapBytes: 256 * 1024});
+        callbackVM.run(
+            "function compiledCallback(value) { return value + 1; }",
+            "automatic_gc_compiled_callback.js");
+        var callback = callbackVM.runtime.getGlobal(
+            callbackVM.context, "compiledCallback");
+        var callbackIndex = 0;
+        while (callbackIndex < 3000) {
+            var execution = callbackVM.context.startFunction(
+                callback, undefined, [callbackIndex]);
+            var callbackResult = callbackVM.context.runExecutionToCompletion(execution);
+            if (callbackResult !== callbackIndex + 1) {
+                throw new Error("compiled callback returned the wrong value");
+            }
+            callbackIndex++;
+        }
+        callbackVM.destroy();
+
+        /* Growth reserves one stable native address range and raises only the
+         * guest-visible allocation limit. This matters for Buffer data because
+         * native callers may retain its address while ordinary guest records
+         * force the heap past its initial capacity. */
+        var growthVM = new VM({heapBytes: 64 * 1024,
+                               maxHeapBytes: 512 * 1024,
+                               gcThreshold: 1000000});
+        var growthBuffer = growthVM.runtime.bufferSupport.allocate(16 * 1024);
+        growthVM.runtime.setProperty(growthBuffer, 0, 0x5a);
+        var growthBacking = growthVM.runtime.bufferSupport.viewBacking(
+            growthBuffer);
+        var pointerBeforeGrowth = growthVM.runtime.heapRecords.
+            bufferBackingPointer(growthBacking);
+        growthVM.runtime.bufferSupport.allocate(96 * 1024);
+        if (growthVM.runtime.linearHeap.growthCount < 1 ||
+            growthVM.runtime.linearHeap.allocationLimit <= 64 * 1024) {
+            throw new Error("guest heap did not grow past its initial capacity");
+        }
+        if (growthVM.runtime.getProperty(growthBuffer, 0) !== 0x5a) {
+            throw new Error("guest heap growth did not preserve Buffer data");
+        }
+        if (pointerBeforeGrowth &&
+            growthVM.runtime.heapRecords.bufferBackingPointer(growthBacking) !==
+                pointerBeforeGrowth) {
+            throw new Error("guest heap growth moved the native address range");
+        }
+        growthVM.destroy();
+        return "automatic GC threshold and stress modes passed";
+    }
+
+    root.GuestVMRunAutomaticGCTest = runAutomaticGCTest;
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = runAutomaticGCTest;
+    }
+}(this));

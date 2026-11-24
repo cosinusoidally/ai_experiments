@@ -13,6 +13,7 @@ var NodeProcess = {
 
         process = {
             argv: nodeArguments,
+            platform: NodeLibc.platformName(),
             env: {
                 DISPLAY: NodeMemory.cString(NodeLibc.getenv("DISPLAY")),
                 XAUTHORITY: NodeMemory.cString(NodeLibc.getenv("XAUTHORITY")),
@@ -23,6 +24,21 @@ var NodeProcess = {
                 NodeProcess.exiting = true;
                 throw NodeProcess.exitMarker;
             }
+        };
+        NodeEventEmitter.call(process);
+        process.on = NodeEventEmitter.prototype.on;
+        process.emit = NodeEventEmitter.prototype.emit;
+        process.once = NodeEventEmitter.prototype.once;
+        process.removeListener = NodeEventEmitter.prototype.removeListener;
+        process.stdout = new NodeEventEmitter();
+        process.stdout.write = function (text) {
+            NodeMemory.writeAll(1, String(text));
+            return true;
+        };
+        process.stderr = new NodeEventEmitter();
+        process.stderr.write = function (text) {
+            NodeMemory.writeAll(2, String(text));
+            return true;
         };
 
         console = {
@@ -146,14 +162,20 @@ var NodeProcess = {
                 encoding !== "utf8" && encoding !== "utf-8") {
                 throw new Error("unsupported Buffer encoding: " + encoding);
             }
-            var result = "";
-            for (var i = start; i < end; i++) {
-                result += String.fromCharCode(this._nodeBytes[i]);
+            if (encoding === "ascii" || encoding === "binary") {
+                return NodeEncoding.byteString(
+                    this._nodeBytes.slice(start, end));
             }
-            return result;
+            return NodeEncoding.utf8String(this._nodeBytes, start, end);
         };
         NodeBuffer.prototype.readUInt16LE = function (offset) {
             return this._nodeBytes[offset] | (this._nodeBytes[offset + 1] << 8);
+        };
+        NodeBuffer.prototype.readUInt8 = function (offset) {
+            if (offset < 0 || offset >= this.length) {
+                throw new RangeError("Buffer index out of range");
+            }
+            return this._nodeBytes[offset];
         };
         NodeBuffer.prototype.readUInt16BE = function (offset) {
             return (this._nodeBytes[offset] << 8) | this._nodeBytes[offset + 1];
@@ -173,6 +195,13 @@ var NodeProcess = {
             this._nodeBytes[offset + 1] = (value >>> 8) & 255;
             return offset + 2;
         };
+        NodeBuffer.prototype.writeUInt8 = function (value, offset) {
+            if (offset < 0 || offset >= this.length) {
+                throw new RangeError("Buffer index out of range");
+            }
+            this._nodeBytes[offset] = Number(value) & 255;
+            return offset + 1;
+        };
         NodeBuffer.prototype.writeUInt32LE = function (value, offset) {
             this._nodeBytes[offset] = value & 255;
             this._nodeBytes[offset + 1] = (value >>> 8) & 255;
@@ -183,7 +212,14 @@ var NodeProcess = {
         NodeBuffer.prototype.writeInt16LE = function (value, offset) {
             return this.writeUInt16LE(value & 65535, offset);
         };
-        Buffer = NodeBuffer;
+        /* The guest runtime installs its heap-backed Buffer before this
+         * compatibility layer. Preserve that implementation: replacing it
+         * with the array fallback makes bulk I/O quadratic and discards the
+         * VM's native buffer intrinsics. Bare ES3 shells and old Node hosts
+         * without Buffer.alloc still receive the portable fallback. */
+        if (typeof Buffer === "undefined" || !Buffer.alloc) {
+            Buffer = NodeBuffer;
+        }
     },
 
     formatArguments: function (values) {
@@ -197,7 +233,11 @@ var NodeProcess = {
     },
 
     reportException: function (error) {
-        var message = error && error.stack ? error.stack : String(error);
+        var message = this.exceptionFormatter ?
+            this.exceptionFormatter(error) :
+            (error && error.stack ? error.stack : String(error));
         NodeMemory.writeAll(2, message + "\n");
-    }
+    },
+
+    exceptionFormatter: null
 };

@@ -1,0 +1,265 @@
+# Small-program compilation performance investigation
+
+Latest measurements, 2026-11-13: [heavy-eval phase and native CPU profile](EVAL_PHASE_MEASUREMENTS_2026-11-13.md).
+The current unchanged workload points first to typed program construction
+and its native-call boundary. No new performance implementation is claimed;
+the report records observer effects and the earlier rejected experiments.
+
+## Initial checkpoint: paused, 2026-10-29
+
+**No performance implementation from this investigation was retained.** All
+experimental source changes were removed after full-workload measurements
+failed to justify them. The retained VM implementation is unchanged from
+`7752861`. This document records results and proposed next steps, not features
+that currently exist in the code. Generated logs/images remain ignored.
+
+Later work on `guestVM-cleanup` is recorded below. The statement above refers
+to the initial rejected bulk-initialization/grouped-allocation experiments,
+not to subsequent candidates.
+
+## Resumed experiments, 2026-10-29
+
+All local-refactor candidates below are now parked. Production VM sources
+are unchanged; the next work is architectural, based on native-PC evidence.
+See `INTERPRETER_ARCHITECTURE_PERFORMANCE.md` for findings and acceptance gates.
+
+- Fresh isolated `S7.8.5_A1.4_T2.js`, original implementation: **113.071 s**
+  test time, 124.26 s external elapsed, 535,296 KiB peak RSS.
+- Native largest-first free-region candidate plus a base-address accessor:
+  **111.474 s** isolated test time, 121.87 s external, 447,460 KiB peak RSS.
+  A subsequent complete-suite attempt was interrupted by system instability;
+  it passed the first three long cases in 119.340 / 124.721 / 129.147 s,
+  respectively, but did not produce a final inventory. These sustained times
+  do not justify retaining the allocator-policy change. The original native
+  sort/insertion/first-fit policy was restored. No completed whole-suite or
+  sustained performance improvement is claimed for this candidate.
+- Base-address accessor alone, original allocator: **112.289 s** isolated
+  test time, 122.68 s external, 535,320 KiB peak RSS. Treat this as essentially
+  unchanged, not evidence of a meaningful speedup. The accessor avoids range
+  conversion for a known zero offset; it still checks liveness and reads the
+  current allocation pointer, with no fixed-address or cached-pointer rule.
+- First compilation candidate lifts the declaration walk's two capturing
+  closures into reusable named functions. Each invocation still owns its
+  deduplication set. Source order, duplicate handling and function boundaries
+  are unchanged; the visitor reads the stable AST node kind once per visit.
+  This removes repeated closure/environment construction rather than caching
+  programs or adding a test-specific shortcut. Node's existing project suite
+  passes 12 guest programs / 270 guest assertions. Completed standalone run:
+  **3,292 passed / 0 failed / 0 not run / 0 timed out**, 607.31 s external,
+  596.20 s user CPU, 575,928 KiB peak RSS. Four long cases total 437.972 s;
+  other tests total 149.042 s. This is slower than the older baseline and is
+  not an accepted performance improvement. The matched unchanged snapshot
+  subsequently passes all 3,292 in 636.82 s external / 631.94 s user CPU /
+  575,988 KiB peak RSS. Its four long cases total 481.531 s; other tests total
+  138.635 s. The recursive candidate is 4.6% faster overall but 7.5% slower
+  outside the outliers; it is therefore not accepted unchanged. Raw candidate log:
+  `artifacts/eval-walker-suite.log`.
+- Follow-up: use an iterative declaration walk instead of recursive helper
+  calls carrying the result/set through every statement. Root statements
+  are read directly; only nested statements enter the worklist, in reverse
+  order to preserve source-order traversal. This removes both capturing
+  closures and per-node recursive calls. Node project suite: 12 programs /
+  270 assertions pass. Focused standalone chapter `ch11/11.7`: **87/87 pass**
+  for both unchanged and iterative snapshots; summed test times 15.768 s and
+  15.602 s, respectively. This is essentially parity, not a large speedup.
+  Full standalone suite: **3,292 passed / 0 failed / 0 not run / 0 timed out**,
+  615.29 s external, 611.41 s user CPU, 575,956 KiB peak RSS. Four long cases
+  total 463.368 s; other tests total 135.237 s. Relative to the matched control,
+  external elapsed falls 3.4%, outlier time 3.8%, other-test time 2.5%.
+  These are single full runs, not statistically established steady-state gains;
+  peak memory is unchanged and this does not solve the main performance gap.
+  Both hosts' project suites and bounded GC audits subsequently pass; the
+  standalone 24-round / 47-collection GC workload also passes. Three-way
+  rebuild validation was stopped on redirection to architectural work. The
+  candidate is parked, not part of production VM sources. Raw logs:
+  `artifacts/eval-baseline-shifts.log`, `artifacts/eval-iterative-shifts.log`.
+  Full iterative log: `artifacts/eval-iterative-suite.log`.
+
+All experiments execute external tests unchanged. Generated snapshots and
+logs are ignored, not checked in. After the interruption, the original i386
+snapshot successfully ran `hello.js`; no emulation or binary rebuild was used.
+
+The objective is to accelerate the four long Unicode/eval Test262 cases
+through general VM improvements, without regressing other tests. No external
+tests or demos were modified; no test-specific cache or budget exception was
+introduced. Tests still execute under the standalone guest VM.
+
+## Baseline
+
+The user's completed `artifacts/log.txt` run provides a default-output baseline:
+
+- 3,292 executed; **3,292 passed / 0 failed / 0 not run / 0 timed out**.
+- Runner elapsed: **540.386 seconds**.
+- Summed individual test-call time: **525.347 seconds**.
+- Four long RegExp-literal Unicode cases: **399.732 seconds** combined.
+- Other 3,288 tests: **125.615 seconds** combined.
+
+The four cases are `S7.8.5_A1.1_T2.js`, `S7.8.5_A1.4_T2.js`,
+`S7.8.5_A2.1_T2.js` and `S7.8.5_A2.4_T2.js`, all under `ch07/7.8/7.8.5/`.
+They repeatedly compile different small eval sources; matching performance
+alone does not explain their cost.
+
+## Sampling
+
+The existing read-only stack sampler was run against a bounded
+2,000,000-instruction selection of `S7.8.5_A1.4_T2.js`. Runtime-construction
+samples must be excluded: that phase also invokes a compiler but is not eval
+execution. Among 83 sampled stacks containing `JSContext.compileEval`, 50
+contained `Runtime.registerProgram`. These are overlapping inclusive stacks,
+not independent percentages or proof of exclusive installation cost. The
+sampler pauses the process briefly and perturbs timings; its elapsed time
+must not be used as a throughput score.
+
+Logs: `artifacts/eval-cost-baseline.jsonl`,
+`artifacts/eval-cost-baseline.log`, `artifacts/eval-cost-profiler.log`.
+
+## Rejected experiments
+
+1. **Bulk program metadata initialization.** Two shared-kernel functions used
+   named field setters to replace individual metadata writes, with the same
+   JS/i386 backends and ordinary FFI argument limits. A bounded probe improved
+   from **31.685 to 27.444 seconds** of test-call time. That early measurement
+   was not enough to establish a full-test gain.
+
+2. **Straight-line expression completion lowering.** Expression-only programs
+   returned the final expression's result without an accumulator. Combined
+   with the metadata experiment, the matched bounded probe took **29.681
+   seconds**, worse than metadata initialization alone. An interrupted full
+   run is not a conformance result. This compiler experiment was discarded
+   before the completed grouped-storage run below.
+
+3. **Opportunistic grouped program storage.** A single zeroed reservation held
+   three ordinary records: the program descriptor, bytecode and constant
+   vector. Existing layouts and independently collected lifetimes remained
+   unchanged. An optional reservation fell back to separate allocations if
+   contiguous storage could not fit. Allocation debt counted all three
+   records; no collection occurred during partial construction. Together
+   with bulk initialization, the bounded probe took **24.514 seconds**, about
+   23% below the baseline probe. **The completed run did not retain that gain.**
+
+All bounded probes deliberately exhaust the same 2,000,000-instruction cap;
+their timeout is expected and is not a conformance pass. Their images were
+built separately and tested serially, without concurrent heavy workloads.
+
+## Completed experimental full run — rejected
+
+The grouped-storage/bulk-initializer image, with the original completion
+compiler, completed the unmodified suite:
+
+- **3,292 passed / 0 failed / 0 not run / 0 timed out**.
+- Runner elapsed: **554.764 seconds**; external elapsed: **555.41 seconds**.
+- User CPU: **552.16 seconds**; peak RSS: **575,752 KiB**.
+- Summed individual test-call time: **538.054 seconds**.
+- Four long cases: **400.054 seconds** combined — essentially unchanged.
+- Other 3,288 tests: **138.000 seconds** — about **9.9% slower** in this run.
+
+Command: `./artifacts/js_runner.exe artifacts/eval-storage.snap
+test262_runner.js`. Log: `artifacts/eval-storage-full.log`.
+
+These are single-run comparisons, not statistical estimates. Nevertheless,
+there is no demonstrated long-case benefit to justify keeping added complexity
+and a possible regression elsewhere. All experimental implementation changes
+were removed. Early low-budget improvements must not be reported as completed
+test speedups.
+
+Experimental versions also passed the Node project suite (12 guest programs /
+270 assertions) and bounded structural GC audit (27 audits / 87,198 references /
+76 embedding collections). Those checks establish useful correctness evidence,
+not performance success. A new full Octane/demo/snapshot rebuild validation
+was not completed for these rejected changes; no such claim is made.
+
+## Proposed next step — not implemented
+
+### Resumed diagnostic checkpoint on guestVM-cleanup
+
+The original sampler's 12-frame limit can hide `compileEval` beneath a deep
+parser chain. Filtering only stacks containing that ancestor biases the
+selection toward shallower installation calls. The tool now accepts
+`--stack-depth COUNT` (default 12, maximum 128) and reports truncation.
+Stack-only reads use a bounded 1 MiB chunk cache, discarded on every resume;
+the old single-window cache thrashed between slice descriptors and backing
+strings and made deep-stack pauses excessive. The heap-walk profiler path
+retains its existing window cache. No VM execution semantics change.
+
+`tools/summarize_stacks.js` reports leaf/inclusive counts and the direct child
+of a requested ancestor. It supports `--after-ms` to exclude startup, reports
+incomplete stacks explicitly and warns about ancestor-selection bias. It is
+an optional Node-based reader, like the existing process profiler, not a
+dependency of the VM or Test262 execution.
+
+The new 64-frame probe (`artifacts/eval-deep-cached.jsonl`) has 98 samples
+after 20 seconds, none truncated. Of these, 54 contain `compileEval`: its
+direct child is registration in 31, lowering in 11, parser construction in 5,
+program parsing in 4 and verification in 3. This is a small perturbed sample,
+not an exclusive full-test timing breakdown. Installation is still material,
+but compilation does not account for the entire test duration.
+
+```sh
+node guest_vm/tools/profile_process_memory.js --stack-only --stack-depth 64 \
+  artifacts/snap artifacts/eval-profile test262_runner.js \
+  --instruction-limit 2000000 ch07/7.8/7.8.5/S7.8.5_A1.4_T2.js
+node guest_vm/tools/summarize_stacks.js artifacts/eval-profile.jsonl \
+  --after-ms 20000 --ancestor 'function (source, filename, strict,'
+```
+
+The deliberately capped test times out, as expected; no conformance pass is
+claimed. The uncached deep probe was terminated during startup and must not
+be used as a VM speed measurement. i386 snapshot execution also passed the
+existing hello program. The next runtime experiment is a general allocator
+entry that combines reservation, zeroing and initial record words, replacing
+the separate calls currently required per portable allocation. It must be
+measured on completed workloads before being retained.
+
+Add optional, low-overhead sampled phase timing for eval compilation: parsing,
+scope setup/lowering, verification and program installation. Separate startup
+from sustained execution and distinguish compilation from frame setup, GC and
+the surrounding interpreted loop. Sample a fraction of compilations rather
+than reading clocks or printing logs on every eval. Check profiling overhead
+before trusting its breakdown.
+
+Then target the measured largest sustained cost. No new profiling flag or
+phase-timing implementation had been added when work was paused. Future
+changes need completed long-case comparisons, full-suite correctness, separate
+non-outlier timings and the existing workload/build regression gates before
+being accepted. There are no active investigation processes at this checkpoint.
+
+## Memory-boundary implementation, 2026-10-30
+
+A fresh bounded 64-frame sample has 139 samples after 13 seconds, none
+truncated: 73 include `compileEval`, 39 include program registration, and 22
+include record allocation. Scalar memory normalization/forwarding is visible
+among the leaf samples. These are small, overlapping, perturbed samples,
+not exclusive phase timings. The deliberately capped run times out; it is
+not a conformance pass (`artifacts/heavy-eval-stacks-1.jsonl`).
+
+The new storage-boundary candidate selects native scalar methods once per
+memory instance, and provides general word-array ingress for wide bytecode
+and integer-vector metadata. Dense int32 copies use a kernel-dialect raw
+memory operation; unsupported sources retain ordered JS reads/conversions.
+See `MEMORY_BOUNDARY.md` for guards, ownership, reference behavior and
+snapshot constraints. No benchmark/test source is recognized or cached.
+
+Completed isolated `S7.8.5_A1.1_T2.js` observations, all using a 256 MiB
+control-runtime cap and the same instruction budget:
+
+- Control: **103.165570 s** test time / 115.41 s external / 272,896 KiB RSS.
+- Native scalar selection: **98.416643 s** / 110.74 s / 272,912 KiB.
+- Scalar selection plus bulk ingress: **86.950431 s** / 99.47 s /
+  273,000 KiB. All pass. This is 15.7% lower test execution time than the
+  control at essentially the same peak RSS, not a larger-heap tradeoff.
+
+These single-case observations precede a subsequent numeric-array descriptor
+fix. The new standalone integration check exposed an existing problem: an
+explicit indexed getter was ignored in favor of its old dense cell. The
+unchanged image reproduces it. Explicit own numeric descriptors now precede
+dense reads, and a bytecode getter enters through the ordinary native call
+mechanism with the original receiver. The memory fallback is not specialized
+to work around that language bug. Existing heap-access checks now also run
+inside the standalone integration check, including declined-copy atomicity
+and observable accessor reads.
+
+Node and js_min project suites pass at the initial boundary checkpoint;
+standalone hello, 24-round/47-collection bounded GC stress, and the expanded
+standalone integration check pass. Full-suite, remaining workloads and
+three-way rebuild validation are still pending at this intermediate point.
+Do not infer whole-suite/build speedups from the isolated result above.

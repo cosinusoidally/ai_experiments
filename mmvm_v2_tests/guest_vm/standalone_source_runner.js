@@ -1,0 +1,370 @@
+/* Generic source entry embedded in a standalone guest-VM image.  The image
+ * supplies only native argc/argv/image metadata; every file read, parse,
+ * compile, module load, snapshot write, and application call happens here in
+ * the guest runtime. */
+var GuestStandaloneGlobal = this;
+var GuestStandaloneModuleCache = {};
+var GuestStandaloneExitPointer = 0;
+var GuestStandaloneProfile = false;
+var GuestStandaloneGCStress = false;
+/* Guest programs execute in this context and may legitimately declare the
+ * same compatibility-layer globals.  Keep the embedder's service objects in
+ * private bindings so loading the next file cannot silently switch to a
+ * guest-provided implementation. */
+var GuestStandaloneFs = NodeFs;
+var GuestStandaloneDlsymPointer = NodeDlsymPointer;
+var GuestStandaloneBuffer = Buffer;
+var GuestStandaloneUint8Array = Uint8Array;
+
+function guestStandaloneReadSource(path, encoding) {
+    /* NodeFs.readFileSync resolves Buffer through its global environment.
+     * Application runners are allowed to install their own Buffer, but the
+     * embedder must keep using the intrinsic-backed implementation captured
+     * with its filesystem service. */
+    var applicationBuffer = GuestStandaloneGlobal.Buffer;
+    GuestStandaloneGlobal.Buffer = GuestStandaloneBuffer;
+    try {
+        var result = GuestStandaloneFs.readFileSync(path);
+        if (encoding === "binary") {
+            /* Shell read(..., "binary") returns an actual typed byte array,
+             * not the internal Node-compatible Buffer used by filesystem IO.
+             * Consumers use its ArrayBuffer/view identity as well as indexing. */
+            return new GuestStandaloneUint8Array(result);
+        }
+        return result.toString("utf8");
+    } finally { GuestStandaloneGlobal.Buffer = applicationBuffer; }
+}
+
+function guestStandaloneProfileStart() {
+    return GuestStandaloneProfile ? NodeRuntime.now() : 0;
+}
+
+function guestStandaloneProfileEnd(label, started) {
+    if (GuestStandaloneProfile) {
+        console.log("standalone profile: " + label + "=" +
+            ((NodeRuntime.now() - started) | 0) + "ms");
+    }
+}
+
+function guestStandaloneQuit(status) {
+    /* Exit is a direct guest FFI operation.  The C image loader supplies only
+     * dlsym; no VM-specific callback or host JavaScript participates. */
+    if (!GuestStandaloneExitPointer) {
+        GuestStandaloneExitPointer = ffi_call(
+            GuestStandaloneDlsymPointer, 0, "exit");
+        if (!GuestStandaloneExitPointer) {
+            throw new Error("standalone libc exit is unavailable");
+        }
+    }
+    ffi_call(GuestStandaloneExitPointer,
+             status === undefined ? 0 : Number(status) | 0);
+    throw new Error("standalone libc exit returned");
+}
+
+function guestStandaloneCString(pointer) {
+    var result = "";
+    var code;
+    while ((code = peek8(pointer++)) !== 0) {
+        result += String.fromCharCode(code);
+    }
+    return result;
+}
+
+function guestStandaloneArguments() {
+    var result = [];
+    var index = 0;
+    while (index < __guestVMStandaloneArgc) {
+        result.push(guestStandaloneCString(
+            peek32(__guestVMStandaloneArgv + index * 4)));
+        index++;
+    }
+    return result;
+}
+
+function guestStandaloneDirname(path) {
+    var slash = path.lastIndexOf("/");
+    return slash < 0 ? "." : slash === 0 ? "/" : path.substring(0, slash);
+}
+
+function guestStandaloneNormalize(path) {
+    var absolute = path.charAt(0) === "/";
+    var source = path.split("/");
+    var parts = [];
+    var index = 0;
+    while (index < source.length) {
+        var part = source[index++];
+        if (!part || part === ".") continue;
+        if (part === "..") {
+            if (parts.length && parts[parts.length - 1] !== "..") parts.pop();
+            else if (!absolute) parts.push(part);
+        } else parts.push(part);
+    }
+    return (absolute ? "/" : "") + parts.join("/") || (absolute ? "/" : ".");
+}
+
+var GuestStandalonePath = {
+    sep: "/",
+    delimiter: ":",
+    dirname: guestStandaloneDirname,
+    normalize: guestStandaloneNormalize,
+    join: function () {
+        var value = "";
+        var index = 0;
+        while (index < arguments.length) {
+            if (arguments[index]) value += (value ? "/" : "") + arguments[index];
+            index++;
+        }
+        return guestStandaloneNormalize(value || ".");
+    },
+    resolve: function () {
+        var value = "";
+        var index = arguments.length - 1;
+        while (index >= 0) {
+            var part = String(arguments[index--]);
+            if (part) value = part + (value ? "/" + value : "");
+            if (part.charAt(0) === "/") return guestStandaloneNormalize(value);
+        }
+        var cwd = NodeMemory.cString(NodeLibc.getenv("PWD")) || ".";
+        return guestStandaloneNormalize(cwd + "/" + value);
+    }
+};
+
+/* Node's ancestor search paths, exposed separately from module loading so
+ * tools can construct a module's lookup paths without loading a package. */
+var GuestStandaloneModule = {
+    _nodeModulePaths: function (directory) {
+        if (typeof directory !== "string") {
+            throw new TypeError("module search directory must be a string");
+        }
+        var current = GuestStandalonePath.resolve(directory);
+        var paths = [];
+        while (true) {
+            var slash = current.lastIndexOf("/");
+            var basename = current.substring(slash + 1);
+            if (basename !== "node_modules") {
+                paths.push((current === "/" ? "" : current) +
+                           "/node_modules");
+            }
+            if (current === "/") break;
+            current = guestStandaloneDirname(current);
+        }
+        return paths;
+    }
+};
+
+function guestStandaloneBuiltin(request) {
+    if (request === "fs") return GuestStandaloneFs;
+    if (request === "net") return NodeNet;
+    if (request === "http") return NodeHttp;
+    if (request === "path") return GuestStandalonePath;
+    if (request === "module") return GuestStandaloneModule;
+    return null;
+}
+
+function guestStandaloneRequire(request, parentFilename) {
+    var builtin = guestStandaloneBuiltin(request);
+    if (builtin) return builtin;
+    if (request.substring(0, 2) !== "./" &&
+        request.substring(0, 3) !== "../") {
+        throw new Error("unsupported guest module: " + request);
+    }
+    var filename = guestStandaloneNormalize(
+        guestStandaloneDirname(parentFilename) + "/" + request);
+    if (filename.substring(filename.length - 3) !== ".js") filename += ".js";
+    if (GuestStandaloneModuleCache[filename]) {
+        return GuestStandaloneModuleCache[filename].exports;
+    }
+    var module = {exports: {}, filename: filename};
+    GuestStandaloneModuleCache[filename] = module;
+    var exports = module.exports;
+    var __filename = filename;
+    var __dirname = guestStandaloneDirname(filename);
+    var require = function (child) {
+        return guestStandaloneRequire(String(child), filename);
+    };
+    var phaseStarted = guestStandaloneProfileStart();
+    var source = guestStandaloneReadSource(filename);
+    guestStandaloneProfileEnd("read " + filename, phaseStarted);
+    var factoryName = "__guestVMStandaloneModuleFactory";
+    var previousFactory = GuestStandaloneGlobal[factoryName];
+    var factorySource = factoryName + " = function(module, exports, require, " +
+        "__filename, __dirname) {\n" + source + "\n};";
+    phaseStarted = guestStandaloneProfileStart();
+    var factoryProgram = GuestStandaloneFrontend.compileExecutable(
+        factorySource, filename, guestStandaloneExecute,
+        GuestStandaloneGlobal);
+    guestStandaloneProfileEnd("compile " + filename, phaseStarted);
+    phaseStarted = guestStandaloneProfileStart();
+    factoryProgram();
+    var factory = GuestStandaloneGlobal[factoryName];
+    GuestStandaloneGlobal[factoryName] = previousFactory;
+    factory(module, exports, require, __filename, __dirname);
+    guestStandaloneProfileEnd("execute " + filename, phaseStarted);
+    return module.exports;
+}
+
+function guestStandaloneExecute(path, programArguments, actions) {
+    if (!actions) actions = [{filename: path}];
+    NodeProcess.install([path].concat(programArguments));
+    GuestStandaloneGlobal.arguments = programArguments;
+    GuestStandaloneGlobal.assertEqual = function (actual, expected, message) {
+        if (actual !== expected) {
+            /* Keep assertion reporting independent of the guest Error
+             * constructor.  A missing constructor intrinsic must not mask the
+             * language mismatch that caused a standalone regression test to
+             * fail. */
+            throw (message ? String(message) + ": " : "") +
+                "expected " + expected + ", got " + actual;
+        }
+    };
+    GuestStandaloneGlobal.require = function (request) {
+        return guestStandaloneRequire(String(request), path);
+    };
+    GuestStandaloneGlobal.load = function (filename) {
+        filename = String(filename);
+        var loadedPhaseStarted = guestStandaloneProfileStart();
+        var loadedSource = guestStandaloneReadSource(filename);
+        guestStandaloneProfileEnd("read " + filename, loadedPhaseStarted);
+        loadedPhaseStarted = guestStandaloneProfileStart();
+        var loadedExecutable = GuestStandaloneFrontend.compileExecutable(
+            loadedSource, filename, guestStandaloneExecute,
+            GuestStandaloneGlobal, true);
+        guestStandaloneProfileEnd("compile " + filename, loadedPhaseStarted);
+        loadedPhaseStarted = guestStandaloneProfileStart();
+        loadedExecutable();
+        guestStandaloneProfileEnd("execute " + filename, loadedPhaseStarted);
+    };
+    GuestStandaloneGlobal.print = console.log;
+    GuestStandaloneGlobal.read = guestStandaloneReadSource;
+    GuestStandaloneGlobal.quit = guestStandaloneQuit;
+    GuestStandaloneGlobal.scriptArgs = programArguments;
+    GuestStandaloneGlobal.printErr = console.error;
+    GuestStandaloneGlobal.ctypes = GuestShellCTypes.create(GuestStandaloneDlsymPointer, ffi_call);
+    for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        var action = actions[actionIndex];
+        var phaseStarted = guestStandaloneProfileStart();
+        var source = action.source;
+        if (source === undefined) {
+            source = guestStandaloneReadSource(action.filename);
+            guestStandaloneProfileEnd("read " + action.filename, phaseStarted);
+        }
+        phaseStarted = guestStandaloneProfileStart();
+        var executable = GuestStandaloneFrontend.compileExecutable(
+            source, action.filename, guestStandaloneExecute, GuestStandaloneGlobal,
+            true);
+        guestStandaloneProfileEnd("compile " + action.filename, phaseStarted);
+        phaseStarted = guestStandaloneProfileStart();
+        executable();
+        guestStandaloneProfileEnd("execute " + action.filename, phaseStarted);
+    }
+}
+
+function guestStandaloneRunGuestRunnerUnchecked(runnerArguments) {
+    var snapshotPath = null;
+    var programPath = null;
+    var programArguments = [];
+    var index = 0;
+    while (index < runnerArguments.length) {
+        var option = runnerArguments[index++];
+        if (!programPath && (option === "-e" || option === "-f")) {
+            programArguments.push(option);
+            if (index >= runnerArguments.length) throw new Error(option + " requires an argument");
+            programArguments.push(runnerArguments[index++]);
+        } else if (!programPath && option === "--no-ion") {
+        } else if (!programPath && option === "--snapshot") {
+            if (index >= runnerArguments.length) {
+                throw new Error("--snapshot requires a snapshot file");
+            }
+            snapshotPath = runnerArguments[index++];
+        } else if (!programPath && option === "--vm-native") {
+            /* The standalone interpreter is already native. */
+        } else if (!programPath && option === "--vm-predecode") {
+            throw new Error("--vm-predecode is selected when building the snapshot; " +
+                "omit it when running an existing snapshot");
+        } else if (!programPath && option === "--vm-profile") {
+            GuestStandaloneProfile = true;
+        } else if (!programPath && option === "--vm-gc-stress") {
+            GuestStandaloneGCStress = true;
+        } else if (!programPath && option === "--") {
+            programArguments.push(option);
+            while (index < runnerArguments.length) programArguments.push(runnerArguments[index++]);
+            break;
+        } else if (!programPath && option.charAt(0) === "-") {
+            throw new Error("unsupported standalone guest-runner option: " + option);
+        } else if (!programPath) {
+            programPath = option;
+            programArguments.push(option);
+        }
+        else programArguments.push(option);
+    }
+    if (snapshotPath) {
+        throw new Error("snapshot rebuild must use the full guest_runner.js build pipeline");
+    }
+    var command = GuestShellCommandLine.parse(programArguments);
+    if (!command.actions.length) {
+        if (snapshotPath) return;
+        throw new Error("guest_runner.js requires a program");
+    }
+    if (GuestStandaloneGCStress) {
+        var stressInterval = __guestVMGCStress(true);
+        console.log("GC stress enabled: collection every " + stressInterval +
+                    " opcode boundaries");
+    }
+    guestStandaloneExecute(command.programName, command.scriptArguments, command.actions);
+}
+
+function guestStandaloneRunGuestRunner(runnerArguments) {
+    try {
+        guestStandaloneRunGuestRunnerUnchecked(runnerArguments);
+    } catch (error) {
+        if (error === NodeProcess.exitMarker) {
+            guestStandaloneQuit(NodeProcess.exitCode);
+        }
+        var description = guestStandaloneDescribeError(error);
+        guestStandaloneReportError(description);
+    }
+}
+
+/* Native exceptions need not carry a host-generated stack. Report their
+ * message before attempting object-to-string conversion, so a second missing
+ * operation cannot hide the original failure at the standalone boundary. */
+function guestStandaloneDescribeError(error) {
+    if (error && error.stack) return error.stack;
+    if (error && typeof error.message === "string") {
+        return (typeof error.name === "string" ? error.name : "Error") +
+               ": " + error.message;
+    }
+    return String(error);
+}
+
+/* Argument parsing can fail before NodeProcess.install replaces the build
+ * console. Report through libc rather than invoking an embedding callback,
+ * or rethrowing a handled exception as an opaque unsupported-opcode exit. */
+function guestStandaloneReportError(description) {
+    var dprintfPointer = ffi_call(GuestStandaloneDlsymPointer, 0, "dprintf");
+    ffi_call(dprintfPointer, 2, "%s\n", description);
+    guestStandaloneQuit(3);
+}
+
+__guestVMStandaloneRunGuestRunner = guestStandaloneRunGuestRunner;
+
+var GuestStandaloneArgv = guestStandaloneArguments();
+try {
+    var GuestStandaloneCommand = GuestShellCommandLine.parse(GuestStandaloneArgv);
+    if (!GuestStandaloneCommand.actions.length) throw new Error("standalone program is missing");
+    guestStandaloneExecute(
+        GuestStandaloneCommand.programName, GuestStandaloneCommand.scriptArguments,
+        GuestStandaloneCommand.actions);
+    NodeRuntime.run();
+} catch (GuestStandaloneError) {
+    if (GuestStandaloneError !== NodeProcess.exitMarker) {
+        guestStandaloneReportError(guestStandaloneDescribeError(GuestStandaloneError));
+    }
+}
+if (GuestStandaloneGCStress) {
+    console.log("GC stress completed: " + __guestVMGCStress() +
+                " native collections");
+}
+/* The native loader cannot infer a guest process.exit status. Propagate it
+ * through libc rather than returning a successful kernel return to C. */
+if (NodeProcess.exitCode !== 0) guestStandaloneQuit(NodeProcess.exitCode);

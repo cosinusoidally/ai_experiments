@@ -1,0 +1,189 @@
+/* Bounded-memory, no-clobber file adapter for Node and MMVM hosts. */
+(function (root) {
+    var CHUNK_BYTES = 65536, OWNER_READ_WRITE = 384, EXECUTABLE_MODE = 493;
+    var OPEN_READ_ONLY = 0, OPEN_EXCLUSIVE_WRITE = 193;
+    var SEEK_SET = 0, SEEK_END = 2, INTERRUPTED = 4;
+    var CRT_BINARY = 32768, CRT_EXCLUSIVE_WRITE = 1281;
+
+    function nodeAdapter(fs) {
+        var scratch = Buffer.alloc ? Buffer.alloc(CHUNK_BYTES) : new Buffer(CHUNK_BYTES);
+        return {
+            openInput: function (path) { return fs.openSync(path, "r"); },
+            createOutput: function (path) { return fs.openSync(path, "wx", OWNER_READ_WRITE); },
+            length: function (fd) { return fs.fstatSync(fd).size; },
+            read: function (fd, count) { return fs.readSync(fd, scratch, 0, count, null); },
+            write: function (fd, count) {
+                var done = 0, n;
+                while (done < count) {
+                    n = fs.writeSync(fd, scratch, done, count - done, null);
+                    if (n <= 0) throw new Error("short output write");
+                    done += n;
+                }
+            },
+            get: function (index) { return scratch[index]; },
+            set: function (index, value) { scratch[index] = value; },
+            close: function (fd) { fs.closeSync(fd); },
+            chmod: function (path) { fs.chmodSync(path, EXECUTABLE_MODE); },
+            publish: function (temporary, destination) { fs.linkSync(temporary, destination); },
+            remove: function (path) { fs.unlinkSync(path); },
+            pid: function () { return process.pid; },
+            dispose: function () {}
+        };
+    }
+
+    function nativeAdapter(HostFFI) {
+        var ffi = new HostFFI(), functions = {}, i;
+        /* A native Windows js_min may expose only msvcrt exports, whereas
+         * our Windows guest resolver already supplies the POSIX contracts.
+         * Detect the contract, not the build host or requested output format. */
+        var windowsCRT = ffi.call(ffi.getDlsym(), [0, "__errno_location"]) === 0;
+        var crtNames = {open: "_open", close: "_close", read: "_read", write: "_write",
+            lseek: "_lseek", chmod: "_chmod", link: "rename", unlink: "_unlink",
+            getpid: "_getpid", __errno_location: "_errno"};
+        var publishedTemporary = null;
+        var names = ["open", "close", "read", "write", "lseek", "calloc", "free",
+            "chmod", "link", "unlink", "getpid", "__errno_location"];
+        for (i = 0; i < names.length; i++) functions[names[i]] = ffi.resolve(
+            windowsCRT && crtNames[names[i]] ? crtNames[names[i]] : names[i]);
+        function call(name, args) { return ffi.call(functions[name], args); }
+        function checked(name, args) {
+            var result = call(name, args);
+            if (result < 0) throw new Error(name + " failed (errno " + errno() + ")");
+            return result;
+        }
+        function errno() { return ffi.peek32(call("__errno_location", [])); }
+        var scratch = call("calloc", [CHUNK_BYTES, 1]);
+        if (!scratch) throw new Error("could not allocate file copy buffer");
+        return {
+            openInput: function (path) {
+                return checked("open", [path, windowsCRT ? CRT_BINARY : OPEN_READ_ONLY, 0]);
+            },
+            createOutput: function (path) {
+                return checked("open", [path, windowsCRT ? CRT_EXCLUSIVE_WRITE | CRT_BINARY :
+                    OPEN_EXCLUSIVE_WRITE, OWNER_READ_WRITE]);
+            },
+            length: function (fd) {
+                var length = checked("lseek", [fd, 0, SEEK_END]);
+                checked("lseek", [fd, 0, SEEK_SET]); return length;
+            },
+            read: function (fd, count) {
+                var n;
+                do { n = call("read", [fd, scratch, count]); }
+                while (n < 0 && errno() === INTERRUPTED);
+                if (n < 0) throw new Error("input read failed (errno " + errno() + ")");
+                return n;
+            },
+            write: function (fd, count) {
+                var done = 0, n;
+                while (done < count) {
+                    n = call("write", [fd, scratch + done, count - done]);
+                    if (n < 0 && errno() === INTERRUPTED) continue;
+                    if (n <= 0) throw new Error("output write failed");
+                    done += n;
+                }
+            },
+            get: function (index) { return ffi.peek8(scratch + index); },
+            set: function (index, value) { ffi.poke8(scratch + index, value); },
+            close: function (fd) { checked("close", [fd]); },
+            chmod: function (path) { checked("chmod", [path, windowsCRT ? OWNER_READ_WRITE : EXECUTABLE_MODE]); },
+            publish: function (temporary, destination) {
+                /* MSVCRT rename refuses an existing destination. Unlike the
+                 * POSIX hard-link publication it consumes the temporary name. */
+                checked("link", [temporary, destination]);
+                if (windowsCRT) publishedTemporary = temporary;
+            },
+            remove: function (path) {
+                if (windowsCRT && path === publishedTemporary) { publishedTemporary = null; return; }
+                checked("unlink", [path]);
+            },
+            pid: function () { return call("getpid", []); },
+            dispose: function () { call("free", [scratch]); }
+        };
+    }
+
+    function convert(io, input, output, elf, Assembler, format, debugPath, DebugELF, Digest) {
+        var source = -1, destination = -1, owned = false, temporary;
+        var length, header = [], leading = [], bootstrap = null, layout, n, i, remaining;
+        var MAX_BOOTSTRAP_PREFIX_BYTES = 1024 * 1024;
+        function writeArray(bytes) {
+            var offset = 0, count, j;
+            while (offset < bytes.length) {
+                count = Math.min(CHUNK_BYTES, bytes.length - offset);
+                for (j = 0; j < count; j++) io.set(j, bytes[offset + j]);
+                io.write(destination, count); offset += count;
+            }
+        }
+        try {
+            source = io.openInput(input); length = io.length(source);
+            remaining = format.headerBytes;
+            while (remaining) {
+                n = io.read(source, remaining);
+                if (!n) throw new Error("truncated snapshot header");
+                for (i = 0; i < n; i++) header.push(io.get(i));
+                remaining -= n;
+            }
+            var debug = null;
+            if (debugPath) {
+                var debugDescriptor = io.openInput(debugPath), debugBytes = [];
+                try {
+                    var debugLength = io.length(debugDescriptor);
+                    if (elf.read32(header, format.fields.debugVersion) !== format.debugBindingVersion ||
+                        debugLength !== elf.read32(header, format.fields.debugLength) ||
+                        debugLength > 64 * 1024 * 1024) throw new Error("invalid debug binding/length");
+                    while (debugBytes.length < debugLength) {
+                        n = io.read(debugDescriptor, Math.min(CHUNK_BYTES, debugLength - debugBytes.length));
+                        if (!n) throw new Error("truncated debug sidecar");
+                        for (i = 0; i < n; i++) debugBytes.push(io.get(i));
+                    }
+                } finally { io.close(debugDescriptor); }
+                var digest = Digest.bytes(debugBytes);
+                for (i = 0; i < digest.length; i++) {
+                    if (digest[i] !== header[format.fields.debugDigest + i]) {
+                        throw new Error("debug sidecar does not match snapshot");
+                    }
+                }
+                debug = DebugELF.relocate(debugBytes,
+                    elf.kernelAddress(header, format), elf.read32(header, format.fields.codeLength));
+                var entryOffset = elf.read32(header, format.fields.entryOffset);
+                var entryLength = elf.read32(header, format.fields.entryLength);
+                var leadingLength = entryOffset + entryLength - header.length;
+                if (entryOffset < header.length || !entryLength || entryOffset + entryLength > length ||
+                    leadingLength > MAX_BOOTSTRAP_PREFIX_BYTES) throw new Error("invalid or oversized snapshot bootstrap range");
+                while (leading.length < leadingLength) {
+                    n = io.read(source, Math.min(CHUNK_BYTES, leadingLength - leading.length));
+                    if (!n) throw new Error("truncated snapshot bootstrap");
+                    for (i = 0; i < n; i++) leading.push(io.get(i));
+                }
+                bootstrap = leading.slice(entryOffset - header.length);
+            }
+            layout = elf.build(header, length, Assembler, format, debug, bootstrap);
+            temporary = output + ".tmp." + io.pid();
+            destination = io.createOutput(temporary); owned = true;
+            writeArray(layout.prefix); writeArray(header); writeArray(leading);
+            remaining = length - header.length - leading.length;
+            while (remaining) {
+                n = io.read(source, Math.min(CHUNK_BYTES, remaining));
+                if (!n) throw new Error("snapshot was truncated during copy");
+                io.write(destination, n); remaining -= n;
+            }
+            if (io.read(source, 1)) throw new Error("snapshot grew during copy");
+            writeArray(layout.suffix);
+            io.close(destination); destination = -1;
+            io.close(source); source = -1;
+            io.chmod(temporary);
+            /* link is atomic and refuses an existing target, unlike rename.
+             * Temporary and final path share a directory/filesystem. */
+            io.publish(temporary, output);
+            io.remove(temporary); owned = false;
+            return layout;
+        } finally {
+            if (source >= 0) io.close(source);
+            if (destination >= 0) io.close(destination);
+            if (owned) io.remove(temporary);
+            io.dispose();
+        }
+    }
+    var api = {nodeAdapter: nodeAdapter, nativeAdapter: nativeAdapter, convert: convert};
+    root.GuestVMSnapshotExeIO = api;
+    if (typeof module !== "undefined" && module.exports) module.exports = api;
+}(this));

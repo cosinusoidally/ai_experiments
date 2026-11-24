@@ -1,0 +1,1834 @@
+(function (root) {
+    var op = root.GuestVMBytecode;
+    var optimizer = root.GuestVMBytecodeOptimizer;
+    var Parser = root.GuestVMParser;
+    var FunctionAnalysis = root.GuestVMFunctionAnalysis;
+    if (typeof module !== "undefined" && module.exports) {
+        op = require("./bytecode.js");
+        optimizer = require("./bytecode_optimizer.js");
+        Parser = require("./parser.js");
+        FunctionAnalysis = require("./function_analysis.js");
+    }
+    var isLiteralExpression = Parser.isLiteralExpression;
+    var literalExpressionValue = Parser.literalExpressionValue;
+    /* Immutable compiler-only markers. Handler/with regions need no
+     * per-occurrence object; finalizers carry their lexical target depths. */
+    var HANDLER_REGION = {kind: "handler"};
+    var LEXICAL_ENVIRONMENT_REGION = {kind: "scope"};
+
+    function Compiler(scopeBindings, outerScopes, registerBindings, options) {
+        this.consumeAst = !!options && options.consumeAst === true;
+        this.retainAst = !!options && options.retainAst === true;
+        this.finishFunction = options && options.finishFunction || null;
+        this.captureLocations = !options || options.captureLocations !== false;
+        this.packedWords = !!options && options.packedWords === true;
+        this.pagedTables = !!options && options.pagedTables === true;
+        this.captureHints = !options || options.captureHints !== false;
+        this.reuseStatementTemps = !!options && options.reuseStatementTemps === true;
+        if (this.reuseStatementTemps && this.captureHints) {
+            throw new Error("temporary reuse requires hint capture to be disabled");
+        }
+        this.temporaryScopeActive = false;
+        this.statementTemporaries = this.reuseStatementTemps ? [] : null;
+        this.freeTemporaryRegisters = this.reuseStatementTemps ? [] : null;
+        if (this.reuseStatementTemps) this.allocate = this.allocateReusable;
+        this.wordArena = this.packedWords && options && options.wordArena || null;
+        this.code = new op.WordBuffer(this.packedWords, this.wordArena);
+        this.constants = this.pagedTables ? new op.PagedTable() : [];
+        this.primitiveConstantIndexes = {};
+        this.emptyArgumentConstant = -1;
+        this.smallIntegerConstantIndexes = [];
+        this.registerCount = 0;
+        this.breakTargets = [];
+        this.continueTargets = [];
+        this.labelTargets = [];
+        this.unwindRegions = [];
+        this.completionRegister = -1;
+        this.constantRegisters = this.pagedTables ? new op.PagedTable() : [];
+        this.registerHints = [];
+        this.compactLocations = this.pagedTables || !!options && options.compactLocations === true;
+        this.sourceLocations = this.compactLocations ? new op.SourceLocationTable() : [];
+        this.lastSourceLocation = null;
+        this.currentLocation = null;
+        this.filename = "<source>";
+        this.scopes = [];
+        if (scopeBindings) {
+            this.scopes.push(makeCompileScope(this, scopeBindings,
+                                              !!registerBindings));
+        }
+        this.bindingRegisterCount = this.registerCount;
+        var scopeIndex = 0;
+        while (outerScopes && scopeIndex < outerScopes.length) {
+            this.scopes.push(outerScopes[scopeIndex++]);
+        }
+    }
+
+    /* These operators produce an int32 Number regardless of operand types.
+     * Their operand conversions must still execute, but another |0 cannot
+     * change their result or introduce observable conversion side effects. */
+    function producesInt32(expression) {
+        if (!expression || typeof expression !== "object") return false;
+        if (expression.type === "UnaryExpression") return expression.operator === "~";
+        if (expression.type !== "BinaryExpression") return false;
+        var operator = expression.operator;
+        if (operator === "&" || operator === "|" || operator === "^" ||
+            operator === "<<" || operator === ">>") return true;
+        if (operator === ">>>" && isLiteralExpression(expression.right)) {
+            var count = literalExpressionValue(expression.right);
+            return typeof count === "number" && (count & 31) !== 0;
+        }
+        return false;
+    }
+
+    function isInt32Coercion(expression) {
+        /* Lower a literal coercion without requiring CFG/type analysis.
+         * The left operand is still evaluated and converted exactly once;
+         * numeric zero has no side effects or additional conversion hooks. */
+        return expression && expression.type === "BinaryExpression" &&
+            expression.operator === "|" && isLiteralExpression(expression.right) &&
+            literalExpressionValue(expression.right) === 0;
+    }
+
+    Compiler.prototype.allocate = function () {
+        var register = this.registerCount;
+        this.registerCount++;
+        return register;
+    };
+    Compiler.prototype.allocatePersistentRegister = Compiler.prototype.allocate;
+
+    /* Only whole statements release temporaries. Loop/handler/switch state
+     * remains live throughout its containing statement. Named bindings and
+     * preloaded constants always receive persistent, non-reused slots. */
+    Compiler.prototype.allocateReusable = function () {
+        if (!this.temporaryScopeActive) return this.allocatePersistentRegister();
+        var register = this.freeTemporaryRegisters.length ?
+            this.freeTemporaryRegisters.pop() : this.allocatePersistentRegister();
+        this.statementTemporaries.push(register);
+        return register;
+    };
+
+    Compiler.prototype.releaseStatementTemporaries = function () {
+        this.temporaryScopeActive = false;
+        while (this.statementTemporaries.length) {
+            this.freeTemporaryRegisters.push(this.statementTemporaries.pop());
+        }
+    };
+
+    Compiler.prototype.allocateBlock = function (count) {
+        var first = this.registerCount;
+        this.registerCount += count;
+        return first;
+    };
+
+    Compiler.prototype.constant = function (value) {
+        var type = typeof value;
+        if (type === "number") {
+            /* Large generated numeric tables are overwhelmingly unique.  Do
+             * not stringify and hash every element merely to prove that.  A
+             * compact direct-index cache still shares the small integers that
+             * occur repeatedly in ordinary code. */
+            if (value >= -1 && value <= 255 && value === (value | 0)) {
+                var smallSlot = value + 1;
+                var encodedIndex = this.smallIntegerConstantIndexes[smallSlot];
+                if (encodedIndex) return encodedIndex - 1;
+                var smallIndex = this.constants.length;
+                this.constants.push(value);
+                this.smallIntegerConstantIndexes[smallSlot] = smallIndex + 1;
+                return smallIndex;
+            }
+            this.constants.push(value);
+            return this.constants.length - 1;
+        }
+        if (value === null || type === "undefined" || type === "boolean" ||
+            type === "string") {
+            /* Prefixing the type keeps 1, "1", true, and "true" distinct.
+             * The historical strict-equality scan treated +0 and -0 as the
+             * same constant. Numeric constants use the path above. */
+            var key = "$" + type + ":" + String(value);
+            var existing = this.primitiveConstantIndexes[key];
+            if (existing !== undefined) return existing;
+            var primitiveIndex = this.constants.length;
+            this.constants.push(value);
+            this.primitiveConstantIndexes[key] = primitiveIndex;
+            return primitiveIndex;
+        }
+        /* Other compiler objects are distinct: never identity-scan the full
+         * table, which is quadratic for large generated programs. */
+        this.constants.push(value);
+        return this.constants.length - 1;
+    };
+
+    /* Only CALL/CONSTRUCT sites use this operation. The empty list has a
+     * canonical representation without constructing/hash-looking-up a key for
+     * every call site. Other lists are shared later by runtime registration;
+     * ordinary program parsing must not pay a whole-list interning pass. */
+    Compiler.prototype.argumentListConstant = function (registers) {
+        if (registers.length === 0 && this.emptyArgumentConstant >= 0) {
+            return this.emptyArgumentConstant;
+        }
+        var index = this.constants.length;
+        this.constants.push(registers);
+        if (registers.length === 0) this.emptyArgumentConstant = index;
+        return index;
+    };
+
+    Compiler.prototype.emit = function () {
+        var position = this.code.length;
+        if (this.captureLocations && this.currentLocation) {
+            if (!this.compactLocations) this.sourceLocations[position] = this.currentLocation;
+            else if (this.currentLocation !== this.lastSourceLocation) {
+                this.sourceLocations.append(position, this.currentLocation);
+                this.lastSourceLocation = this.currentLocation;
+            }
+        }
+        this.code.appendKnownWords(arguments);
+        return position;
+    };
+
+    Compiler.prototype.patch = function (position, value) {
+        this.code.words[position] = value;
+    };
+
+    Compiler.prototype.compile = function (program, preserveCompletionValue) {
+        this.filename = program.filename || this.filename;
+        var globalDeclarations = [];
+        if (this.scopes.length === 0) {
+            collectVariableDeclarations(program.body, globalDeclarations);
+        }
+        var declarations = [];
+        collectFunctionDeclarations(program.body, declarations);
+        var declarationIndex = 0;
+        while (declarationIndex < declarations.length) {
+            var declaration = declarations[declarationIndex++];
+            this.currentLocation = declaration.location || program.location;
+            var declaredFunction = this.allocate();
+            var declarationProgram = this.compileFunction(declaration);
+            var declarationConstant = this.constant(declarationProgram);
+            declaration.guestProgramConstant = declarationConstant;
+            this.emit(op.MAKE_FUNCTION, declaredFunction,
+                      declarationConstant);
+            this.storeReference(this.referenceForName(declaration.name), declaredFunction);
+        }
+        var index = 0;
+        if (preserveCompletionValue) {
+            this.completionRegister = this.allocate();
+            this.compileStatement = this.compileStatementWithCompletion;
+            this.emit(op.MOVE, this.completionRegister,
+                      this.emitConstant(undefined));
+        }
+        while (index < program.body.length) {
+            var statement = program.body[index];
+            if (this.reuseStatementTemps) this.temporaryScopeActive = true;
+            this.compileStatement(statement);
+            if (this.reuseStatementTemps) this.releaseStatementTemporaries();
+            /* All whole-body analyses precede lowering. Release completed
+             * root statements only; nested finally bodies may be replayed
+             * along multiple control-flow paths and must remain intact. */
+            if (this.consumeAst && !this.retainAst) program.body[index] = null;
+            index++;
+        }
+        this.emit(op.RETURN, this.completionRegister < 0 ?
+                  this.emitConstant(undefined) : this.completionRegister);
+        return optimizer.optimize({code: this.code.finish(), constants: this.constants,
+                packedWords: this.packedWords,
+                wordArena: this.wordArena,
+                constantRegisters: this.constantRegisters,
+                registerHints: this.registerHints,
+                registerCount: this.registerCount, parameters: [], locals: [],
+                filename: this.filename,
+                location: program.location || {filename: this.filename,
+                                                line: 1, column: 1},
+                sourceLocations: this.sourceLocations,
+                globalDeclarations: globalDeclarations,
+                strict: !!program.strict}, this.bindingRegisterCount);
+    };
+
+    Compiler.prototype.compileFunction = function (expression) {
+        var analysis = this.consumeAst ? FunctionAnalysis.analyze(expression) : null;
+        /* Mutable/public ASTs keep fresh analyses. With-scoped binding
+         * collection retains the existing conservative path as well. */
+        if (analysis && (!analysis.supported || analysis.hasWith)) analysis = null;
+        var locals = analysis ? analysis.locals : collectLocals(expression.body, expression.name);
+        var bindings = makeFunctionBindings(expression.parameters, locals);
+        var bindingMap = makeBindingMap(bindings);
+        var directEval = analysis ? analysis.directEval : containsDirectEval(expression.body);
+        var usesArguments = (analysis ? analysis.usesArguments : referencesArguments(expression.body)) || directEval;
+        var argumentsSlot = bindingMap.$arguments;
+        var parameterIndex = 0;
+        while (parameterIndex < expression.parameters.length) {
+            if (expression.parameters[parameterIndex++] === "arguments") {
+                /* A formal parameter already supplies this binding. It must
+                 * not be replaced by an automatically created arguments object. */
+                argumentsSlot = -1;
+                usesArguments = false;
+                break;
+            }
+        }
+        /* Sloppy arguments objects alias named parameter bindings.  Keep
+         * those bindings in a guest environment so the mapping remains valid
+         * if the arguments object escapes its activation. */
+        var useRegisters = (analysis ? analysisAllowsRegisters(analysis, bindingMap) :
+            canUseRegisterBindings(expression.body, bindingMap)) &&
+            (!!expression.strict || !usesArguments);
+        var nested = new Compiler(bindings, this.scopes, useRegisters,
+            {consumeAst: this.consumeAst, retainAst: this.retainAst,
+             finishFunction: this.finishFunction,
+             packedWords: this.packedWords,
+             pagedTables: this.pagedTables,
+             compactLocations: this.compactLocations,
+             wordArena: this.wordArena,
+             captureHints: this.captureHints,
+             reuseStatementTemps: this.reuseStatementTemps,
+             captureLocations: this.captureLocations});
+        if (directEval) {
+            /* Sloppy eval may introduce a new var binding in this activation
+             * which shadows an outer binding. Keep known locals in their
+             * fixed slots, but resolve every non-local name through the live
+             * environment chain. */
+            nested.scopes.splice(1, 0, {
+                bindings: {}, createsEnvironment: false, dynamic: true
+            });
+        }
+        var bodyProgram = {body: expression.body.body,
+                           filename: expression.location ?
+                               expression.location.filename : this.filename,
+                           location: expression.location || null,
+                           strict: !!expression.strict};
+        /* These analyses need the AST, not emitted instructions. Finish them
+         * before the consuming compiler releases completed statements. */
+        var returnKind = analysis ? analysis.returnKind : inferReturnKind(expression.body);
+        var nonlocalBindings = analysis ? describeNonlocalNames(analysis.names, nested) :
+            describeNonlocalBindings(expression.body, nested);
+        var program = nested.compile(bodyProgram);
+        program.parameters = expression.parameters.slice(0);
+        program.locals = locals;
+        program.bindings = bindings;
+        program.bindingSlots = bindingMap;
+        program.bindingRegisters = useRegisters ?
+            bindingRegisters(bindings, nested.scopes[0]) : null;
+        program.parameterSlots = bindingSlots(expression.parameters,
+                                               program.bindingSlots);
+        program.argumentsSlot = argumentsSlot;
+        program.thisSlot = program.bindingSlots.$this;
+        program.functionNameSlot = expression.name ?
+            program.bindingSlots["$" + expression.name] : -1;
+        program.usesArguments = usesArguments;
+        program.name = expression.name || "";
+        program.source = expression.source || null;
+        if (!this.consumeAst) program.astBody = expression.body;
+        program.returnKind = returnKind;
+        program.nonlocalBindings = nonlocalBindings;
+        /* Direct eval is compiled after this function has started executing.
+         * Preserve the compiler-visible outer environment layouts so eval can
+         * resolve through the complete lexical chain, not merely its caller's
+         * innermost activation. */
+        program.outerEnvironmentScopes = nested.scopes.slice(1);
+        /* A parser-owned AST has no external observer. Once all scope/return
+         * analyses and lowering have consumed this function, detach its body
+         * so a large compilation need not retain every AST beside every
+         * emitted program. The default API remains non-destructive for the
+         * structured backend and embedders which retain their ASTs. */
+        if (this.consumeAst && !this.retainAst) expression.body = null;
+        /* A frontend sink can adopt a completed nested program immediately.
+         * Its parent then retains only the executable template rather than
+         * every child's temporary bytecode and analysis arrays. */
+        if (this.finishFunction) {
+            var adopted = this.finishFunction(program);
+            nested.code.releaseWorkspace(nested.wordArena);
+            return adopted;
+        }
+        return program;
+    };
+
+    Compiler.prototype.emitConstant = function (value) {
+        var constant = this.constant(value);
+        var registers = this.constantRegisters;
+        var target = this.pagedTables ? registers.get(constant) : registers[constant];
+        if (target === undefined) {
+            target = this.allocatePersistentRegister();
+            if (this.pagedTables) registers.set(constant, target);
+            else registers[constant] = target;
+        }
+        return target;
+    };
+
+    /* Empty statement completions leave the eval prefix unchanged. These
+     * helpers emit nothing in ordinary functions/source-loading programs. */
+    Compiler.prototype.saveCompletionValue = function () {
+        if (this.completionRegister < 0) return -1;
+        var saved = this.allocate();
+        this.emit(op.MOVE, saved, this.completionRegister);
+        return saved;
+    };
+
+    Compiler.prototype.restoreCompletionValue = function (saved) {
+        if (saved >= 0) this.emit(op.MOVE, this.completionRegister, saved);
+    };
+
+    Compiler.prototype.enterCatchScope = function (name) {
+        var bindings = {};
+        bindings["$" + name] = {kind: "environment", slot: 0};
+        this.scopes.unshift({bindings: bindings, createsEnvironment: true});
+        this.unwindRegions.push(LEXICAL_ENVIRONMENT_REGION);
+    };
+
+    Compiler.prototype.compileCatchClause = function (statement) {
+        this.enterCatchScope(statement.parameter);
+        this.compileStatement(statement.handler);
+        this.unwindRegions.pop();
+        this.scopes.shift();
+        this.emit(op.LEAVE_WITH);
+    };
+
+    Compiler.prototype.compileFinalizer = function (statement, entry) {
+        /* Cleanup is replayed at each abrupt edge and on normal/exceptional
+         * fallthrough. Its nested functions must keep their ASTs until the
+         * enclosing try statement is finished, including function bodies
+         * lowered by child compilers. Ownership-based analyses remain valid;
+         * only destructive release is deferred for this borrowed subtree. */
+        var previousRetention = this.retainAst;
+        this.retainAst = true;
+        try {
+            if (this.completionRegister < 0) {
+                this.compileStatement(statement);
+                return;
+            }
+            var pending = this.saveCompletionValue();
+            this.restoreCompletionValue(entry);
+            this.compileStatement(statement);
+            /* Abrupt completions leave this path before the restore. A normal
+             * finally completion never replaces the pending try/catch value. */
+            this.restoreCompletionValue(pending);
+        } finally {
+            this.retainAst = previousRetention;
+        }
+    };
+
+    Compiler.prototype.makeJumpTarget = function (position) {
+        var target = [];
+        target.position = position;
+        target.unwindDepth = this.unwindRegions.length;
+        return target;
+    };
+
+    Compiler.prototype.emitJumpTo = function (target) {
+        if (this.unwindRegions.length !== target.unwindDepth) {
+            this.emitUnwindTo(target.unwindDepth);
+        }
+        if (target.position >= 0) this.emit(op.JUMP, target.position);
+        else target.push(this.emit(op.JUMP, 0));
+    };
+
+    /* Materialize cleanup at an abrupt edge, not on every loop iteration.
+     * The original compiler stacks remain intact for other control-flow
+     * paths. Recursive abrupt exits from a finalizer see only its lexical
+     * enclosing regions/targets, never those inside the abandoned try body. */
+    Compiler.prototype.emitUnwindTo = function (depth) {
+        if (this.unwindRegions.length === depth) return;
+        var regions = this.unwindRegions;
+        var scopes = this.scopes;
+        var index = regions.length;
+        while (index > depth) {
+            var region = regions[--index];
+            if (region.kind === "scope") {
+                this.emit(op.LEAVE_WITH);
+                if (this.scopes === scopes) this.scopes = scopes.slice(0);
+                this.scopes.shift();
+            } else {
+                this.emit(op.POP_CATCH);
+                if (region.kind === "finally") {
+                    this.unwindRegions = regions.slice(0, index);
+                    var breaks = this.breakTargets;
+                    var continues = this.continueTargets;
+                    var labels = this.labelTargets;
+                    this.breakTargets = breaks.slice(0, region.breakDepth);
+                    this.continueTargets = continues.slice(0, region.continueDepth);
+                    this.labelTargets = labels.slice(0, region.labelDepth);
+                    this.compileFinalizer(region.block, region.completionEntry);
+                    this.breakTargets = breaks;
+                    this.continueTargets = continues;
+                    this.labelTargets = labels;
+                }
+            }
+        }
+        this.unwindRegions = regions;
+        this.scopes = scopes;
+    };
+
+    Compiler.prototype.compileStatement = function (statement) {
+        if (statement.location) this.currentLocation = statement.location;
+        var index;
+        if (statement.type === "EmptyStatement") return;
+        if (statement.type === "ExpressionStatement") {
+            this.compileExpression(statement.expression);
+            return;
+        }
+        if (statement.type === "BlockStatement") {
+            index = 0;
+            while (index < statement.body.length) {
+                this.compileStatement(statement.body[index]);
+                index++;
+            }
+            return;
+        }
+        if (statement.type === "WithStatement") {
+            var withObject = this.compileExpression(statement.object);
+            this.emit(op.ENTER_WITH, withObject);
+            this.scopes.unshift({bindings: {}, createsEnvironment: true,
+                                 dynamic: true});
+            this.unwindRegions.push(LEXICAL_ENVIRONMENT_REGION);
+            this.compileStatement(statement.body);
+            this.unwindRegions.pop();
+            this.scopes.shift();
+            this.emit(op.LEAVE_WITH);
+            return;
+        }
+        if (statement.type === "LabeledStatement") {
+            var labelledTarget = {
+                name: statement.label,
+                breaks: this.makeJumpTarget(-1),
+                iteration: labelledIteration(statement.body),
+                continueTarget: null
+            };
+            this.labelTargets.push(labelledTarget);
+            this.compileStatement(statement.body);
+            this.labelTargets.pop();
+            patchBreaks(this, labelledTarget.breaks, this.code.length);
+            return;
+        }
+        if (statement.type === "VariableStatement") {
+            index = 0;
+            while (index < statement.declarations.length) {
+                var declaration = statement.declarations[index];
+                /* Declaration instantiation has already created the binding.
+                 * A var declaration without an initializer performs no
+                 * assignment and must not erase an earlier value. */
+                if (declaration.initial === null) {
+                    index++;
+                    continue;
+                }
+                var declarationReference = this.referenceForName(declaration.name);
+                var value;
+                if (declarationReference.kind === "register" &&
+                    this.compileExpressionInto(
+                        declaration.initial, declarationReference.register)) {
+                    value = declarationReference.register;
+                } else {
+                    value = this.compileExpression(declaration.initial);
+                    this.storeReference(declarationReference, value);
+                }
+                index++;
+            }
+            return;
+        }
+        if (statement.type === "FunctionDeclaration") {
+            /* Function declarations are instantiated at scope entry. */
+            return;
+        }
+        if (statement.type === "IfStatement") {
+            var condition = this.compileExpression(statement.test);
+            var falseJump = this.emit(op.JUMP_IF_FALSE, condition, 0);
+            this.compileStatement(statement.consequent);
+            if (statement.alternate) {
+                var endJump = this.emit(op.JUMP, 0);
+                this.patch(falseJump + 2, this.code.length);
+                this.compileStatement(statement.alternate);
+                this.patch(endJump + 1, this.code.length);
+            } else {
+                this.patch(falseJump + 2, this.code.length);
+            }
+            return;
+        }
+        if (statement.type === "WhileStatement") {
+            var whileStart = this.code.length;
+            condition = this.compileExpression(statement.test);
+            var whileEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
+            var whileBreaks = this.makeJumpTarget(-1);
+            var whileContinues = this.makeJumpTarget(whileStart);
+            this.breakTargets.push(whileBreaks);
+            this.continueTargets.push(whileContinues);
+            bindLabelContinues(this, statement, whileContinues);
+            this.compileStatement(statement.body);
+            this.continueTargets.pop();
+            this.breakTargets.pop();
+            this.emit(op.JUMP, whileStart);
+            this.patch(whileEnd + 2, this.code.length);
+            patchBreaks(this, whileBreaks, this.code.length);
+            return;
+        }
+        if (statement.type === "ForStatement") {
+            if (statement.initial !== null) {
+                if (statement.initial.type === "VariableStatement") {
+                    this.compileStatement(statement.initial);
+                } else {
+                    this.compileExpression(statement.initial);
+                }
+            }
+            var forStart = this.code.length;
+            var forEnd = -1;
+            if (statement.test !== null) {
+                condition = this.compileExpression(statement.test);
+                forEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
+            }
+            var forBreaks = this.makeJumpTarget(-1);
+            var forContinues = this.makeJumpTarget(-1);
+            this.breakTargets.push(forBreaks);
+            this.continueTargets.push(forContinues);
+            bindLabelContinues(this, statement, forContinues);
+            this.compileStatement(statement.body);
+            this.continueTargets.pop();
+            this.breakTargets.pop();
+            patchBreaks(this, forContinues, this.code.length);
+            if (statement.update !== null) this.compileExpression(statement.update);
+            this.emit(op.JUMP, forStart);
+            if (forEnd >= 0) this.patch(forEnd + 2, this.code.length);
+            patchBreaks(this, forBreaks, this.code.length);
+            return;
+        }
+        if (statement.type === "DoWhileStatement") {
+            var doStart = this.code.length;
+            var doBreaks = this.makeJumpTarget(-1);
+            var doContinues = this.makeJumpTarget(-1);
+            this.breakTargets.push(doBreaks);
+            this.continueTargets.push(doContinues);
+            bindLabelContinues(this, statement, doContinues);
+            this.compileStatement(statement.body);
+            this.continueTargets.pop();
+            this.breakTargets.pop();
+            patchBreaks(this, doContinues, this.code.length);
+            condition = this.compileExpression(statement.test);
+            var doEnd = this.emit(op.JUMP_IF_FALSE, condition, 0);
+            this.emit(op.JUMP, doStart);
+            this.patch(doEnd + 2, this.code.length);
+            patchBreaks(this, doBreaks, this.code.length);
+            return;
+        }
+        if (statement.type === "ForInStatement") {
+            var forInReference;
+            if (statement.left.type === "VariableStatement") {
+                if (statement.left.declarations.length !== 1) {
+                    throw new SyntaxError("for-in requires one variable");
+                }
+                forInReference = this.referenceForName(
+                    statement.left.declarations[0].name);
+            } else {
+                forInReference = this.compileReference(statement.left);
+            }
+            var forInObject = this.compileExpression(statement.right);
+            var forInKeys = this.allocate();
+            this.emit(op.GET_KEYS, forInKeys, forInObject);
+            var forInIndex = this.allocate();
+            this.emit(op.MOVE, forInIndex, this.emitConstant(0));
+            var forInStart = this.code.length;
+            var lengthKey = this.emitConstant("length");
+            var forInLength = this.allocate();
+            this.emit(op.GET_PROPERTY, forInLength, forInKeys, lengthKey);
+            var forInCondition = this.allocate();
+            this.emit(op.LESS, forInCondition, forInIndex, forInLength);
+            var forInEnd = this.emit(op.JUMP_IF_FALSE, forInCondition, 0);
+            var forInKey = this.allocate();
+            this.emit(op.GET_PROPERTY, forInKey, forInKeys, forInIndex);
+            this.storeReference(forInReference, forInKey);
+            var forInBreaks = this.makeJumpTarget(-1);
+            var forInContinues = this.makeJumpTarget(-1);
+            this.breakTargets.push(forInBreaks);
+            this.continueTargets.push(forInContinues);
+            bindLabelContinues(this, statement, forInContinues);
+            this.compileStatement(statement.body);
+            this.continueTargets.pop();
+            this.breakTargets.pop();
+            patchBreaks(this, forInContinues, this.code.length);
+            var oneForIn = this.emitConstant(1);
+            this.emit(op.ADD, forInIndex, forInIndex, oneForIn);
+            this.emit(op.JUMP, forInStart);
+            this.patch(forInEnd + 2, this.code.length);
+            patchBreaks(this, forInBreaks, this.code.length);
+            return;
+        }
+        if (statement.type === "BreakStatement") {
+            if (statement.label !== null) {
+                var labelledBreak = findLabel(this, statement.label);
+                this.emitJumpTo(labelledBreak.breaks);
+                return;
+            }
+            if (!this.breakTargets.length) throw new SyntaxError("break outside loop");
+            this.emitJumpTo(this.breakTargets[this.breakTargets.length - 1]);
+            return;
+        }
+        if (statement.type === "ContinueStatement") {
+            var continueTarget;
+            if (statement.label !== null) {
+                var labelledContinue = findLabel(this, statement.label);
+                if (labelledContinue.continueTarget === null) {
+                    throw new SyntaxError("continue label is not an iteration statement");
+                }
+                continueTarget = labelledContinue.continueTarget;
+            } else {
+                if (!this.continueTargets.length) {
+                    throw new SyntaxError("continue outside loop");
+                }
+                continueTarget = this.continueTargets[
+                    this.continueTargets.length - 1];
+            }
+            this.emitJumpTo(continueTarget);
+            return;
+        }
+        if (statement.type === "ThrowStatement") {
+            this.emit(op.THROW, this.compileExpression(statement.argument));
+            return;
+        }
+        if (statement.type === "TryStatement") {
+            var tryCompletion = this.saveCompletionValue();
+            if (!statement.finalizer) {
+                var catchPush = this.emit(op.PUSH_CATCH_SCOPE, 0,
+                    this.constant(statement.parameter));
+                this.unwindRegions.push(HANDLER_REGION);
+                this.compileStatement(statement.block);
+                this.unwindRegions.pop();
+                this.emit(op.POP_CATCH);
+                var catchEnd = this.emit(op.JUMP, 0);
+                this.patch(catchPush + 1, this.code.length);
+                this.restoreCompletionValue(tryCompletion);
+                this.compileCatchClause(statement);
+                this.patch(catchEnd + 1, this.code.length);
+                return;
+            }
+            var finallyPush = this.emit(op.PUSH_CATCH_SCOPE, 0,
+                this.constant(statement.finallyParameter));
+            var finalizerRegion = {kind: "finally", block: statement.finalizer,
+                completionEntry: tryCompletion,
+                breakDepth: this.breakTargets.length,
+                continueDepth: this.continueTargets.length,
+                labelDepth: this.labelTargets.length};
+            this.unwindRegions.push(finalizerRegion);
+            var userCatchPush = -1;
+            if (statement.handler) {
+                userCatchPush = this.emit(op.PUSH_CATCH_SCOPE, 0,
+                    this.constant(statement.parameter));
+                this.unwindRegions.push(HANDLER_REGION);
+            }
+            this.compileStatement(statement.block);
+            if (statement.handler) {
+                this.unwindRegions.pop();
+                this.emit(op.POP_CATCH);
+            }
+            var skipUserCatch = -1;
+            if (statement.handler) {
+                skipUserCatch = this.emit(op.JUMP, 0);
+                this.patch(userCatchPush + 1, this.code.length);
+                this.restoreCompletionValue(tryCompletion);
+                this.compileCatchClause(statement);
+                this.patch(skipUserCatch + 1, this.code.length);
+            }
+            this.unwindRegions.pop();
+            this.emit(op.POP_CATCH);
+            this.compileFinalizer(statement.finalizer, tryCompletion);
+            var finallyEnd = this.emit(op.JUMP, 0);
+            this.patch(finallyPush + 1, this.code.length);
+            this.enterCatchScope(statement.finallyParameter);
+            this.compileFinalizer(statement.finalizer, tryCompletion);
+            this.emit(op.THROW, this.loadReference(
+                this.referenceForName(statement.finallyParameter)));
+            this.unwindRegions.pop();
+            this.scopes.shift();
+            this.patch(finallyEnd + 1, this.code.length);
+            return;
+        }
+        if (statement.type === "SwitchStatement") {
+            var switchValue = this.compileExpression(statement.discriminant);
+            var caseDispatches = [];
+            var defaultCaseIndex = -1;
+            index = 0;
+            while (index < statement.cases.length) {
+                var switchCase = statement.cases[index];
+                /* Compact literal tests can be 0, false or "". Only the
+                 * absence sentinel denotes a default arm. */
+                if (switchCase.test !== null) {
+                    var caseValue = this.compileExpression(switchCase.test);
+                    var caseMatches = this.allocate();
+                    this.emit(op.STRICT_EQUAL, caseMatches,
+                              switchValue, caseValue);
+                    var nextCase = this.emit(op.JUMP_IF_FALSE,
+                                             caseMatches, 0);
+                    caseDispatches[index] = this.emit(op.JUMP, 0);
+                    this.patch(nextCase + 2, this.code.length);
+                } else defaultCaseIndex = index;
+                index++;
+            }
+            var defaultDispatch = this.emit(op.JUMP, 0);
+            var switchBreaks = this.makeJumpTarget(-1);
+            this.breakTargets.push(switchBreaks);
+            var casePositions = [];
+            index = 0;
+            while (index < statement.cases.length) {
+                casePositions[index] = this.code.length;
+                var consequentIndex = 0;
+                var caseConsequent = statement.cases[index].consequent;
+                while (consequentIndex < caseConsequent.length) {
+                    this.compileStatement(caseConsequent[consequentIndex++]);
+                }
+                index++;
+            }
+            this.breakTargets.pop();
+            var switchEnd = this.code.length;
+            index = 0;
+            while (index < caseDispatches.length) {
+                if (caseDispatches[index] !== undefined) {
+                    this.patch(caseDispatches[index] + 1,
+                               casePositions[index]);
+                }
+                index++;
+            }
+            this.patch(defaultDispatch + 1, defaultCaseIndex < 0 ?
+                       switchEnd : casePositions[defaultCaseIndex]);
+            patchBreaks(this, switchBreaks, switchEnd);
+            return;
+        }
+        if (statement.type === "ReturnStatement") {
+            var returned = statement.argument !== null ?
+                this.compileExpression(statement.argument) :
+                this.emitConstant(undefined);
+            var returnDepth = this.unwindRegions.length;
+            var regionIndex = 0;
+            while (regionIndex < returnDepth) {
+                if (this.unwindRegions[regionIndex].kind === "finally") {
+                    returnDepth = regionIndex;
+                    break;
+                }
+                regionIndex++;
+            }
+            if (returnDepth < this.unwindRegions.length) {
+                /* Named binding registers occupy the initial register
+                 * prefix. Other results are already private temporaries or
+                 * constants and cannot be reassigned by the finalizer. */
+                if (returned < this.bindingRegisterCount) {
+                    var stableReturn = this.allocate();
+                    this.emit(op.MOVE, stableReturn, returned);
+                    returned = stableReturn;
+                }
+                this.emitUnwindTo(returnDepth);
+            }
+            /* The return boundary discards the frame and its remaining
+             * handlers/environments. Only cleanup through the outermost
+             * finalizer must run explicitly before that boundary. */
+            this.emit(op.RETURN, returned);
+            return;
+        }
+        throw new Error("unsupported statement: " + statement.type);
+    };
+
+    /* Select the completion-aware entry only for eval. Recursive statement
+     * lists call this.compileStatement, so they automatically retain the
+     * selected mode, while ordinary functions keep the original fast path.
+     * The shared body is not copied and the public AST is never retagged. */
+    Compiler.prototype.compileOrdinaryStatement = Compiler.prototype.compileStatement;
+    Compiler.prototype.compileStatementWithCompletion = function (statement) {
+        if (statement.type === "ExpressionStatement") {
+            if (statement.location) this.currentLocation = statement.location;
+            var value = this.compileExpression(statement.expression);
+            this.emit(op.MOVE, this.completionRegister, value);
+        } else this.compileOrdinaryStatement(statement);
+    };
+
+    Compiler.prototype.emitBinary = function (operator, target, left, right) {
+        var opcode = operator === "+" ? op.ADD :
+            operator === "-" ? op.SUBTRACT :
+            operator === "*" ? op.MULTIPLY :
+            operator === "/" ? op.DIVIDE :
+            operator === "%" ? op.REMAINDER :
+            operator === "===" ? op.STRICT_EQUAL :
+            operator === "==" ? op.EQUAL :
+            operator === "<" ? op.LESS :
+            operator === "<=" ? op.LESS_EQUAL :
+            operator === ">" ? op.GREATER :
+            operator === ">=" ? op.GREATER_EQUAL : 0;
+        if (operator === "&") opcode = op.BIT_AND;
+        else if (operator === "|") opcode = op.BIT_OR;
+        else if (operator === "^") opcode = op.BIT_XOR;
+        else if (operator === "<<") opcode = op.SHIFT_LEFT;
+        else if (operator === ">>") opcode = op.SHIFT_RIGHT;
+        else if (operator === ">>>") opcode = op.SHIFT_UNSIGNED_RIGHT;
+        else if (operator === "in") opcode = op.IN;
+        else if (operator === "instanceof") opcode = op.INSTANCEOF;
+        if (operator === "!==" || operator === "!=") {
+            var equalRegister = this.allocate();
+            this.emit(operator === "!==" ? op.STRICT_EQUAL : op.EQUAL,
+                      equalRegister, left, right);
+            this.emit(op.NOT, target, equalRegister);
+            return;
+        }
+        if (!opcode) throw new Error("unsupported binary operator: " + operator);
+        this.emit(opcode, target, left, right);
+    };
+
+    Compiler.prototype.compileReference = function (expression, future) {
+        if (expression.type === "Identifier") {
+            return this.referenceForName(expression.name);
+        }
+        if (expression.type === "MemberExpression") {
+            var objectFuture = expression.computed ?
+                [expression.property, future] : future;
+            var object = this.compileExpression(expression.object, objectFuture);
+            if (!expression.computed && isLiteralExpression(expression.property)) {
+                return {kind: "constantProperty", object: object,
+                        key: this.constant(literalExpressionValue(
+                            expression.property))};
+            }
+            return {kind: "property",
+                    object: object,
+                    key: this.compileExpression(expression.property, future)};
+        }
+        throw new SyntaxError("invalid assignment target");
+    };
+
+    Compiler.prototype.referenceForName = function (name) {
+        var binding = this.resolveBinding(name);
+        if (binding) {
+            if (binding.kind === "dynamic") {
+                return {kind: "dynamic", name: this.constant(name)};
+            }
+            if (binding.kind === "register") return binding;
+            return {kind: "local", depth: binding.depth, slot: binding.slot};
+        }
+        return {kind: "global", name: this.constant(name)};
+    };
+
+    Compiler.prototype.resolveBinding = function (name) {
+        var key = "$" + name;
+        var depth = 0;
+        var scopeIndex = 0;
+        while (scopeIndex < this.scopes.length) {
+            var scope = this.scopes[scopeIndex];
+            if (scope.dynamic) return {kind: "dynamic"};
+            var binding = scope.bindings[key];
+            if (binding !== undefined) {
+                if (binding.kind === "register") return binding;
+                return {kind: "environment", depth: depth, slot: binding.slot};
+            }
+            if (scope.createsEnvironment) depth++;
+            scopeIndex++;
+        }
+        return null;
+    };
+
+    /* `this` is an execution-context binding, never an identifier resolved
+     * through a with object's properties or a dynamically introduced name. */
+    Compiler.prototype.referenceForThis = function () {
+        var depth = 0;
+        var index = 0;
+        while (index < this.scopes.length) {
+            var scope = this.scopes[index++];
+            var binding = scope.bindings.$this;
+            if (binding !== undefined) {
+                if (binding.kind === "register") return binding;
+                return {kind: "local", depth: depth, slot: binding.slot};
+            }
+            if (scope.createsEnvironment) depth++;
+        }
+        return {kind: "global"};
+    };
+
+    Compiler.prototype.loadReference = function (reference, requestedTarget) {
+        var target = requestedTarget === undefined ?
+            this.allocate() : requestedTarget;
+        if (reference.kind === "global") {
+            this.emit(op.GET_GLOBAL, target, reference.name);
+            if (this.captureHints) {
+                this.registerHints[target] = "global:" + (this.pagedTables ?
+                    this.constants.get(reference.name) : this.constants[reference.name]);
+            }
+        } else if (reference.kind === "local") {
+            this.emit(op.GET_LOCAL, target, reference.depth, reference.slot);
+        } else if (reference.kind === "register") {
+            this.emit(op.MOVE, target, reference.register);
+        } else if (reference.kind === "dynamic") {
+            this.emit(op.GET_NAME, target, reference.name);
+        } else if (reference.kind === "constantProperty") {
+            this.emit(op.GET_PROPERTY_CONST, target, reference.object, reference.key);
+            if (this.captureHints) {
+                var objectHint = this.registerHints[reference.object];
+                var propertyName = this.pagedTables ? this.constants.get(reference.key) :
+                    this.constants[reference.key];
+                this.registerHints[target] = objectHint === "global:Math" ?
+                    "math:" + propertyName : "property:" + propertyName;
+            }
+        } else {
+            this.emit(op.GET_PROPERTY, target, reference.object, reference.key);
+        }
+        return target;
+    };
+
+    Compiler.prototype.storeReference = function (reference, value) {
+        if (reference.kind === "global") {
+            this.emit(op.SET_GLOBAL, reference.name, value);
+        } else if (reference.kind === "local") {
+            this.emit(op.SET_LOCAL, reference.depth, reference.slot, value);
+        } else if (reference.kind === "register") {
+            if (reference.register !== value) this.emit(op.MOVE, reference.register, value);
+        } else if (reference.kind === "dynamic") {
+            this.emit(op.SET_NAME, reference.name, value);
+        } else if (reference.kind === "constantProperty") {
+            this.emit(op.SET_PROPERTY_CONST, reference.object, reference.key, value);
+        } else {
+            this.emit(op.SET_PROPERTY, reference.object, reference.key, value);
+        }
+    };
+
+    /* Compile the common expression forms directly into an existing lexical
+     * register. Operands are still fully evaluated before the destination is
+     * written, so assignment evaluation order and self-references retain their
+     * ECMAScript meaning. Returning false asks the ordinary expression path to
+     * produce a value followed by a MOVE. */
+    Compiler.prototype.compileExpressionInto = function (expression, target) {
+        if (isLiteralExpression(expression)) return false;
+        if (isInt32Coercion(expression)) {
+            if (producesInt32(expression.left)) {
+                return this.compileExpressionInto(expression.left, target);
+            }
+            this.emit(op.TO_INT32, target, this.compileExpression(expression.left));
+            return true;
+        }
+        if (expression.type === "BinaryExpression" &&
+            expression.operator !== "&&" && expression.operator !== "||") {
+            var left = this.compileExpression(expression.left, expression.right);
+            var right = this.compileExpression(expression.right);
+            this.emitBinary(expression.operator, target, left, right);
+            return true;
+        }
+        if (expression.type === "UnaryExpression" &&
+            expression.operator !== "delete" && expression.operator !== "void") {
+            var argument;
+            if (expression.operator === "typeof" &&
+                expression.argument.type === "Identifier") {
+                var typeofReference = this.referenceForName(
+                    expression.argument.name);
+                if (typeofReference.kind === "global") {
+                    this.emit(op.TYPEOF_GLOBAL, target, typeofReference.name);
+                    return true;
+                } else if (typeofReference.kind === "dynamic") {
+                    this.emit(op.TYPEOF_NAME, target, typeofReference.name);
+                    return true;
+                }
+            }
+            argument = this.compileExpression(expression.argument);
+            if (expression.operator === "!") this.emit(op.NOT, target, argument);
+            else if (expression.operator === "-") this.emit(op.NEGATE, target, argument);
+            else if (expression.operator === "+") this.emit(op.POSITIVE, target, argument);
+            else if (expression.operator === "~") this.emit(op.BIT_NOT, target, argument);
+            else if (expression.operator === "typeof") {
+                this.emit(op.TYPEOF, target, argument);
+            } else return false;
+            return true;
+        }
+        if (expression.type === "MemberExpression") {
+            this.loadReference(this.compileReference(expression, null), target);
+            return true;
+        }
+        return false;
+    };
+
+    Compiler.prototype.compileExpression = function (expression, future) {
+        if (isLiteralExpression(expression)) {
+            return this.emitConstant(literalExpressionValue(expression));
+        }
+        if (isInt32Coercion(expression)) {
+            if (producesInt32(expression.left)) {
+                return this.compileExpression(expression.left, future);
+            }
+            var coercionSource = this.compileExpression(expression.left);
+            var coercionTarget = this.allocate();
+            this.emit(op.TO_INT32, coercionTarget, coercionSource);
+            return coercionTarget;
+        }
+        if (expression.type === "FunctionExpression") {
+            var functionRegister = this.allocate();
+            var functionProgram = this.compileFunction(expression);
+            var functionConstant = this.constant(functionProgram);
+            expression.guestProgramConstant = functionConstant;
+            this.emit(op.MAKE_FUNCTION, functionRegister,
+                      functionConstant);
+            return functionRegister;
+        }
+        if (expression.type === "ObjectExpression") {
+            var objectRegister = this.allocate();
+            this.emit(op.MAKE_OBJECT, objectRegister);
+            var propertyIndex = 0;
+            while (propertyIndex < expression.properties.length) {
+                var property = expression.properties[propertyIndex];
+                var propertyKey = this.emitConstant(property.key);
+                var propertyValue = this.compileExpression(property.value);
+                if (property.kind === "get") {
+                    this.emit(op.DEFINE_GETTER, objectRegister, propertyKey,
+                              propertyValue);
+                } else if (property.kind === "set") {
+                    this.emit(op.DEFINE_SETTER, objectRegister, propertyKey,
+                              propertyValue);
+                } else {
+                    this.emit(op.DEFINE_DATA_PROPERTY, objectRegister, propertyKey,
+                              propertyValue);
+                }
+                propertyIndex++;
+            }
+            return objectRegister;
+        }
+        if (expression.type === "ArrayExpression") {
+            var arrayRegister = this.allocate();
+            this.emit(op.MAKE_ARRAY, arrayRegister, expression.elements.length);
+            var elementIndex = 0;
+            while (elementIndex < expression.elements.length) {
+                if (expression.elements[elementIndex] !== null) {
+                    var elementKey = this.emitConstant(elementIndex);
+                    var elementValue = this.compileExpression(
+                        expression.elements[elementIndex]);
+                    this.emit(op.SET_PROPERTY, arrayRegister, elementKey, elementValue);
+                }
+                elementIndex++;
+            }
+            return arrayRegister;
+        }
+        if (expression.type === "RegExpLiteral") {
+            var regexpRegister = this.allocate();
+            this.emit(op.MAKE_REGEXP, regexpRegister,
+                      this.constant(expression.pattern), this.constant(expression.flags));
+            return regexpRegister;
+        }
+        if (expression.type === "Identifier") {
+            var identifierReference = this.referenceForName(expression.name);
+            if (identifierReference.kind === "register" &&
+                !this.expressionWritesRegister(future,
+                                               identifierReference.register)) {
+                return identifierReference.register;
+            }
+            return this.loadReference(identifierReference);
+        }
+        if (expression.type === "ThisExpression") {
+            if (this.evalThis) {
+                var evalThis = this.allocate();
+                this.emit(op.GET_THIS, evalThis);
+                return evalThis;
+            }
+            var thisReference = this.referenceForThis();
+            if (thisReference.kind === "global") {
+                var globalThis = this.allocate();
+                this.emit(op.GET_THIS, globalThis);
+                return globalThis;
+            }
+            return this.loadReference(thisReference);
+        }
+        if (expression.type === "BinaryExpression") {
+            if (expression.operator === "&&" || expression.operator === "||") {
+                var logical = this.compileExpression(expression.left);
+                var logicalResult = this.allocate();
+                this.emit(op.MOVE, logicalResult, logical);
+                var skip = this.emit(op.JUMP_IF_FALSE, logical, 0);
+                if (expression.operator === "||") {
+                    var endTrue = this.emit(op.JUMP, 0);
+                    this.patch(skip + 2, this.code.length);
+                    var orRight = this.compileExpression(expression.right);
+                    this.emit(op.MOVE, logicalResult, orRight);
+                    this.patch(endTrue + 1, this.code.length);
+                } else {
+                    var andRight = this.compileExpression(expression.right);
+                    this.emit(op.MOVE, logicalResult, andRight);
+                    this.patch(skip + 2, this.code.length);
+                }
+                return logicalResult;
+            }
+            var left = this.compileExpression(expression.left, expression.right);
+            var right = this.compileExpression(expression.right);
+            var binary = this.allocate();
+            this.emitBinary(expression.operator, binary, left, right);
+            return binary;
+        }
+        if (expression.type === "ConditionalExpression") {
+            var conditionalResult = this.allocate();
+            var conditionalTest = this.compileExpression(expression.test);
+            var alternateJump = this.emit(op.JUMP_IF_FALSE, conditionalTest, 0);
+            var consequentValue = this.compileExpression(expression.consequent);
+            this.emit(op.MOVE, conditionalResult, consequentValue);
+            var conditionalEnd = this.emit(op.JUMP, 0);
+            this.patch(alternateJump + 2, this.code.length);
+            var alternateValue = this.compileExpression(expression.alternate);
+            this.emit(op.MOVE, conditionalResult, alternateValue);
+            this.patch(conditionalEnd + 1, this.code.length);
+            return conditionalResult;
+        }
+        if (expression.type === "UnaryExpression") {
+            if (expression.operator === "delete") {
+                if (expression.argument.type !== "MemberExpression") {
+                    if (expression.argument.type === "Identifier") {
+                        var deleteNameReference = this.referenceForName(
+                            expression.argument.name);
+                        if (deleteNameReference.kind === "local" ||
+                            deleteNameReference.kind === "register") {
+                            return this.emitConstant(false);
+                        }
+                        var deleteNameResult = this.allocate();
+                        this.emit(op.DELETE_NAME, deleteNameResult,
+                                  deleteNameReference.name);
+                        return deleteNameResult;
+                    }
+                    this.compileExpression(expression.argument);
+                    return this.emitConstant(true);
+                }
+                var deleteReference = this.compileReference(expression.argument, null);
+                var deleteResult = this.allocate();
+                if (deleteReference.kind === "constantProperty") {
+                    this.emit(op.DELETE_PROPERTY_CONST, deleteResult,
+                              deleteReference.object, deleteReference.key);
+                } else {
+                    this.emit(op.DELETE_PROPERTY, deleteResult,
+                              deleteReference.object, deleteReference.key);
+                }
+                return deleteResult;
+            }
+            var unary = this.allocate();
+            if (expression.operator === "typeof" &&
+                expression.argument.type === "Identifier") {
+                var typeofReference = this.referenceForName(
+                    expression.argument.name);
+                if (typeofReference.kind === "global") {
+                    this.emit(op.TYPEOF_GLOBAL, unary, typeofReference.name);
+                    return unary;
+                } else if (typeofReference.kind === "dynamic") {
+                    this.emit(op.TYPEOF_NAME, unary, typeofReference.name);
+                    return unary;
+                }
+            }
+            var argument = this.compileExpression(expression.argument);
+            if (expression.operator === "!") this.emit(op.NOT, unary, argument);
+            else if (expression.operator === "-") this.emit(op.NEGATE, unary, argument);
+            else if (expression.operator === "+") this.emit(op.POSITIVE, unary, argument);
+            else if (expression.operator === "~") this.emit(op.BIT_NOT, unary, argument);
+            else if (expression.operator === "typeof") this.emit(op.TYPEOF, unary, argument);
+            else if (expression.operator === "void") {
+                return this.emitConstant(undefined);
+            } else throw new Error("unsupported unary operator: " + expression.operator);
+            return unary;
+        }
+        if (expression.type === "MemberExpression") {
+            return this.loadReference(this.compileReference(expression, future));
+        }
+        if (expression.type === "AssignmentExpression") {
+            if (expression.left.type !== "Identifier" &&
+                expression.left.type !== "MemberExpression") {
+                this.compileExpression(expression.left);
+                if (expression.operator !== "=") {
+                    this.emit(op.INVALID_ASSIGNMENT);
+                    return this.emitConstant(undefined);
+                }
+                var invalidAssigned = this.compileExpression(expression.right);
+                this.emit(op.INVALID_ASSIGNMENT);
+                return invalidAssigned;
+            }
+            var reference = this.compileReference(expression.left, expression.right);
+            var assigned;
+            if (expression.operator === "=") {
+                if (reference.kind === "register" &&
+                    this.compileExpressionInto(expression.right,
+                                               reference.register)) {
+                    assigned = reference.register;
+                } else assigned = this.compileExpression(expression.right);
+            } else {
+                var current = this.loadReference(reference);
+                var assignmentRight = this.compileExpression(expression.right);
+                assigned = reference.kind === "register" ?
+                    reference.register : this.allocate();
+                this.emitBinary(expression.operator.substring(
+                                    0, expression.operator.length - 1), assigned,
+                                current, assignmentRight);
+            }
+            this.storeReference(reference, assigned);
+            if (this.expressionWritesRegister(future, assigned)) {
+                var stableAssignment = this.allocate();
+                this.emit(op.MOVE, stableAssignment, assigned);
+                return stableAssignment;
+            }
+            return assigned;
+        }
+        if (expression.type === "UpdateExpression") {
+            reference = this.compileReference(expression.argument, null);
+            current = this.loadReference(reference);
+            var numericCurrent = this.allocate();
+            this.emit(op.POSITIVE, numericCurrent, current);
+            var one = this.emitConstant(1);
+            var updated = reference.kind === "register" ?
+                reference.register : this.allocate();
+            this.emit(expression.operator === "++" ? op.ADD : op.SUBTRACT,
+                      updated, numericCurrent, one);
+            this.storeReference(reference, updated);
+            var updateResult = expression.prefix ? updated : numericCurrent;
+            if (this.expressionWritesRegister(future, updateResult)) {
+                var stableUpdate = this.allocate();
+                this.emit(op.MOVE, stableUpdate, updateResult);
+                return stableUpdate;
+            }
+            return updateResult;
+        }
+        if (expression.type === "CallExpression") {
+            var callee;
+            var receiver = -1;
+            if (expression.callee.type === "MemberExpression") {
+                var callReference = this.compileReference(expression.callee,
+                                                          expression.arguments);
+                callee = this.loadReference(callReference);
+                receiver = callReference.object;
+            } else {
+                callee = this.compileExpression(expression.callee,
+                                                expression.arguments);
+                if (expression.callee.type === "Identifier" &&
+                    expression.callee.name === "eval") receiver = -2;
+            }
+            var values = [];
+            var index = 0;
+            while (index < expression.arguments.length) {
+                values.push(this.compileExpression(expression.arguments[index],
+                    expression.arguments.slice(index + 1)));
+                index++;
+            }
+            var callResult = this.allocate();
+            this.emit(op.CALL, callResult, callee, receiver,
+                      this.argumentListConstant(values));
+            return callResult;
+        }
+        if (expression.type === "NewExpression") {
+            var constructor = this.compileExpression(expression.callee,
+                                                     expression.arguments);
+            var constructorValues = [];
+            var constructorIndex = 0;
+            while (constructorIndex < expression.arguments.length) {
+                constructorValues.push(this.compileExpression(
+                    expression.arguments[constructorIndex],
+                    expression.arguments.slice(constructorIndex + 1)));
+                constructorIndex++;
+            }
+            var constructed = this.allocate();
+            this.emit(op.CONSTRUCT, constructed, constructor,
+                      this.argumentListConstant(constructorValues));
+            return constructed;
+        }
+        if (expression.type === "SequenceExpression") {
+            this.compileExpression(expression.left);
+            return this.compileExpression(expression.right);
+        }
+        throw new Error("unsupported expression: " + expression.type);
+    };
+
+    Compiler.prototype.expressionWritesRegister = function (node, register) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression") {
+            return false;
+        }
+        if ((node.type === "AssignmentExpression" ||
+             node.type === "UpdateExpression") &&
+            node.left && node.left.type === "Identifier") {
+            var assigned = this.resolveBinding(node.left.name);
+            if (assigned && assigned.kind === "register" &&
+                assigned.register === register) return true;
+        }
+        if (node.type === "UpdateExpression" && node.argument &&
+            node.argument.type === "Identifier") {
+            var updated = this.resolveBinding(node.argument.name);
+            if (updated && updated.kind === "register" &&
+                updated.register === register) return true;
+        }
+        if (typeof node.length === "number" && node.type === undefined) {
+            var arrayIndex = 0;
+            while (arrayIndex < node.length) {
+                if (this.expressionWritesRegister(node[arrayIndex++], register)) return true;
+            }
+            return false;
+        }
+        var key;
+        for (key in node) {
+            if (key !== "type" &&
+                key !== "location" && key !== "guestProgramConstant" &&
+                this.expressionWritesRegister(node[key], register)) return true;
+        }
+        return false;
+    };
+
+    function patchBreaks(compiler, breaks, target) {
+        var index = 0;
+        while (index < breaks.length) {
+            compiler.patch(breaks[index] + 1, target);
+            index++;
+        }
+    }
+
+    function labelledIteration(statement) {
+        while (statement && statement.type === "LabeledStatement") {
+            statement = statement.body;
+        }
+        if (!statement) return null;
+        return statement.type === "WhileStatement" ||
+               statement.type === "ForStatement" ||
+               statement.type === "DoWhileStatement" ||
+               statement.type === "ForInStatement" ? statement : null;
+    }
+
+    function bindLabelContinues(compiler, statement, target) {
+        var index = compiler.labelTargets.length - 1;
+        while (index >= 0) {
+            if (compiler.labelTargets[index].iteration === statement) {
+                compiler.labelTargets[index].continueTarget = target;
+            }
+            index--;
+        }
+    }
+
+    function findLabel(compiler, name) {
+        var index = compiler.labelTargets.length - 1;
+        while (index >= 0) {
+            if (compiler.labelTargets[index].name === name) {
+                return compiler.labelTargets[index];
+            }
+            index--;
+        }
+        throw new SyntaxError("unknown statement label " + name);
+    }
+
+    function collectLocals(body, functionName) {
+        var names = {};
+        var result = [];
+        function add(name) {
+            if (name && !names["$" + name]) {
+                names["$" + name] = true;
+                result.push(name);
+            }
+        }
+        function visit(statement) {
+            var index;
+            if (statement.type === "VariableStatement") {
+                for (index = 0; index < statement.declarations.length; index++) {
+                    add(statement.declarations[index].name);
+                }
+            } else if (statement.type === "FunctionDeclaration") {
+                add(statement.name);
+            } else if (statement.type === "BlockStatement") {
+                for (index = 0; index < statement.body.length; index++) visit(statement.body[index]);
+            } else if (statement.type === "LabeledStatement") {
+                visit(statement.body);
+            } else if (statement.type === "IfStatement") {
+                visit(statement.consequent);
+                if (statement.alternate) visit(statement.alternate);
+            } else if (statement.type === "WhileStatement" || statement.type === "ForStatement" ||
+                       statement.type === "DoWhileStatement" ||
+                       statement.type === "ForInStatement") {
+                if (statement.initial && statement.initial.type === "VariableStatement") visit(statement.initial);
+                if (statement.left && statement.left.type === "VariableStatement") visit(statement.left);
+                visit(statement.body);
+            } else if (statement.type === "TryStatement") {
+                visit(statement.block);
+                if (statement.handler) visit(statement.handler);
+                if (statement.finalizer) visit(statement.finalizer);
+            } else if (statement.type === "SwitchStatement") {
+                for (index = 0; index < statement.cases.length; index++) {
+                    var consequentIndex = 0;
+                    var consequent = statement.cases[index].consequent;
+                    while (consequentIndex < consequent.length) {
+                        visit(consequent[consequentIndex++]);
+                    }
+                }
+            }
+        }
+        add(functionName);
+        visit(body);
+        return result;
+    }
+
+    function makeFunctionBindings(parameters, locals) {
+        var result = [];
+        var seen = {};
+        function add(name) {
+            var key = "$" + name;
+            if (!seen[key]) {
+                seen[key] = true;
+                result.push(name);
+            }
+        }
+        var index = 0;
+        while (index < parameters.length) add(parameters[index++]);
+        index = 0;
+        while (index < locals.length) add(locals[index++]);
+        add("arguments");
+        add("this");
+        return result;
+    }
+
+    function makeBindingMap(bindings) {
+        var result = {};
+        var index = 0;
+        while (index < bindings.length) {
+            result["$" + bindings[index]] = index;
+            index++;
+        }
+        return result;
+    }
+
+    function makeCompileScope(compiler, bindings, useRegisters) {
+        var map = {};
+        var index = 0;
+        while (index < bindings.length) {
+            map["$" + bindings[index]] = useRegisters ?
+                {kind: "register", register: compiler.allocate(), slot: index} :
+                {kind: "environment", slot: index};
+            index++;
+        }
+        return {bindings: map, createsEnvironment: !useRegisters};
+    }
+
+    function bindingRegisters(bindings, scope) {
+        var result = [];
+        var index = 0;
+        while (index < bindings.length) {
+            result[index] = scope.bindings["$" + bindings[index]].register;
+            index++;
+        }
+        return result;
+    }
+
+    function canUseRegisterBindings(body, bindingMap) {
+        return !requiresEnvironmentBindings(body, bindingMap, false);
+    }
+
+    function analysisAllowsRegisters(analysis, bindingMap) {
+        if (analysis.environmentRequired) return false;
+        var index = 0;
+        while (index < analysis.nestedNames.length) {
+            if (bindingMap["$" + analysis.nestedNames[index++]] !== undefined) return false;
+        }
+        return true;
+    }
+
+    function containsDirectEval(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "CallExpression" && node.callee &&
+            node.callee.type === "Identifier" &&
+            node.callee.name === "eval") return true;
+        if (node.type === "FunctionDeclaration" ||
+            node.type === "FunctionExpression") return false;
+        if (typeof node.length === "number" && node.type === undefined) {
+            var arrayIndex = 0;
+            while (arrayIndex < node.length) {
+                if (containsDirectEval(node[arrayIndex++])) return true;
+            }
+            return false;
+        }
+        var key;
+        for (key in node) {
+            if (key !== "type" && key !== "location" &&
+                    containsDirectEval(node[key])) return true;
+        }
+        return false;
+    }
+
+    /* A capture-free callback does not make its enclosing locals observable.
+     * Be conservative about shadowing: any matching identifier in any nested
+     * function pins the enclosing bindings, even if a nested declaration may
+     * shadow it. Dynamic scopes/eval and exception handlers retain the
+     * existing environment representation. No escaping closure loses a cell. */
+    function requiresEnvironmentBindings(node, bindingMap, nestedFunction) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "TryStatement" || node.type === "WithStatement") return true;
+        if (node.type === "FunctionDeclaration" ||
+                node.type === "FunctionExpression") nestedFunction = true;
+        if (nestedFunction && node.type === "Identifier" &&
+                bindingMap["$" + node.name] !== undefined) return true;
+        /* A direct eval must be able to address the caller's bindings by
+         * lexical slot. Keep those bindings in the guest environment rather
+         * than in registers that dynamically compiled code cannot name. */
+        if (node.type === "CallExpression" &&
+            node.callee && node.callee.type === "Identifier" &&
+            node.callee.name === "eval") return true;
+        if (typeof node.length === "number" && node.type === undefined) {
+            var arrayIndex = 0;
+            while (arrayIndex < node.length) {
+                if (requiresEnvironmentBindings(node[arrayIndex++],
+                        bindingMap, nestedFunction)) return true;
+            }
+            return false;
+        }
+        var key;
+        for (key in node) {
+            if (key !== "type" && key !== "location" &&
+                    requiresEnvironmentBindings(node[key], bindingMap,
+                        nestedFunction)) return true;
+        }
+        return false;
+    }
+
+    function referencesArguments(node) {
+        if (!node || typeof node !== "object") return false;
+        if (node.type === "Identifier" && node.name === "arguments") return true;
+        if (node.type === "FunctionDeclaration" ||
+            node.type === "FunctionExpression") return false;
+        var key;
+        for (key in node) {
+            if (key !== "location") {
+                var value = node[key];
+                if (value && typeof value === "object") {
+                    if (typeof value.length === "number") {
+                        var index = 0;
+                        while (index < value.length) {
+                            if (referencesArguments(value[index++])) return true;
+                        }
+                    } else if (referencesArguments(value)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    function bindingSlots(names, map) {
+        var result = [];
+        var index = 0;
+        while (index < names.length) {
+            result[index] = map["$" + names[index]];
+            index++;
+        }
+        return result;
+    }
+
+    function describeNonlocalNames(names, compiler) {
+        var result = {}, index = 0;
+        while (index < names.length) {
+            var name = names[index++];
+            var binding = compiler.resolveBinding(name);
+            if (!binding) result["$" + name] = {kind: "global"};
+            else if (binding.kind === "environment") {
+                result["$" + name] = {kind: "environment", depth: binding.depth, slot: binding.slot};
+            }
+        }
+        return result;
+    }
+
+    function describeNonlocalBindings(body, compiler) {
+        var result = {};
+        function visit(node) {
+            if (!node || typeof node !== "object") return;
+            if (node.type === "FunctionExpression" ||
+                node.type === "FunctionDeclaration") return;
+            if (node.type === "Identifier") {
+                var key = "$" + node.name;
+                if (result[key] === undefined) {
+                    var binding = compiler.resolveBinding(node.name);
+                    if (!binding) result[key] = {kind: "global"};
+                    else if (binding.kind === "environment") {
+                        result[key] = {kind: "environment", depth: binding.depth,
+                                       slot: binding.slot};
+                    }
+                }
+                return;
+            }
+            var property;
+            for (property in node) {
+                if (property !== "location") {
+                    var value = node[property];
+                    if (value && typeof value === "object") {
+                        if (typeof value.length === "number") {
+                            var index = 0;
+                            while (index < value.length) visit(value[index++]);
+                        } else visit(value);
+                    }
+                }
+            }
+        }
+        visit(body);
+        return result;
+    }
+
+    function inferReturnKind(body) {
+        var kind = null;
+        var invalid = false;
+        function visit(node) {
+            if (!node || typeof node !== "object" || invalid) return;
+            if (node.type === "FunctionExpression" ||
+                node.type === "FunctionDeclaration") return;
+            if (node.type === "ReturnStatement" && node.argument) {
+                var current = node.argument.type === "ObjectExpression" ? "properties" :
+                              node.argument.type === "ArrayExpression" ? "array" : null;
+                if (!current || (kind && kind !== current)) invalid = true;
+                else kind = current;
+                return;
+            }
+            var key;
+            for (key in node) {
+                if (key !== "location") {
+                    var value = node[key];
+                    if (value && typeof value === "object") {
+                        if (typeof value.length === "number") {
+                            var index = 0;
+                            while (index < value.length) visit(value[index++]);
+                        } else visit(value);
+                    }
+                }
+            }
+        }
+        visit(body);
+        return invalid ? null : kind;
+    }
+
+    function collectFunctionDeclarations(statements, result) {
+        var index = 0;
+        while (index < statements.length) {
+            var statement = statements[index++];
+            if (statement.type === "FunctionDeclaration") {
+                result.push(statement);
+            } else if (statement.type === "BlockStatement") {
+                collectFunctionDeclarations(statement.body, result);
+            } else if (statement.type === "LabeledStatement") {
+                collectFunctionDeclarations([statement.body], result);
+            } else if (statement.type === "IfStatement") {
+                collectFunctionDeclarations([statement.consequent], result);
+                if (statement.alternate) {
+                    collectFunctionDeclarations([statement.alternate], result);
+                }
+            } else if (statement.type === "WhileStatement" ||
+                       statement.type === "DoWhileStatement" ||
+                       statement.type === "ForStatement" ||
+                       statement.type === "ForInStatement") {
+                collectFunctionDeclarations([statement.body], result);
+            } else if (statement.type === "TryStatement") {
+                collectFunctionDeclarations(statement.block.body, result);
+                if (statement.handler) {
+                    collectFunctionDeclarations(statement.handler.body, result);
+                }
+                if (statement.finalizer) {
+                    collectFunctionDeclarations(statement.finalizer.body, result);
+                }
+            } else if (statement.type === "SwitchStatement") {
+                var caseIndex = 0;
+                while (caseIndex < statement.cases.length) {
+                    collectFunctionDeclarations(
+                        statement.cases[caseIndex++].consequent, result);
+                }
+            }
+        }
+    }
+
+    function collectVariableDeclarations(statements, result) {
+        var seen = {};
+        function add(name) {
+            var key = "$" + name;
+            if (!seen[key]) {
+                seen[key] = true;
+                result.push(name);
+            }
+        }
+        function visit(statement) {
+            var index;
+            if (!statement) return;
+            if (statement.type === "VariableStatement") {
+                index = 0;
+                while (index < statement.declarations.length) {
+                    add(statement.declarations[index++].name);
+                }
+            } else if (statement.type === "FunctionDeclaration") {
+                add(statement.name);
+            } else if (statement.type === "LabeledStatement" ||
+                       statement.type === "WithStatement") {
+                visit(statement.body);
+            } else if (statement.type === "BlockStatement") {
+                index = 0;
+                while (index < statement.body.length) {
+                    visit(statement.body[index++]);
+                }
+            } else if (statement.type === "IfStatement") {
+                visit(statement.consequent);
+                visit(statement.alternate);
+            } else if (statement.type === "WhileStatement" ||
+                       statement.type === "DoWhileStatement") {
+                visit(statement.body);
+            } else if (statement.type === "ForStatement") {
+                visit(statement.initial);
+                visit(statement.body);
+            } else if (statement.type === "ForInStatement") {
+                visit(statement.left);
+                visit(statement.body);
+            } else if (statement.type === "TryStatement") {
+                visit(statement.block);
+                if (statement.handler) visit(statement.handler);
+                if (statement.finalizer) visit(statement.finalizer);
+            } else if (statement.type === "SwitchStatement") {
+                index = 0;
+                while (index < statement.cases.length) {
+                    var consequentIndex = 0;
+                    var consequent = statement.cases[index++].consequent;
+                    while (consequentIndex < consequent.length) {
+                        visit(consequent[consequentIndex++]);
+                    }
+                }
+            }
+            /* Function bodies have their own variable environment. */
+        }
+        var statementIndex = 0;
+        while (statementIndex < statements.length) {
+            visit(statements[statementIndex++]);
+        }
+    }
+
+    Compiler.environmentScopesForProgram = function (program) {
+        if (!program || !program.bindingSlots) return null;
+        var bindings = {};
+        var key;
+        for (key in program.bindingSlots) {
+            bindings[key] = {kind: "environment",
+                             slot: program.bindingSlots[key]};
+        }
+        var scopes = [{bindings: bindings, createsEnvironment: true}];
+        var outer = program.outerEnvironmentScopes || [];
+        var outerIndex = 0;
+        while (outerIndex < outer.length) scopes.push(outer[outerIndex++]);
+        return scopes;
+    };
+
+    Compiler.compileSloppyDirectEval = function (ast, outerScopes, options) {
+        var declarations = [];
+        collectVariableDeclarations(ast.body, declarations);
+        /* A direct sloppy eval can introduce bindings into the caller's
+         * variable environment. Name bytecodes perform the required dynamic
+         * lookup after those bindings have been instantiated. */
+        var scopes = [{bindings: {}, createsEnvironment: false, dynamic: true}];
+        var outerIndex = 0;
+        while (outerScopes && outerIndex < outerScopes.length) {
+            scopes.push(outerScopes[outerIndex++]);
+        }
+        var compiler = new Compiler(null, scopes, false, options);
+        compiler.evalThis = true;
+        var program = compiler.compile(ast, true);
+        program.evalDeclarations = declarations;
+        return program;
+    };
+
+    Compiler.compileStrictEval = function (ast, outerScopes, options) {
+        var block = {type: "BlockStatement", body: ast.body};
+        var locals = collectLocals(block, null);
+        var bindings = locals.slice(0);
+        var compiler = new Compiler(bindings, outerScopes, false, options);
+        var program = compiler.compile(ast, true);
+        program.parameters = [];
+        program.locals = locals;
+        program.bindings = bindings;
+        program.bindingSlots = makeBindingMap(bindings);
+        program.bindingRegisters = null;
+        program.parameterSlots = [];
+        program.argumentsSlot = -1;
+        program.thisSlot = -1;
+        program.functionNameSlot = -1;
+        program.usesArguments = false;
+        program.evalCode = true;
+        return program;
+    };
+
+    Compiler.createWordArena = op.createWordArena;
+    Compiler.visitSourceLocations = op.visitSourceLocations;
+    Compiler.constantAt = function (program, index) {
+        return op.tableGet(program.constants, index);
+    };
+    Compiler.constantRegisterAt = function (program, index) {
+        return op.tableGet(program.constantRegisters, index);
+    };
+    root.GuestVMCompiler = Compiler;
+    if (typeof module !== "undefined" && module.exports) module.exports = Compiler;
+}(this));

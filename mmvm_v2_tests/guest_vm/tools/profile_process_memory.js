@@ -1,0 +1,355 @@
+/* Linux-only, read-only parent-process profiler. Node supervises the native
+ * executable; it provides no guest language support. ES3-compatible syntax.
+ * node guest_vm/tools/profile_process_memory.js SNAPSHOT OUTPUT_PREFIX
+ *      PROGRAM [ARGS...]
+ * Optional leading --stack-only samples bounded guest call stacks instead of
+ * walking every record. It uses a 200 ms interval; timings are perturbed.
+ * --stack-depth COUNT (1..128, default 12) controls the stack bound. Truncated
+ * stacks are identified explicitly: filtering for an ancestor absent below
+ * that bound otherwise biases a phase analysis toward shallow call chains.
+ * --executable FILE runs a standalone image instead of js_runner + SNAPSHOT;
+ * SNAPSHOT still supplies the layout used to inspect that image's heap.
+ * --cwd DIRECTORY selects the application's working directory without changing
+ * where the profiler resolves its snapshot, runner or output files.
+ * Brief SIGSTOP samples perturb timing; do not use this run as a stock score.
+ * No heap dumps, forced collections, page advice or runtime changes. */
+(function () {
+    var fs = require("fs"), cp = require("child_process");
+    var Heap = require("../heap.js"), Records = require("../heap_records.js");
+    var Cells = require("../value_cell.js");
+    var Backend = require("../aot/backend_x86.js");
+    var args = process.argv.slice(2);
+    var stackOnly = false, stackDepth = 12, childDirectory, executable;
+    var MAX_STACK_DEPTH = 128;
+    while (args.length && args[0].substring(0, 2) === "--") {
+        var option = args.shift();
+        if (option === "--stack-only") stackOnly = true;
+        else if (option === "--executable") {
+            executable = args.shift();
+            if (!executable) throw new Error("--executable requires a file");
+        }
+        else if (option === "--cwd") {
+            childDirectory = args.shift();
+            if (!childDirectory) throw new Error("--cwd requires a directory");
+        }
+        else if (option === "--stack-depth") {
+            stackDepth = Number(args.shift());
+            if (!(stackDepth >= 1 && stackDepth <= MAX_STACK_DEPTH) ||
+                    stackDepth !== Math.floor(stackDepth)) {
+                throw new Error("--stack-depth requires an integer from 1 to " + MAX_STACK_DEPTH);
+            }
+        } else throw new Error("unknown profiler option: " + option);
+    }
+    if (args.length < 3) throw new Error("expected SNAPSHOT OUTPUT_PREFIX PROGRAM [ARGS...]");
+    var snapshot = args.shift(), prefix = args.shift();
+    var fields = Backend.StandaloneHeaderFields;
+    var image = fs.readFileSync(snapshot);
+    var externalAccounting = image.readUInt32LE(fields.compilerVersion) >= Records.NativeInterpreterContractVersion;
+    var imageHeapOffset = image.readUInt32LE(fields.heapOffset);
+    var imageHeapLength = image.readUInt32LE(fields.heapLength);
+    var heapCapacity = image.readUInt32LE(fields.heapCapacity);
+    var engine = 0, offset = Heap.FIRST_RECORD;
+    while (offset < imageHeapLength) {
+        var type = image.readUInt32LE(imageHeapOffset + offset + Heap.HeaderFields.TYPE);
+        var size = image.readUInt32LE(imageHeapOffset + offset + Heap.HeaderFields.SIZE);
+        if (!size || size % Heap.RECORD_ALIGNMENT) throw new Error("invalid snapshot record");
+        if (type === Heap.Types.ENGINE_STATE) {
+            if (engine) throw new Error("ambiguous snapshot engine");
+            engine = offset;
+        }
+        offset += size;
+    }
+    if (!engine) throw new Error("snapshot has no native engine");
+    var signature = image.slice(imageHeapOffset + Heap.FIRST_RECORD,
+        imageHeapOffset + Heap.FIRST_RECORD + Heap.HeaderFields.MARK);
+    image = null;
+    var output = fs.openSync(prefix + ".jsonl", "wx");
+    var log = fs.openSync(prefix + ".log", "wx");
+    var paths = require("path");
+    var child = cp.spawn(paths.resolve(executable || "artifacts/js_runner.exe"),
+        executable ? args : [paths.resolve(snapshot)].concat(args),
+        {cwd: childDirectory, stdio: ["ignore", "pipe", "pipe"]});
+    var started = Date.now(), samples = 0, pending = false, closed = false;
+    var heapBase = 0, timer, interval = stackOnly ? 200 : 5000;
+    function record(value) {
+        fs.writeSync(output, JSON.stringify(value) + "\n");
+    }
+    function readMappings() {
+        var text = fs.readFileSync("/proc/" + child.pid + "/smaps", "utf8");
+        var lines = text.split("\n"), maps = [], current, i, match;
+        for (i = 0; i < lines.length; i++) {
+            match = /^([0-9a-f]+)-([0-9a-f]+) (\S+) \S+ \S+ \S+\s*(.*)$/.exec(lines[i]);
+            if (match) {
+                current = {start: parseInt(match[1], 16), end: parseInt(match[2], 16),
+                    permissions: match[3], name: match[4], rssKiB: 0,
+                    anonymousKiB: 0, privateDirtyKiB: 0, pageBytes: 0};
+                maps.push(current);
+            } else if (current) {
+                match = /^(Rss|Anonymous|Private_Dirty|KernelPageSize):\s+(\d+) kB/.exec(lines[i]);
+                if (match && match[1] === "KernelPageSize") {
+                    current.pageBytes = Number(match[2]) * 1024;
+                    continue;
+                }
+                if (match) current[match[1] === "Rss" ? "rssKiB" :
+                    match[1] === "Anonymous" ? "anonymousKiB" : "privateDirtyKiB"] = Number(match[2]);
+            }
+        }
+        return maps;
+    }
+    function sample() {
+        var descriptor = fs.openSync("/proc/" + child.pid + "/mem", "r");
+        try {
+            var maps = readMappings(), totalRSS = 0, heapMap, i;
+            var small = Buffer.alloc(Heap.HEADER_SIZE);
+            for (i = 0; i < maps.length; i++) {
+                totalRSS += maps[i].rssKiB;
+                /* Adjacent anonymous arenas can merge into one Linux VMA
+                 * after another runtime is created. The known heap base need
+                 * not remain the mapping's first address. */
+                if (heapBase && maps[i].start <= heapBase && maps[i].end > heapBase) heapMap = maps[i];
+                if (!heapBase && !maps[i].name && maps[i].permissions.indexOf("rw") === 0 &&
+                        maps[i].end - maps[i].start >= heapCapacity) {
+                    /* GC marks are mutable. Match only immutable type/size,
+                     * then verify the engine at its independent known offset.
+                     * A large calloc below the heap can merge VMAs before our
+                     * first sample; the heap may then be the mapping suffix. */
+                    var candidates = [maps[i].start, maps[i].end - heapCapacity];
+                    for (var candidateIndex = 0; candidateIndex < candidates.length && !heapBase; candidateIndex++) {
+                        var candidate = candidates[candidateIndex];
+                        fs.readSync(descriptor, small, 0, small.length, candidate + Heap.FIRST_RECORD);
+                        if (small.slice(0, signature.length).equals(signature)) {
+                            fs.readSync(descriptor, small, 0, small.length, candidate + engine);
+                            if (small.readUInt32LE(Heap.HeaderFields.TYPE) === Heap.Types.ENGINE_STATE) {
+                                heapBase = candidate;
+                                heapMap = maps[i];
+                            }
+                        }
+                    }
+                }
+            }
+            if (!heapMap) return; // bootstrap has not mapped its heap yet
+            /* Pagemap's present bit needs no physical-frame-number access.
+             * Count only pages wholly inside each record: shared boundary
+             * pages are deliberately not attributed twice. No payload reads. */
+            var pageBytes = heapMap.pageBytes;
+            if (!pageBytes) throw new Error("mapping has no kernel page size");
+            var pageMap = null;
+            if (!stackOnly) {
+                pageMap = Buffer.alloc(Math.ceil(heapCapacity / pageBytes) * 8);
+                var pageDescriptor = fs.openSync("/proc/" + child.pid + "/pagemap", "r");
+                try {
+                    var got = fs.readSync(pageDescriptor, pageMap, 0, pageMap.length,
+                        heapBase / pageBytes * 8);
+                    if (got !== pageMap.length) throw new Error("short pagemap read");
+                } finally { fs.closeSync(pageDescriptor); }
+            }
+            function residentInterior(start, end) {
+                var first = Math.ceil(start / pageBytes), last = Math.floor(end / pageBytes);
+                var present = 0;
+                while (first < last) {
+                    if (pageMap[first * 8 + 7] & 128) present += pageBytes;
+                    first++;
+                }
+                return present;
+            }
+            /* Bounded read cache, not a second copy of the guest heap. Reuse
+             * the authoritative Heap/Records accessors for payload fields. */
+            var cache = Buffer.alloc(65536), cacheStart = -1, cacheLength = 0;
+            /* A string slice alternates between its descriptor and backing.
+             * A single window thrashes on that access pattern, extending
+             * SIGSTOP pauses drastically for deeper stacks. Retain bounded
+             * chunks only for this stopped sample; never across GC/resume. */
+            var STACK_READ_CHUNK_BYTES = 4096;
+            var MAX_STACK_CACHE_BYTES = 1024 * 1024;
+            var stackChunks = {}, stackCacheBytes = 0;
+            function readStackWord(address) {
+                var start = Math.floor(address / STACK_READ_CHUNK_BYTES) * STACK_READ_CHUNK_BYTES;
+                var key = "$" + start, chunk = stackChunks[key];
+                if (!chunk) {
+                    var length = Math.min(STACK_READ_CHUNK_BYTES, heapCapacity - start);
+                    if (stackCacheBytes + length > MAX_STACK_CACHE_BYTES) {
+                        stackChunks = {};
+                        stackCacheBytes = 0;
+                    }
+                    chunk = Buffer.alloc(length);
+                    var got = fs.readSync(descriptor, chunk, 0, length, heapBase + start);
+                    if (got !== length) throw new Error("short stopped-heap chunk read");
+                    stackChunks[key] = chunk;
+                    stackCacheBytes += length;
+                }
+                var offset = address - start;
+                if (offset + Heap.WORD_BYTES <= chunk.length) return chunk.readUInt32LE(offset);
+                /* General unaligned reads may straddle chunks. */
+                var word = 0, byteIndex = 0;
+                while (byteIndex < Heap.WORD_BYTES) {
+                    var byteAddress = address + byteIndex;
+                    var aligned = byteAddress - byteAddress % Heap.WORD_BYTES;
+                    word |= ((readStackWord(aligned) >>>
+                        ((byteAddress % Heap.WORD_BYTES) * 8)) & 255) << (byteIndex * 8);
+                    byteIndex++;
+                }
+                return word >>> 0;
+            }
+            function readWord(address) {
+                if (address < 0 || address + 4 > heapCapacity) throw new Error("heap read outside mapping");
+                if (stackOnly) return readStackWord(address);
+                if (address < cacheStart || address + 4 > cacheStart + cacheLength) {
+                    cacheStart = Math.floor(address / cache.length) * cache.length;
+                    cacheLength = fs.readSync(descriptor, cache, 0,
+                        Math.min(cache.length, heapCapacity - cacheStart), heapBase + cacheStart);
+                }
+                return cache.readUInt32LE(address - cacheStart);
+            }
+            var heap = Object.create(Heap.prototype);
+            function readByte(address) {
+                return (readWord(address - address % 4) >>> ((address % 4) * 8)) & 255;
+            }
+            heap.memory = {readU32Trusted: readWord, readU32: readWord,
+                readU8Trusted: readByte, readU8: readByte,
+                readU16: function (address) { return readByte(address) + readByte(address + 1) * 256; }};
+            heap.bump = heapCapacity;
+            var records = new Records(heap, new Cells(heap));
+            if (stackOnly) {
+                var stack = [], stackFrame = records.engineCurrentFrame(engine);
+                while (stackFrame && stack.length < stackDepth) {
+                    if (heap.recordType(stackFrame) !== Heap.Types.FRAME) break;
+                    var stackProgram = records.frameProgram(stackFrame);
+                    var stackSource = records.programSource(stackProgram);
+                    var prefixText = "", prefixIndex = 0;
+                    if (stackSource) {
+                        var prefixLength = Math.min(160, records.stringLength(stackSource));
+                        while (prefixIndex < prefixLength) prefixText += String.fromCharCode(
+                            records.stringCharacterCodeUnit(stackSource, prefixIndex++));
+                    }
+                    stack.push({program: stackProgram, pc: records.framePC(stackFrame), source: prefixText});
+                    stackFrame = records.frameCaller(stackFrame);
+                }
+                record({event: "stack", elapsedMs: Date.now() - started,
+                    rssKiB: totalRSS, stack: stack, maximumDepth: stackDepth,
+                    truncated: !!stackFrame});
+                samples++;
+                return;
+            }
+            var arenaBump = records.engineHeapBump(engine);
+            var activeArena = records.engineNativeRegionActive(engine);
+            var regionEnd = records.engineNativeRegionEnd(engine);
+            var tail = Math.max(arenaBump, records.engineNativeTailBump(engine));
+            var counts = {}, bytes = {}, resident = {}, free = 0, occupied = 0, largest = 0;
+            var spareValues = 0, spareProperties = 0;
+            var externalBufferBytes = 0, externalBufferCount = 0;
+            var position = Heap.FIRST_RECORD, recordCount = 0;
+            while (position < tail) {
+                if (activeArena && position === arenaBump) {
+                    free += regionEnd - arenaBump;
+                    position = regionEnd;
+                    continue;
+                }
+                var header = heap.inspectRecordHeader(position);
+                if (!header.size || header.size % Heap.RECORD_ALIGNMENT ||
+                        header.type > Heap.LastRecordType || position + header.size > tail) {
+                    throw new Error("sample interrupted a record update at " + position);
+                }
+                counts[header.type] = (counts[header.type] || 0) + 1;
+                bytes[header.type] = (bytes[header.type] || 0) + header.size;
+                resident[header.type] = (resident[header.type] || 0) +
+                    residentInterior(position, position + header.size);
+                if (header.type === Heap.Types.FREE) {
+                    free += header.size;
+                    largest = Math.max(largest, header.size);
+                } else {
+                    occupied += header.size;
+                    if (header.type === Heap.Types.BUFFER_BACKING &&
+                            records.bufferBackingIsExternal(position)) {
+                        externalBufferBytes += records.bufferBackingLength(position);
+                        externalBufferCount++;
+                    } else if (header.type === Heap.Types.VALUE_VECTOR) {
+                        spareValues += (records.vectorCapacity(position) -
+                            records.vectorLength(position)) * Cells.PAYLOAD_BYTES;
+                    } else if (header.type === Heap.Types.PROPERTY_STORAGE) {
+                        spareProperties += (records.propertyStorageCapacity(position) -
+                            records.propertyStorageLiveCount(position)) * Records.PropertyStorageLayout.ENTRY_BYTES;
+                    }
+                }
+                recordCount++;
+                position += header.size;
+            }
+            var namedTypes = {}, name;
+            for (name in Heap.Types) {
+                if (Object.prototype.hasOwnProperty.call(Heap.Types, name)) {
+                    namedTypes[name] = {count: counts[Heap.Types[name]] || 0,
+                        bytes: bytes[Heap.Types[name]] || 0,
+                        residentInteriorBytes: resident[Heap.Types[name]] || 0};
+                }
+            }
+            var sourcePrefix = "", frame = records.engineCurrentFrame(engine);
+            if (frame && heap.recordType(frame) === Heap.Types.FRAME) {
+                var program = records.frameProgram(frame), source = records.programSource(program);
+                if (source) {
+                    var length = Math.min(100, records.stringLength(source)), character = 0;
+                    while (character < length) sourcePrefix += String.fromCharCode(
+                        records.stringCharacterCodeUnit(source, character++));
+                }
+            }
+            var result = {event: "sample", elapsedMs: Date.now() - started,
+                currentFunctionSourcePrefix: sourcePrefix,
+                rssKiB: totalRSS, heapRssKiB: residentInterior(0, heapCapacity) / 1024,
+                outsideHeapRssKiB: totalRSS - residentInterior(0, heapCapacity) / 1024,
+                heapCapacity: heapCapacity, tail: tail, occupiedBytes: occupied,
+                freeBytes: free, largestFreeRecord: largest, recordCount: recordCount,
+                spareValueBytes: spareValues, sparePropertyBytes: spareProperties,
+                externalBufferBytes: externalBufferBytes, externalBufferCount: externalBufferCount,
+                trackedExternalBufferBytes: externalAccounting ? records.engineExternalBufferBytes(engine) : undefined,
+                externalBufferThreshold: externalAccounting ? records.engineExternalBufferThreshold(engine) : undefined,
+                collectorWorkspaceResidentBytes: residentInterior(
+                    records.engineGCStackBase(engine), records.engineGCStackLimit(engine)),
+                collections: records.engineGCCollections(engine),
+                lastPostGCOccupiedBytes: records.engineGCLiveBytes(engine), types: namedTypes};
+            record(result);
+            samples++;
+            console.log("sample " + samples + ": RSS " + totalRSS + " KiB; occupied " +
+                occupied + "; free " + free + "; collections " + result.collections);
+        } finally { fs.closeSync(descriptor); }
+    }
+    function requestSample() {
+        if (closed || pending) return;
+        pending = true;
+        child.kill("SIGSTOP");
+        /* Wait until the kernel reports a stopped process before inspecting.
+         * Sending SIGSTOP alone is not proof that all writes have stopped. */
+        function stopped() {
+            if (closed) return;
+            var status;
+            try { status = fs.readFileSync("/proc/" + child.pid + "/status", "utf8"); }
+            catch (error) { pending = false; return; }
+            if (!/^State:\s+T/m.test(status)) {
+                setTimeout(stopped, 1);
+                return;
+            }
+            try { sample(); }
+            catch (error) { record({event: "sample-unavailable", message: error.message}); }
+            finally { child.kill("SIGCONT"); pending = false; }
+        }
+        stopped();
+    }
+    function capture(data) {
+        fs.writeSync(log, data);
+        record({event: "output", elapsedMs: Date.now() - started, text: data.toString()});
+        requestSample();
+    }
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
+    timer = setInterval(requestSample, interval);
+    child.on("error", function (error) { throw error; });
+    child.on("close", function (code, signal) {
+        closed = true;
+        clearInterval(timer);
+        record({event: "exit", elapsedMs: Date.now() - started, code: code, signal: signal, samples: samples});
+        fs.closeSync(log);
+        fs.closeSync(output);
+        console.log("exit " + code + ", signal " + signal + "; " + samples + " samples");
+        process.exitCode = code === 0 ? 0 : 1;
+    });
+    function terminate() { child.kill("SIGCONT"); child.kill("SIGTERM"); }
+    process.on("SIGINT", terminate);
+    process.on("SIGTERM", terminate);
+}());

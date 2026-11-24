@@ -1,0 +1,182 @@
+function sum(left, right) {
+    var total = left + right;
+    return total;
+}
+assertEqual(sum(19, 23), 42, "function parameters and local var");
+
+var scale = 3;
+function makeScaler(offset) {
+    return function (value) {
+        return value * scale + offset;
+    };
+}
+var scaleAndAdd = makeScaler(2);
+assertEqual(scaleAndAdd(4), 14, "function expression and closure");
+
+var record = {
+    value: 7,
+    apply: function (amount) { return amount + 1; }
+};
+assertEqual(record.apply(record.value), 8, "object literal and method call");
+
+function addToThis(amount) {
+    return this.base + amount;
+}
+assertEqual(addToThis.call({base: 9}, 4), 13,
+            "Function.prototype.call supplies an explicit receiver");
+assertEqual(addToThis.apply({base: 8}, [5]), 13,
+            "Function.prototype.apply supplies a receiver and argument array");
+var boundAdd = addToThis.bind({base: 10}, 6);
+assertEqual(boundAdd(), 16,
+            "Function.prototype.bind supplies receiver and leading arguments");
+function setThroughBareThis(value) {
+    this.bareReceiverValue = value;
+    return this;
+}
+assertEqual(setThroughBareThis(17) === this, true,
+            "non-strict bare call receives the global object");
+assertEqual(bareReceiverValue, 17,
+            "bare-call global receiver is the active context global");
+assertEqual(setThroughBareThis.call(null, 19) === this, true,
+            "non-strict null receiver becomes the global object");
+var accessorObject = {
+    stored: 4,
+    get doubled() { return this.stored * 2; },
+    set doubled(value) { this.stored = value / 2; }
+};
+assertEqual(accessorObject.doubled, 8,
+            "object literal getter receives the access receiver");
+accessorObject.doubled = 18;
+assertEqual(accessorObject.stored, 9,
+            "object literal setter updates through its receiver");
+var accessorPrototype = {
+    get inheritedValue() { return this.stored + 1; },
+    set inheritedValue(value) { this.stored = value - 1; }
+};
+var accessorChild = Object.create(accessorPrototype);
+accessorChild.stored = 10;
+assertEqual(accessorChild.inheritedValue, 11,
+            "inherited getter retains the original receiver");
+accessorChild.inheritedValue = 15;
+assertEqual(accessorChild.stored, 14,
+            "inherited setter retains the original receiver");
+var definedAccessor = {stored: 3};
+Object.defineProperty(definedAccessor, "tripled", {
+    get: function () { return this.stored * 3; },
+    set: function (value) { this.stored = value / 3; },
+    enumerable: true,
+    configurable: true
+});
+assertEqual(definedAccessor.tripled, 9,
+            "Object.defineProperty installs a getter");
+definedAccessor.tripled = 21;
+assertEqual(definedAccessor.stored, 7,
+            "Object.defineProperty installs a setter");
+assertEqual(addToThis.toString().indexOf("function addToThis") === 0, true,
+            "Function.prototype.toString preserves guest source");
+
+var values = [9, 8, 7];
+values[1] = 6;
+assertEqual(values.length, 3, "array length");
+assertEqual(values[1], 6, "array indexing");
+
+function PrototypeConstructor() { this.value = 5; }
+PrototypeConstructor.prototype = {
+    set data(value) { this.value = value; },
+    get data() { return this.value; },
+    read: function () { return this.value; }
+};
+var prototypeInstance = new PrototypeConstructor();
+assertEqual(prototypeInstance.read(), 5,
+            "constructed object uses the assigned function prototype");
+prototypeInstance.data = 8;
+assertEqual(prototypeInstance.read(), 8,
+            "methods following accessors remain on an assigned prototype");
+guestCollect();
+assertEqual(prototypeInstance.read(), 8,
+            "constructed object retains its assigned prototype across GC");
+
+assertEqual((5 & 3) | 8, 9, "bitwise operators");
+assertEqual(255 >>> 4, 15, "unsigned shift");
+assertEqual(false ? 1 : 2, 2, "conditional expression");
+assertEqual(false || "right", "right", "logical or evaluates right when needed");
+assertEqual("left" || "right", "left", "logical or short circuits");
+
+var visits = 0;
+while (true) {
+    visits++;
+    if (visits === 4) break;
+}
+assertEqual(visits, 4, "break exits loop");
+
+function argumentAt(index) {
+    return arguments[index];
+}
+assertEqual(argumentAt(1, "second"), "second", "function arguments object");
+
+function registerLocalEvaluationOrder() {
+    var value = 3;
+    return value + (value = 7);
+}
+assertEqual(registerLocalEvaluationOrder(), 10,
+            "register local reads preserve expression snapshots");
+
+function leafRecursive(value) {
+    if (value <= 1) return 1;
+    return value * leafRecursive(value - 1);
+}
+assertEqual(leafRecursive(5), 120, "register local named-function recursion");
+
+function pair(left, right) { return left * 10 + right; }
+function orderedRegisterArguments() {
+    var value = 1;
+    return pair(value, value = 2);
+}
+assertEqual(orderedRegisterArguments(), 12,
+            "earlier register arguments preserve their value");
+
+function orderedAssignmentArguments() {
+    var value = 1;
+    return pair(value = value + 1, value = value + 1);
+}
+assertEqual(orderedAssignmentArguments(), 23,
+            "side-effecting arguments preserve left-to-right values");
+
+function methodReceiverBeforeArguments() {
+    var first = {value: 3, read: function () { return this.value; }};
+    var second = {value: 9};
+    return first.read(first = second);
+}
+assertEqual(methodReceiverBeforeArguments(), 3,
+            "method receiver is fixed before argument evaluation");
+
+function assignmentObjectBeforeValue() {
+    var first = {value: 1};
+    var second = {value: 2};
+    var original = first;
+    first.value = (first = second, 7);
+    return original.value + second.value;
+}
+assertEqual(assignmentObjectBeforeValue(), 9,
+            "assignment object is fixed before value evaluation");
+
+function registerCompoundEvaluationOrder() {
+    var value = 3;
+    value += (value = 7);
+    return value;
+}
+assertEqual(registerCompoundEvaluationOrder(), 10,
+            "register compound assignment preserves its old value");
+
+function registerPostfixValue() {
+    var value = 3;
+    var old = value++;
+    return old * 10 + value;
+}
+assertEqual(registerPostfixValue(), 34,
+            "register postfix update preserves its result value");
+var reservedProperties = {};
+reservedProperties.default = 11;
+reservedProperties.null = 12;
+assertEqual(reservedProperties.default + reservedProperties.null, 23,
+            "reserved words are valid names after property dot");

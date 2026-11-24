@@ -1,0 +1,610 @@
+(function (root) {
+    function runNativeInterpreterTest(VM, NativeInterpreter, bytecode, predecode) {
+        var vm = new VM({heapBytes: 256 * 1024,
+                         nativeOperandPredecode: !!predecode});
+        var engine = new NativeInterpreter(vm.runtime);
+        try {
+            var program = {code: [bytecode.CONST, 0, 0,
+                                  bytecode.MOVE, 1, 0,
+                                  bytecode.RETURN, 1],
+                           constants: [17], registerCount: 2};
+            var programAddress = vm.runtime.programAddress(program);
+            var frame = vm.runtime.heapRecords.allocateFrame(
+                programAddress, 0, 0, -1, program.registerCount);
+            var first = engine.run(frame, program, 2);
+            if (first.reason !== NativeInterpreter.Exit.BUDGET ||
+                first.pc !== 6 || first.instructions !== 2) {
+                throw new Error("native interpreter budget continuation mismatch: reason=" +
+                    first.reason + ", pc=" + first.pc + ", instructions=" + first.instructions);
+            }
+            var diagnosticCodes = NativeInterpreter.CallDiagnostics;
+            for (var diagnosticName in diagnosticCodes) {
+                if (Object.prototype.hasOwnProperty.call(diagnosticCodes, diagnosticName) &&
+                        diagnosticName.indexOf("CALL_REJECT_") === 0 &&
+                        NativeInterpreter.describeCallRejectReason(
+                            diagnosticCodes[diagnosticName]) !== diagnosticName) {
+                    throw new Error("native diagnostic catalog/formatter disagree");
+                }
+            }
+            if (NativeInterpreter.sourceLocation(program, first.pc).line !== 0) {
+                throw new Error("native diagnostic invented a missing source location");
+            }
+            var second = engine.run(frame, program, 2);
+            if (second.reason !== NativeInterpreter.Exit.RETURN ||
+                second.pc !== 6 || second.instructions !== 1 ||
+                vm.runtime.readHeapValue(second.resultCell) !== 17) {
+                throw new Error("native interpreter return mismatch");
+            }
+            /* Construction between execution slices uses the same allocator
+             * without executing bytecode or collecting. Exercise dirty-space
+             * reuse as well as payload initialization and zeroed padding. */
+            var allocationHeap = vm.runtime.linearHeap;
+            var beforeAllocationInstructions = vm.runtime.heapRecords.engineInstructionCount(engine.stateAddress);
+            var allocationType = allocationHeap.constructor.Types.ROOT_SLOT;
+            var initializedRecord = allocationHeap.allocateRecordWords(
+                allocationType, 48, -1, 2, 3, 4);
+            if (allocationHeap.recordType(initializedRecord) !== allocationType ||
+                    allocationHeap.readFieldU32(initializedRecord, 0) !== 4294967295 ||
+                    allocationHeap.readFieldU32(initializedRecord, 12) !== 4 ||
+                    allocationHeap.readFieldU32(initializedRecord, 44) !== 0 ||
+                    vm.runtime.heapRecords.engineInstructionCount(engine.stateAddress) !== beforeAllocationInstructions) {
+                throw new Error("allocator-owned record initialization changed state or payload");
+            }
+            allocationHeap.writeFieldU32(initializedRecord, 44, 123);
+            engine.releaseAllocatorOwnership();
+            allocationHeap.freeRecord(initializedRecord);
+            engine.acquireAllocatorOwnership();
+            initializedRecord = allocationHeap.allocateRecordWords(allocationType, 48, 5, 6, 7, 8);
+            if (allocationHeap.readFieldU32(initializedRecord, 0) !== 5 ||
+                    allocationHeap.readFieldU32(initializedRecord, 44) !== 0) {
+                throw new Error("allocator-owned record reuse retained dirty payload");
+            }
+            vm.runtime.linearHeap.freeRecord(frame);
+
+            var arithmetic = {code: [bytecode.CONST, 0, 0,
+                                     bytecode.CONST, 1, 1,
+                                     bytecode.ADD, 2, 0, 1,
+                                     bytecode.RETURN, 2],
+                              constants: [7, 2.5], registerCount: 3};
+            var arithmeticAddress = vm.runtime.programAddress(arithmetic);
+            var arithmeticFrame = vm.runtime.heapRecords.allocateFrame(
+                arithmeticAddress, 0, 0, -1, arithmetic.registerCount);
+            var arithmeticExit = engine.run(arithmeticFrame, arithmetic, 10);
+            if (arithmeticExit.reason !== NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(arithmeticExit.resultCell) !== 9.5) {
+                throw new Error("native interpreter binary64 arithmetic mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(arithmeticFrame);
+
+            var stringSemantics = {
+                code: [bytecode.CONST, 0, 0,
+                       bytecode.CONST, 1, 1,
+                       bytecode.ADD, 2, 0, 1,
+                       bytecode.CONST, 3, 2,
+                       bytecode.STRICT_EQUAL, 4, 2, 3,
+                       bytecode.RETURN, 4],
+                constants: ["road", ":", "road:"], registerCount: 5
+            };
+            var stringSemanticsAddress = vm.runtime.programAddress(
+                stringSemantics);
+            var stringSemanticsFrame = vm.runtime.heapRecords.allocateFrame(
+                stringSemanticsAddress, 0, 0, -1,
+                stringSemantics.registerCount);
+            var stringSemanticsExit = engine.run(
+                stringSemanticsFrame, stringSemantics, 20);
+            if (stringSemanticsExit.reason !==
+                    NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(
+                    stringSemanticsExit.resultCell) !== true) {
+                throw new Error(
+                    "native interpreter guest-string semantics mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(stringSemanticsFrame);
+
+            var comparison = {code: [bytecode.CONST, 0, 0,
+                                     bytecode.CONST, 1, 1,
+                                     bytecode.LESS, 2, 0, 1,
+                                     bytecode.RETURN, 2],
+                              constants: [2.5, 7], registerCount: 3};
+            var comparisonAddress = vm.runtime.programAddress(comparison);
+            var comparisonFrame = vm.runtime.heapRecords.allocateFrame(
+                comparisonAddress, 0, 0, -1, comparison.registerCount);
+            var comparisonExit = engine.run(comparisonFrame, comparison, 10);
+            if (comparisonExit.reason !== NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(comparisonExit.resultCell) !== true) {
+                throw new Error("native interpreter binary64 comparison mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(comparisonFrame);
+
+            var nanComparison = {code: [bytecode.CONST, 0, 0,
+                                        bytecode.CONST, 1, 0,
+                                        bytecode.STRICT_EQUAL, 2, 0, 1,
+                                        bytecode.RETURN, 2],
+                                 constants: [NaN], registerCount: 3};
+            var nanAddress = vm.runtime.programAddress(nanComparison);
+            var nanFrame = vm.runtime.heapRecords.allocateFrame(
+                nanAddress, 0, 0, -1, nanComparison.registerCount);
+            var nanExit = engine.run(nanFrame, nanComparison, 10);
+            if (nanExit.reason !== NativeInterpreter.Exit.RETURN ||
+                vm.runtime.readHeapValue(nanExit.resultCell) !== false) {
+                throw new Error("native interpreter NaN comparison mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(nanFrame);
+
+            var regexpProgram = {code: [bytecode.MAKE_REGEXP, 0, 0, 1,
+                                        bytecode.RETURN, 0],
+                                 constants: ["x", "i"], registerCount: 1};
+            var regexpAddress = vm.runtime.programAddress(regexpProgram);
+            var regexpFrame = vm.runtime.heapRecords.allocateFrame(
+                regexpAddress, 0, 0, -1, regexpProgram.registerCount);
+            var exit = engine.run(regexpFrame, regexpProgram, 10);
+            var regexpResult = vm.runtime.readHeapValue(exit.resultCell);
+            if (exit.reason !== NativeInterpreter.Exit.RETURN ||
+                !regexpResult || regexpResult.guestType !== "regexp" ||
+                vm.runtime.heapRecords.regexpPattern(
+                    regexpResult.heapAddress) !== "x" ||
+                vm.runtime.heapRecords.regexpFlags(
+                    regexpResult.heapAddress) !== "i") {
+                throw new Error("native interpreter regexp construction mismatch");
+            }
+            vm.runtime.linearHeap.freeRecord(regexpFrame);
+
+            var integratedVM = new VM({heapBytes: 256 * 1024,
+                                       nativeInterpreter: true,
+                                       nativeOperandPredecode: !!predecode});
+            var wordBufferRoot = null;
+            try {
+                var context = integratedVM.context;
+                integratedVM.run(
+                    "function metadataFirst(a) { return a; }" +
+                    "function metadataSecond(a) { return a; }" +
+                    "__guestVMProgramSetVector(metadataFirst, 2, 0, 1);" +
+                    "assertEqual(metadataSecond(42), 42, 'native metadata mutation isolation');" +
+                    "assertEqual([0, 1, -1, 10, -10, 2147483647, -2147483648, 'x', null].join(',')," +
+                    " '0,1,-1,10,-10,2147483647,-2147483648,x,', 'mixed integer join');",
+                    "native-metadata-isolation.js");
+                var integratedProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.MOVE, 1, 0,
+                           bytecode.RETURN, 1],
+                    constants: [23], registerCount: 2
+                };
+                var execution = context.startProgram(integratedProgram);
+                var integratedBudget = execution.resume(2);
+                if (integratedBudget.status !== "budget" ||
+                    integratedBudget.instructions !== 2) {
+                    throw new Error("native Execution budget integration mismatch");
+                }
+                /* A suspended execution must keep all of its executable
+                 * storage alive, regardless of the selected operand view. */
+                integratedVM.collect();
+                var integratedReturn = execution.resume(2);
+                if (integratedReturn.status !== "completed" ||
+                    integratedReturn.value !== 23 ||
+                    integratedReturn.instructions !== 1) {
+                    throw new Error("native Execution return integration mismatch");
+                }
+                var counterFallbacks = integratedVM.runtime.nativeInterpreter.
+                    unsupportedExitCount;
+                if (context.run("__guestVMOpcodeCounterWord(0)") !== undefined ||
+                    context.run("__guestVMOpcodeCounterWord(-1)") !== undefined ||
+                    context.run("__guestVMOpcodeCounterWord()") !== undefined ||
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                        counterFallbacks) {
+                    throw new Error("disabled opcode counters must stay native and undefined");
+                }
+
+                /* Cached initialization must reflect program edits, and
+                 * collection must not resurrect the previous constant bank. */
+                var constantContext = integratedVM.jsRuntime.createContext();
+                constantContext.run(
+                    "function frameInit(v) { return v + 17; } var frameInitResult = frameInit(1);");
+                if (integratedVM.runtime.getGlobal(constantContext, "frameInitResult") !== 18) {
+                    throw new Error("native frame initializer first call mismatch");
+                }
+                var constantCallable = integratedVM.runtime.getGlobal(
+                    constantContext, "frameInit");
+                var editableConstants = constantCallable.program.constants;
+                var editableIndex = 0;
+                while (editableIndex < editableConstants.length &&
+                       editableConstants[editableIndex] !== 17) editableIndex++;
+                if (editableIndex === editableConstants.length) {
+                    throw new Error("native frame initializer fixture constant missing");
+                }
+                var constantFallbacks = integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                constantContext.run("__guestVMProgramSetConstant(frameInit," +
+                    editableIndex + ",23);");
+                integratedVM.collect();
+                constantContext.run("frameInitResult = frameInit(1);");
+                if (integratedVM.runtime.getGlobal(constantContext, "frameInitResult") !== 24) {
+                    throw new Error("native frame initializer retained an edited constant");
+                }
+                if (typeof get_dlsym === "function" &&
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount !== constantFallbacks) {
+                    throw new Error("native frame initializer edit used semantic fallback");
+                }
+                constantContext.destroy();
+
+                var regexpContext = integratedVM.jsRuntime.createContext();
+                var regexpProgram = {
+                    code: [bytecode.MAKE_REGEXP, 0, 0, 1,
+                           bytecode.RETURN, 0],
+                    constants: ["x", ""], registerCount: 1
+                };
+                var nativeRegexp = regexpContext.runProgram(regexpProgram);
+                if (!nativeRegexp || nativeRegexp.guestType !== "regexp") {
+                    throw new Error("native Execution regexp mismatch");
+                }
+                if (integratedVM.runtime.nativeInterpreter.runCount < 3) {
+                    throw new Error("native Execution did not run regexp opcode");
+                }
+
+                var allocationFallbacks =
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                var objectContext = integratedVM.jsRuntime.createContext();
+                var nativeObject = objectContext.runProgram({
+                    code: [bytecode.MAKE_OBJECT, 0,
+                           bytecode.CONST, 1, 0,
+                           bytecode.SET_PROPERTY_CONST, 0, 1, 1,
+                           bytecode.GET_PROPERTY_CONST, 2, 0, 1,
+                           bytecode.RETURN, 0],
+                    constants: [9, "nativeProperty"], registerCount: 3
+                });
+                var allocationContext = integratedVM.jsRuntime.createContext();
+                var nativeArray = allocationContext.runProgram({
+                    code: [bytecode.MAKE_ARRAY, 0, 0,
+                           bytecode.RETURN, 0],
+                    constants: [], registerCount: 1
+                });
+                if (!nativeObject || nativeObject.guestType !== "object" ||
+                    !nativeArray || nativeArray.guestType !== "array" ||
+                    integratedVM.runtime.arrayLength(nativeArray) !== 0 ||
+                    integratedVM.runtime.getProperty(
+                        nativeObject, "nativeProperty") !== 9) {
+                    throw new Error("native bump allocation mismatch");
+                }
+                if (integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                    allocationFallbacks) {
+                    throw new Error("native allocation used semantic fallback");
+                }
+
+                var globalContext = integratedVM.jsRuntime.createContext();
+                globalContext.installGlobal("counter", 40);
+                var globalProgram = {
+                    code: [bytecode.GET_GLOBAL, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.ADD, 2, 0, 1,
+                           bytecode.SET_GLOBAL, 0, 2,
+                           bytecode.GET_GLOBAL, 3, 0,
+                           bytecode.RETURN, 3],
+                    constants: ["counter", 2], registerCount: 4
+                };
+                var globalFallbacksBefore =
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                var globalResult = globalContext.runProgram(globalProgram);
+                if (globalResult !== 42 ||
+                    integratedVM.runtime.getGlobal(globalContext, "counter") !== 42) {
+                    throw new Error("native global value-cell access mismatch");
+                }
+                if (integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                    globalFallbacksBefore) {
+                    throw new Error("native globals unexpectedly used semantic fallback");
+                }
+
+                var localContext = integratedVM.jsRuntime.createContext();
+                var localProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.SET_LOCAL, 0, 0, 0,
+                           bytecode.GET_LOCAL, 1, 0, 0,
+                           bytecode.CONST, 2, 1,
+                           bytecode.ADD, 3, 1, 2,
+                           bytecode.SET_LOCAL, 0, 0, 3,
+                           bytecode.GET_LOCAL, 4, 0, 0,
+                           bytecode.RETURN, 4],
+                    constants: [10, 5], registerCount: 5,
+                    bindings: ["x", "arguments", "this"],
+                    bindingSlots: {$x: 0, $arguments: 1, $this: 2},
+                    parameters: [], parameterSlots: [], argumentsSlot: 1,
+                    thisSlot: 2, functionNameSlot: -1
+                };
+                if (localContext.runProgram(localProgram) !== 15) {
+                    throw new Error("native lexical environment access mismatch");
+                }
+
+                var unaryContext = integratedVM.jsRuntime.createContext();
+                var unaryProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.NEGATE, 1, 0,
+                           bytecode.POSITIVE, 2, 1,
+                           bytecode.RETURN, 2],
+                    constants: [5], registerCount: 3
+                };
+                if (unaryContext.runProgram(unaryProgram) !== -5) {
+                    throw new Error("native numeric unary opcode mismatch");
+                }
+
+                /* Exercise numeric serialization's actual dependencies, not
+                 * just small Math results: these values used to wrap through
+                 * ToInt32 and corrupt a guest-hosted VM's binary64 payloads. */
+                var roundingContext = integratedVM.jsRuntime.createContext();
+                roundingContext.run(
+                    "var samples=[1073741824.25,2147483648.75," +
+                    "-2147483648.75,4503599627370495.5," +
+                    "4503599627370496,1.7976931348623157e308];" +
+                    "var floors=[1073741824,2147483648,-2147483649," +
+                    "4503599627370495,4503599627370496,1.7976931348623157e308];" +
+                    "var ceilings=[1073741825,2147483649,-2147483648," +
+                    "4503599627370496,4503599627370496,1.7976931348623157e308];" +
+                    "var rounded=[1073741824,2147483649,-2147483649," +
+                    "4503599627370496,4503599627370496,1.7976931348623157e308];" +
+                    "for(var i=0;i<samples.length;i++) {" +
+                    "if(Math.floor(samples[i])!==floors[i] ||" +
+                    "Math.ceil(samples[i])!==ceilings[i] ||" +
+                    "Math.round(samples[i])!==rounded[i])" +
+                    "throw new Error('binary64 rounding mismatch at '+i); }" +
+                    "if(Math.round(2147483647)!==2147483647 ||" +
+                    "Math.round(-2147483648)!==-2147483648)" +
+                    "throw new Error('integer rounding wrapped');",
+                    "native-binary64-rounding.js");
+                roundingContext.destroy();
+
+                var negativeZeroContext = integratedVM.jsRuntime.createContext();
+                var negativeZeroProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.NEGATE, 1, 0,
+                           bytecode.RETURN, 1],
+                    constants: [0], registerCount: 2
+                };
+                var negativeZero = negativeZeroContext.runProgram(
+                    negativeZeroProgram);
+                if (negativeZero !== 0 || 1 / negativeZero !== -Infinity) {
+                    throw new Error("native unary minus lost negative zero");
+                }
+
+                var notContext = integratedVM.jsRuntime.createContext();
+                var notProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.NOT, 1, 0,
+                           bytecode.RETURN, 1],
+                    constants: [""], registerCount: 2
+                };
+                if (notContext.runProgram(notProgram) !== true) {
+                    throw new Error("native string truthiness mismatch");
+                }
+
+                var nanBranchContext = integratedVM.jsRuntime.createContext();
+                var nanBranchProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.JUMP_IF_FALSE, 0, 11,
+                           bytecode.CONST, 1, 1,
+                           bytecode.JUMP, 14,
+                           bytecode.CONST, 1, 2,
+                           bytecode.RETURN, 1],
+                    constants: [NaN, 1, 2], registerCount: 2
+                };
+                if (nanBranchContext.runProgram(nanBranchProgram) !== 2) {
+                    throw new Error("native NaN truthiness mismatch");
+                }
+
+                var propertyContext = integratedVM.jsRuntime.createContext();
+                var propertyPrototype = integratedVM.runtime.makeObject();
+                integratedVM.runtime.setProperty(propertyPrototype, "inherited", 20);
+                var propertyObject = integratedVM.runtime.makeObject();
+                integratedVM.runtime.setPrototype(propertyObject, propertyPrototype);
+                integratedVM.runtime.setProperty(propertyObject, "own", 10);
+                var propertyProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.GET_PROPERTY_CONST, 1, 0, 1,
+                           bytecode.CONST, 2, 2,
+                           bytecode.SET_PROPERTY_CONST, 0, 1, 2,
+                           bytecode.GET_PROPERTY_CONST, 3, 0, 1,
+                           bytecode.GET_PROPERTY_CONST, 4, 0, 3,
+                           bytecode.ADD, 5, 3, 4,
+                           bytecode.RETURN, 5],
+                    constants: [propertyObject, "own", 15, "inherited"],
+                    registerCount: 6
+                };
+                if (propertyContext.runProgram(propertyProgram) !== 35 ||
+                    integratedVM.runtime.getProperty(propertyObject, "own") !== 15) {
+                    throw new Error("native constant property access mismatch");
+                }
+
+                var arrayContext = integratedVM.jsRuntime.createContext();
+                var propertyArray = integratedVM.runtime.makeArray();
+                var arrayProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.CONST, 2, 2,
+                           bytecode.SET_PROPERTY, 0, 1, 2,
+                           bytecode.GET_PROPERTY, 3, 0, 1,
+                           bytecode.GET_PROPERTY_CONST, 4, 0, 3,
+                           bytecode.ADD, 5, 3, 4,
+                           bytecode.RETURN, 5],
+                    constants: [propertyArray, 1, 77, "length"],
+                    registerCount: 6
+                };
+                if (arrayContext.runProgram(arrayProgram) !== 79 ||
+                    integratedVM.runtime.arrayGet(propertyArray, 1) !== 77 ||
+                    integratedVM.runtime.arrayLength(propertyArray) !== 2) {
+                    throw new Error("native indexed array access mismatch");
+                }
+
+                var bitwiseContext = integratedVM.jsRuntime.createContext();
+                var bitwiseProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.BIT_AND, 2, 0, 1,
+                           bytecode.CONST, 3, 2,
+                           bytecode.SHIFT_LEFT, 4, 2, 3,
+                           bytecode.BIT_NOT, 5, 4,
+                           bytecode.RETURN, 5],
+                    constants: [12.9, 5, 1], registerCount: 6
+                };
+                if (bitwiseContext.runProgram(bitwiseProgram) !== -9) {
+                    throw new Error("native bitwise ToInt32 mismatch");
+                }
+                var unsignedContext = integratedVM.jsRuntime.createContext();
+                var unsignedProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.SHIFT_UNSIGNED_RIGHT, 2, 0, 1,
+                           bytecode.RETURN, 2],
+                    constants: [-1, 0], registerCount: 3
+                };
+                if (unsignedContext.runProgram(unsignedProgram) !== 4294967295) {
+                    throw new Error("native unsigned shift binary64 mismatch");
+                }
+
+                var looseEqualityContext =
+                    integratedVM.jsRuntime.createContext();
+                looseEqualityContext.run(
+                    "var looseBooleanNumber = " +
+                    "(false == 0) && (0 == false) && " +
+                    "(true == 1) && (1 == true) && " +
+                    "((1 == 6) != 7);",
+                    "native_loose_boolean_number.js");
+                if (integratedVM.runtime.getGlobal(
+                        looseEqualityContext,
+                        "looseBooleanNumber") !== true) {
+                    throw new Error(
+                        "native Boolean/Number loose equality mismatch");
+                }
+
+                /* Exercise the mixed int32/double coercions used by common
+                 * deterministic hash and PRNG code as one high-level unit. */
+                var hashContext = integratedVM.jsRuntime.createContext();
+                hashContext.run(
+                    "var seed = 49734321; for (var hashIndex = 0; hashIndex < 20000; hashIndex++) {" +
+                    "seed = ((seed + 0x7ed55d16) + (seed << 12)) & 0xffffffff;" +
+                    "seed = ((seed ^ 0xc761c23c) ^ (seed >>> 19)) & 0xffffffff;" +
+                    "seed = ((seed + 0x165667b1) + (seed << 5)) & 0xffffffff;" +
+                    "seed = ((seed + 0xd3a2646c) ^ (seed << 9)) & 0xffffffff;" +
+                    "seed = ((seed + 0xfd7046c5) + (seed << 3)) & 0xffffffff;" +
+                    "seed = ((seed ^ 0xb55a4f09) ^ (seed >>> 16)) & 0xffffffff;}" +
+                    "", "native_hash_pipeline.js");
+                var hashResult = integratedVM.runtime.getGlobal(
+                    hashContext, "seed");
+                if (hashResult !== 16991930) {
+                    throw new Error("native 32-bit hash pipeline mismatch: " +
+                                    hashResult);
+                }
+
+                var variantContext = integratedVM.jsRuntime.createContext();
+                variantContext.run(
+                    "var variantSeed=49734321;" +
+                    "function variantRandom(){" +
+                    "variantSeed=((variantSeed+0x7ed55d16)+(variantSeed<<12))&0xffffffff;" +
+                    "variantSeed=((variantSeed^0xc761c23c)^(variantSeed>>>19))&0xffffffff;" +
+                    "variantSeed=((variantSeed+0x165667b1)+(variantSeed<<5))&0xffffffff;" +
+                    "variantSeed=((variantSeed+0xd3a2646c)^(variantSeed<<9))&0xffffffff;" +
+                    "variantSeed=((variantSeed+0xfd7046c5)+(variantSeed<<3))&0xffffffff;" +
+                    "variantSeed=((variantSeed^0xb55a4f09)^(variantSeed>>>16))&0xffffffff;" +
+                    "return (variantSeed&0xfffffff)/0x10000000;}" +
+                    "var variantSource='uggc://jjj.snprobbx.pbz/ybtva.cuc';" +
+                    "var variantHash=0;" +
+                    "for(var variantIndex=1;variantIndex<1000;variantIndex++){" +
+                    "var variantPosition=Math.floor(variantRandom()*variantSource.length);" +
+                    "var variantCharacter=String.fromCharCode((variantSource.charCodeAt(variantPosition)+Math.floor(variantRandom()*128))%128);" +
+                    "var variant=variantSource.substring(0,variantPosition)+variantCharacter+variantSource.substring(variantPosition+1,variantSource.length);" +
+                    "for(var characterIndex=0;characterIndex<variant.length;characterIndex++)" +
+                    "variantHash=((variantHash*33)^variant.charCodeAt(characterIndex))|0;}",
+                    "native_input_variants.js");
+                var variantHash = integratedVM.runtime.getGlobal(
+                    variantContext, "variantHash");
+                if (variantHash !== 1420876352) {
+                    throw new Error("native input variant pipeline mismatch: " +
+                                    variantHash);
+                }
+
+                var wordBuffer = integratedVM.runtime.bufferSupport.allocate(8);
+                /* Context creation can collect before constructing its heap
+                 * records. A host local is not an embedding root; retain the
+                 * unpublished buffer until it is consumed by the program. */
+                wordBufferRoot = integratedVM.runtime.retain(wordBuffer);
+                var writeUInt32LE = integratedVM.runtime.getProperty(
+                    wordBuffer, "writeUInt32LE");
+                var readUInt32LE = integratedVM.runtime.getProperty(
+                    wordBuffer, "readUInt32LE");
+                var bufferFallbacks =
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount;
+                var bufferContext = integratedVM.jsRuntime.createContext();
+                var bufferProgram = {
+                    code: [bytecode.CONST, 0, 0,
+                           bytecode.CONST, 1, 1,
+                           bytecode.CONST, 2, 2,
+                           bytecode.CONST, 3, 3,
+                           bytecode.CALL, 4, 1, 0, 4,
+                           bytecode.CONST, 5, 5,
+                           bytecode.CALL, 6, 5, 0, 6,
+                           bytecode.RETURN, 6],
+                    constants: [wordBuffer, writeUInt32LE, 0x89abcdef, 0,
+                                [2, 3], readUInt32LE, [3]],
+                    registerCount: 7
+                };
+                if (bufferContext.runProgram(bufferProgram) !== 0x89abcdef) {
+                    throw new Error("native Buffer UInt32LE intrinsic mismatch");
+                }
+                if (typeof get_dlsym === "function" &&
+                    integratedVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                    bufferFallbacks) {
+                    throw new Error("native Buffer UInt32LE used semantic fallback");
+                }
+            } finally {
+                if (wordBufferRoot !== null) integratedVM.runtime.release(wordBufferRoot);
+                integratedVM.destroy();
+            }
+            if (typeof get_dlsym === "function") {
+                var rawVM = new VM({heapBytes: 256 * 1024,
+                                    nativeInterpreter: true, rawFFI: true,
+                                    nativeOperandPredecode: !!predecode});
+                var rawPointer = 0;
+                try {
+                    var callocPointer = rawVM.runtime.hostFFI.resolve("calloc");
+                    var freePointer = rawVM.runtime.hostFFI.resolve("free");
+                    rawPointer = rawVM.runtime.hostFFI.call(
+                        callocPointer, [1, 4]);
+                    if (!rawPointer) throw new Error("native intrinsic test calloc failed");
+                    var rawProgram = {
+                        code: [bytecode.GET_GLOBAL, 0, 0,
+                               bytecode.CONST, 1, 1,
+                               bytecode.CONST, 2, 2,
+                               bytecode.CALL, 3, 0, -1, 3,
+                               bytecode.GET_GLOBAL, 4, 4,
+                               bytecode.CALL, 5, 4, -1, 5,
+                               bytecode.RETURN, 5],
+                        constants: ["poke32", rawPointer, 0x12345678,
+                                    [1, 2], "peek32", [1]],
+                        registerCount: 6
+                    };
+                    var rawFallbacks =
+                        rawVM.runtime.nativeInterpreter.unsupportedExitCount;
+                    if (rawVM.execute(rawProgram) !== 0x12345678) {
+                        throw new Error("native raw-memory intrinsic mismatch");
+                    }
+                    if (rawVM.runtime.nativeInterpreter.unsupportedExitCount !==
+                        rawFallbacks) {
+                        throw new Error("native raw-memory call used semantic fallback");
+                    }
+                    rawVM.runtime.hostFFI.call(freePointer, [rawPointer]);
+                    rawPointer = 0;
+                } finally {
+                    if (rawPointer) {
+                        rawVM.runtime.hostFFI.call(
+                            rawVM.runtime.hostFFI.resolve("free"), [rawPointer]);
+                    }
+                    rawVM.destroy();
+                }
+            }
+            return "kernel-compiled bytecode interpreter passed on " +
+                   second.backend;
+        } finally {
+            engine.destroy();
+            vm.destroy();
+        }
+    }
+
+    root.GuestVMRunNativeInterpreterTest = runNativeInterpreterTest;
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = runNativeInterpreterTest;
+    }
+}(this));

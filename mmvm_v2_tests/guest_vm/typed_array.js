@@ -1,0 +1,419 @@
+/* ES5-era typed arrays backed entirely by the guest linear heap.  Buffer and
+ * typed arrays deliberately share the byte-backing record, but each view has
+ * an explicit kind so Buffer intrinsics cannot confuse element and byte
+ * indexing. */
+(function (root) {
+    var NativeIntrinsics = root.GuestVMNativeIntrinsics;
+    var Binary64 = root.GuestVMBinary64;
+    var HeapRecords = root.GuestVMHeapRecords;
+    if (typeof module !== "undefined" && module.exports) {
+        NativeIntrinsics = require("./native_intrinsics.js");
+        Binary64 = require("./binary64.js");
+        HeapRecords = require("./heap_records.js");
+    }
+    function integer(value) {
+        value = Number(value);
+        if (value !== value || value === 0) return 0;
+        return value < 0 ? Math.ceil(value) : Math.floor(value);
+    }
+
+    function canonicalIndex(key) {
+        if (typeof key === "number") {
+            return key >= 0 && key < 4294967295 && key === Math.floor(key) ? key : -1;
+        }
+        if (key === "0") return 0;
+        if (!key || key.charCodeAt(0) === 48) return -1;
+        var value = Number(key);
+        return value >= 0 && value < 4294967295 &&
+            value === Math.floor(value) && String(value) === key ? value : -1;
+    }
+
+    var Kinds = HeapRecords.BufferKinds;
+    var Clamp = HeapRecords.TypedArrayConstants;
+
+    function clampByte(value) {
+        if (!(value > 0)) return 0;
+        if (value >= Clamp.CLAMP_MAX) return Clamp.CLAMP_MAX;
+        var lower = Math.floor(value), fraction = value - lower;
+        return fraction > Clamp.CLAMP_HALF ||
+            (fraction === Clamp.CLAMP_HALF && (lower & 1)) ? lower + 1 : lower;
+    }
+
+    var Descriptions = [
+        null, null,
+        {name: "Uint8Array", bytes: 1, kind: Kinds.UINT8},
+        {name: "Uint16Array", bytes: 2, kind: Kinds.UINT16},
+        {name: "Uint32Array", bytes: 4, kind: Kinds.UINT32},
+        {name: "Int32Array", bytes: 4, kind: Kinds.INT32},
+        {name: "Float32Array", bytes: 4, kind: Kinds.FLOAT32},
+        {name: "Float64Array", bytes: 8, kind: Kinds.FLOAT64},
+        {name: "Int8Array", bytes: 1, kind: Kinds.INT8},
+        {name: "Int16Array", bytes: 2, kind: Kinds.INT16},
+        {name: "Uint8ClampedArray", bytes: 1, kind: Kinds.UINT8_CLAMPED}
+    ];
+
+    function subarrayCallback(receiver, args) {
+        var support = receiver.ownerRuntime.typedArraySupport;
+        support.requireTyped(receiver);
+        var description = support.description(receiver);
+        var length = support.viewLength(receiver);
+        var start = support.normalizeIndex(args[0], length, 0);
+        var end = support.normalizeIndex(args[1], length, length);
+        if (end < start) end = start;
+        return support.makeTypedView(support.viewBacking(receiver),
+            support.viewOffset(receiver) + start * description.bytes,
+            end - start, description);
+    }
+
+    function setCallback(receiver, args) {
+        var support = receiver.ownerRuntime.typedArraySupport;
+        support.requireTyped(receiver);
+        support.copyElements(receiver, args[0], args[1]);
+    }
+
+    function constructorCallback(receiver, args) {
+        return this.ownerRuntime.typedArraySupport.constructTyped(
+            Descriptions[this.typedArrayKind], args);
+    }
+
+    function constructorConstructCallback(args) {
+        return this.ownerRuntime.typedArraySupport.constructTyped(
+            Descriptions[this.typedArrayKind], args);
+    }
+
+    function arrayBufferCallback(receiver, args) {
+        return this.ownerRuntime.typedArraySupport.allocateArrayBuffer(args[0]);
+    }
+
+    function arrayBufferConstructCallback(args) {
+        return this.ownerRuntime.typedArraySupport.allocateArrayBuffer(args[0]);
+    }
+
+    function TypedArraySupport(runtime) {
+        this.runtime = runtime;
+        this.arrayBufferPrototype = runtime.makeObject();
+        this.prototypes = [];
+        this.install();
+    }
+
+    TypedArraySupport.Kinds = Kinds;
+
+    TypedArraySupport.prototype.makeNative = function (name, callback,
+                                                        intrinsicId) {
+        return this.runtime.makeNativeFunction(
+            name, callback, "intrinsic", intrinsicId || 0);
+    };
+
+    TypedArraySupport.prototype.install = function () {
+        var arrayBuffer = this.makeNative("ArrayBuffer", arrayBufferCallback,
+            NativeIntrinsics.ARRAY_BUFFER_CONSTRUCTOR);
+        arrayBuffer.arrayBufferConstructor = true;
+        arrayBuffer.constructCallback = arrayBufferConstructCallback;
+        this.runtime.setProperty(arrayBuffer, "prototype", this.arrayBufferPrototype);
+        this.runtime.defineBuiltinProperty(this.arrayBufferPrototype, "constructor", arrayBuffer);
+        this.runtime.setGlobal("ArrayBuffer", arrayBuffer);
+
+        var kind = Kinds.UINT8;
+        while (kind <= Kinds.FLOAT64) {
+            this.installTypedConstructor(Descriptions[kind]);
+            kind++;
+        }
+        this.installTypedConstructor(Descriptions[Kinds.INT8]);
+        this.installTypedConstructor(Descriptions[Kinds.INT16]);
+        this.installTypedConstructor(Descriptions[Kinds.UINT8_CLAMPED]);
+    };
+
+    TypedArraySupport.prototype.installTypedConstructor = function (description) {
+        var viewPrototype = this.runtime.makeObject();
+        this.prototypes[description.kind] = viewPrototype;
+        this.runtime.setProperty(viewPrototype, "subarray",
+            this.makeNative(description.name + ".prototype.subarray",
+                subarrayCallback, NativeIntrinsics.TYPED_ARRAY_SUBARRAY));
+        this.runtime.setProperty(viewPrototype, "set",
+            this.makeNative(description.name + ".prototype.set",
+                setCallback, NativeIntrinsics.TYPED_ARRAY_SET));
+        var intrinsic = description.kind === Kinds.UINT8_CLAMPED ?
+            NativeIntrinsics.UINT8_CLAMPED_ARRAY_CONSTRUCTOR :
+            NativeIntrinsics.TYPED_ARRAY_CONSTRUCTOR_BASE + description.kind;
+        var constructor = this.makeNative(description.name, constructorCallback, intrinsic);
+        constructor.typedArrayKind = description.kind;
+        constructor.constructCallback = constructorConstructCallback;
+        this.runtime.setProperty(constructor, "prototype", viewPrototype);
+        this.runtime.defineBuiltinProperty(viewPrototype, "constructor", constructor);
+        this.runtime.setProperty(constructor, "BYTES_PER_ELEMENT", description.bytes);
+        this.runtime.setProperty(viewPrototype, "BYTES_PER_ELEMENT", description.bytes);
+        this.runtime.setGlobal(description.name, constructor);
+    };
+
+    TypedArraySupport.prototype.allocateArrayBuffer = function (length) {
+        length = integer(length);
+        if (length < 0 || length > 0x3fffffff) {
+            throw new RangeError("invalid ArrayBuffer length");
+        }
+        var backing = this.runtime.heapRecords.allocateBufferBacking(length);
+        this.runtime.noteAllocation(Math.max(1, Math.ceil(length / 64)));
+        var address = this.runtime.heapRecords.allocateBufferView(backing, 0,
+            length, this.arrayBufferPrototype.heapAddress, Kinds.ARRAY_BUFFER);
+        var buffer = this.runtime.trackObject(
+            this.runtime.makeHeapHandle(address, "arrayBuffer"));
+        this.runtime.heapRecords.setBufferBackingMetadata(backing, address);
+        return buffer;
+    };
+
+    TypedArraySupport.prototype.constructTyped = function (description, args) {
+        var source = args[0];
+        var offset = 0;
+        var length;
+        var buffer;
+        if (source && source.guestType === "arrayBuffer") {
+            buffer = source;
+            offset = args.length > 1 ? integer(args[1]) : 0;
+            if (offset < 0 || offset % description.bytes !== 0 ||
+                offset > this.viewLength(buffer)) {
+                throw new RangeError("typed array byteOffset is invalid");
+            }
+            var available = this.viewLength(buffer) - offset;
+            length = args.length > 2 ? integer(args[2]) :
+                Math.floor(available / description.bytes);
+            if (length < 0 || length * description.bytes > available) {
+                throw new RangeError("typed array length is invalid");
+            }
+            return this.makeTypedView(this.viewBacking(buffer), offset,
+                                      length, description);
+        }
+        if (typeof source === "number" || source === undefined) {
+            length = source === undefined ? 0 : integer(source);
+            if (length < 0 || length > Math.floor(0x3fffffff / description.bytes)) {
+                throw new RangeError("typed array length is invalid");
+            }
+            buffer = this.allocateArrayBuffer(length * description.bytes);
+            return this.makeTypedView(this.viewBacking(buffer), 0, length, description);
+        }
+        if (!source || (source.guestType !== "array" &&
+                        source.guestType !== "typedArray" &&
+                        source.guestType !== "buffer")) {
+            throw new TypeError("unsupported typed array input");
+        }
+        length = source.guestType === "array" ?
+            this.runtime.arrayLength(source) : this.viewLength(source);
+        buffer = this.allocateArrayBuffer(length * description.bytes);
+        var result = this.makeTypedView(this.viewBacking(buffer), 0, length, description);
+        var index = 0;
+        while (index < length) {
+            this.write(result, index, source.guestType === "array" ?
+                this.runtime.arrayGet(source, index) :
+                (source.guestType === "buffer" ?
+                 this.runtime.bufferSupport.read(source, index) : this.read(source, index)));
+            index++;
+        }
+        return result;
+    };
+
+    TypedArraySupport.prototype.makeTypedView = function (backing, offset, length,
+                                                           description) {
+        var address = this.runtime.heapRecords.allocateBufferView(backing, offset,
+            length, this.prototypes[description.kind].heapAddress, description.kind);
+        return this.runtime.trackObject(
+            this.runtime.makeHeapHandle(address, "typedArray"));
+    };
+
+    TypedArraySupport.prototype.viewKind = function (view) {
+        return this.runtime.heapRecords.bufferViewKind(view.heapAddress);
+    };
+    TypedArraySupport.prototype.description = function (view) {
+        return Descriptions[this.viewKind(view)];
+    };
+    TypedArraySupport.prototype.viewBacking = function (view) {
+        return this.runtime.heapRecords.bufferViewBacking(view.heapAddress);
+    };
+    TypedArraySupport.prototype.viewOffset = function (view) {
+        return this.runtime.heapRecords.bufferViewOffset(view.heapAddress);
+    };
+    TypedArraySupport.prototype.viewLength = function (view) {
+        return this.runtime.heapRecords.bufferViewLength(view.heapAddress);
+    };
+    TypedArraySupport.prototype.requireTyped = function (view) {
+        if (!view || view.guestType !== "typedArray") {
+            throw new TypeError("typed array method receiver is invalid");
+        }
+    };
+    TypedArraySupport.prototype.normalizeIndex = function (value, length, fallback) {
+        var index = value === undefined ? fallback : integer(value);
+        if (index < 0) index = length + index;
+        if (index < 0) return 0;
+        return index > length ? length : index;
+    };
+    TypedArraySupport.prototype.dataAddress = function (view, index) {
+        var description = this.description(view);
+        return this.runtime.heapRecords.bufferBackingDataAddress(
+            this.viewBacking(view)) + this.viewOffset(view) + index * description.bytes;
+    };
+
+    TypedArraySupport.prototype.read = function (view, index) {
+        var length = this.viewLength(view);
+        if (index < 0 || index >= length) return undefined;
+        var description = this.description(view);
+        var records = this.runtime.heapRecords, backing = this.viewBacking(view);
+        if (records.bufferBackingIsExternal(backing)) {
+            return this.readExternal(records, backing,
+                this.viewOffset(view) + index * description.bytes, description.kind);
+        }
+        var memory = this.runtime.linearHeap.memory;
+        var address = this.dataAddress(view, index);
+        if (description.kind === Kinds.UINT8 || description.kind === Kinds.UINT8_CLAMPED) return memory.readU8Trusted(address);
+        if (description.kind === Kinds.INT8) {
+            var int8 = memory.readU8Trusted(address);
+            return int8 & 128 ? int8 - 256 : int8;
+        }
+        if (description.kind === Kinds.UINT16) {
+            return memory.readU8Trusted(address) |
+                   (memory.readU8Trusted(address + 1) << 8);
+        }
+        if (description.kind === Kinds.INT16) {
+            var int16 = memory.readU8Trusted(address) |
+                        (memory.readU8Trusted(address + 1) << 8);
+            return int16 & 32768 ? int16 - 65536 : int16;
+        }
+        if (description.kind === Kinds.UINT32) return memory.readU32Trusted(address) >>> 0;
+        if (description.kind === Kinds.INT32) return memory.readU32Trusted(address) | 0;
+        if (description.kind === Kinds.FLOAT64) return memory.readF64Trusted(address);
+        return Binary64.decode32(memory.readU32Trusted(address));
+    };
+
+    TypedArraySupport.prototype.write = function (view, index, value) {
+        var length = this.viewLength(view);
+        if (index < 0 || index >= length) return value;
+        var description = this.description(view);
+        var records = this.runtime.heapRecords, backing = this.viewBacking(view);
+        if (records.bufferBackingIsExternal(backing)) {
+            this.writeExternal(records, backing, this.viewOffset(view) +
+                index * description.bytes, description.kind, Number(value));
+            return value;
+        }
+        var memory = this.runtime.linearHeap.memory;
+        var address = this.dataAddress(view, index);
+        value = Number(value);
+        if (description.kind === Kinds.UINT8_CLAMPED) value = clampByte(value);
+        if (description.kind === Kinds.UINT8 ||
+            description.kind === Kinds.UINT8_CLAMPED ||
+            description.kind === Kinds.INT8) {
+            memory.writeU8Trusted(address, value & 255);
+        } else if (description.kind === Kinds.UINT16 ||
+                   description.kind === Kinds.INT16) {
+            memory.writeU8Trusted(address, value & 255);
+            memory.writeU8Trusted(address + 1, (value >>> 8) & 255);
+        } else if (description.kind === Kinds.UINT32 ||
+                   description.kind === Kinds.INT32) {
+            memory.writeU32Trusted(address, value);
+        } else if (description.kind === Kinds.FLOAT64) memory.writeF64(address, value);
+        else memory.writeU32Trusted(address, Binary64.encode32(value));
+        return value;
+    };
+
+    /* Embedding fallback only. Native guest execution uses the same backing
+     * pointer directly; Node's inline emulation remains unchanged. */
+    TypedArraySupport.prototype.readExternal = function (records, backing, offset, kind) {
+        if (kind === Kinds.UINT8_CLAMPED) return records.readBufferByte(backing, offset);
+        if (kind === Kinds.UINT8 || kind === Kinds.INT8) {
+            var octet = records.readBufferByte(backing, offset);
+            return kind === Kinds.INT8 && (octet & 128) ? octet - 256 : octet;
+        }
+        if (kind === Kinds.UINT16 || kind === Kinds.INT16) {
+            var half = records.readBufferByte(backing, offset) |
+                (records.readBufferByte(backing, offset + 1) << 8);
+            return kind === Kinds.INT16 && (half & 32768) ? half - 65536 : half;
+        }
+        var low = records.readBufferU32LE(backing, offset);
+        if (kind === Kinds.INT32) return low | 0;
+        if (kind === Kinds.UINT32) return low;
+        if (kind === Kinds.FLOAT32) return Binary64.decode32(low);
+        return Binary64.decode(low, records.readBufferU32LE(backing, offset + 4));
+    };
+
+    TypedArraySupport.prototype.writeExternal = function (records, backing, offset, kind, value) {
+        if (kind === Kinds.UINT8_CLAMPED) value = clampByte(value);
+        if (kind === Kinds.UINT8 || kind === Kinds.INT8 || kind === Kinds.UINT8_CLAMPED) {
+            records.writeBufferByte(backing, offset, value & 255);
+        } else if (kind === Kinds.UINT16 || kind === Kinds.INT16) {
+            records.writeBufferByte(backing, offset, value & 255);
+            records.writeBufferByte(backing, offset + 1, (value >>> 8) & 255);
+        } else if (kind === Kinds.FLOAT64) {
+            var words = Binary64.encode(value);
+            records.writeBufferU32LE(backing, offset, words.low);
+            records.writeBufferU32LE(backing, offset + 4, words.high);
+        } else {
+            records.writeBufferU32LE(backing, offset,
+                kind === Kinds.FLOAT32 ? Binary64.encode32(value) : value);
+        }
+    };
+
+    TypedArraySupport.prototype.copyElements = function (target, source, offsetValue) {
+        if (!source || (source.guestType !== "array" &&
+                        source.guestType !== "typedArray" &&
+                        source.guestType !== "buffer")) {
+            throw new TypeError("typed array set source is not array-like");
+        }
+        var offset = offsetValue === undefined ? 0 : integer(offsetValue);
+        var sourceLength = source.guestType === "array" ?
+            this.runtime.arrayLength(source) : this.viewLength(source);
+        if (offset < 0 || offset + sourceLength > this.viewLength(target)) {
+            throw new RangeError("typed array set exceeds target");
+        }
+        /* Snapshot first: source and target may overlap in either direction. */
+        var values = [];
+        var index = 0;
+        while (index < sourceLength) {
+            values[index] = source.guestType === "array" ?
+                this.runtime.arrayGet(source, index) :
+                (source.guestType === "buffer" ?
+                 this.runtime.bufferSupport.read(source, index) : this.read(source, index));
+            index++;
+        }
+        index = 0;
+        while (index < sourceLength) this.write(target, offset + index, values[index++]);
+    };
+
+    TypedArraySupport.prototype.getArrayBuffer = function (view) {
+        var address = this.runtime.heapRecords.bufferBackingMetadata(
+            this.viewBacking(view));
+        return this.runtime.readHeapReference(address);
+    };
+
+    TypedArraySupport.prototype.getProperty = function (view, key) {
+        if (key === "length" && view.guestType === "typedArray") return this.viewLength(view);
+        if (key === "byteLength") {
+            return view.guestType === "arrayBuffer" ? this.viewLength(view) :
+                this.viewLength(view) * this.description(view).bytes;
+        }
+        if (key === "byteOffset") return view.guestType === "arrayBuffer" ? 0 : this.viewOffset(view);
+        if (key === "buffer" && view.guestType === "typedArray") return this.getArrayBuffer(view);
+        if (key === "BYTES_PER_ELEMENT" && view.guestType === "typedArray") {
+            return this.description(view).bytes;
+        }
+        var index = canonicalIndex(key);
+        if (index >= 0 && view.guestType === "typedArray") return this.read(view, index);
+        var property = this.runtime.heapOwnProperty(view, key, false);
+        if (property) return this.runtime.readPropertyEntry(view, property, view);
+        var prototype = view.guestType === "arrayBuffer" ?
+            this.arrayBufferPrototype : this.prototypes[this.viewKind(view)];
+        return this.runtime.getProperty(prototype, key, view);
+    };
+
+    TypedArraySupport.prototype.setProperty = function (view, key, value) {
+        var index = canonicalIndex(key);
+        if (index >= 0 && view.guestType === "typedArray") return this.write(view, index, value);
+        if (key === "length" || key === "byteLength" || key === "byteOffset" || key === "buffer") {
+            return value;
+        }
+        return this.runtime.setNamedProperty(view, String(key), value);
+    };
+
+    TypedArraySupport.prototype.markView = function (view, generation) {
+        this.runtime.linearHeap.setMark(this.viewBacking(view), generation);
+        var metadata = this.runtime.heapRecords.bufferBackingMetadata(this.viewBacking(view));
+        if (metadata) this.runtime.linearHeap.setMark(metadata, generation);
+    };
+
+    root.GuestVMTypedArraySupport = TypedArraySupport;
+    if (typeof module !== "undefined" && module.exports) module.exports = TypedArraySupport;
+}(this));

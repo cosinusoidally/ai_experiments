@@ -1,0 +1,60 @@
+/* Public guest-VM bootstrap. Shell embedders load this file once; CommonJS
+ * embedders may require it as the package-free entry point. */
+(function (root) {
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = require("./vm.js");
+        return;
+    }
+
+    if (typeof root.GuestVM === "undefined") {
+        load("guest_vm/unicode_identifier_data.js");
+        load("guest_vm/tokenizer.js");
+        load("guest_vm/parser.js");
+        load("guest_vm/bytecode.js");
+        load("guest_vm/register_allocator.js");
+        load("guest_vm/bytecode_optimizer.js");
+        load("guest_vm/native_intrinsics.js");
+        load("guest_vm/function_analysis.js");
+        load("guest_vm/compiler.js");
+        load("guest_vm/verifier.js");
+        load("guest_vm/host_ffi.js");
+        load("guest_vm/byte_search_kernel.js");
+        load("guest_vm/host_memory.js");
+        load("guest_vm/binary64.js");
+        load("guest_vm/number_format_kernel.js");
+        load("guest_vm/linear_memory.js");
+        load("guest_vm/heap.js");
+        load("guest_vm/value_cell.js");
+        load("guest_vm/program_debug_layout.js");
+        load("guest_vm/heap_records.js");
+        load("guest_vm/native_free_index_kernel.js");
+        load("guest_vm/property_storage_kernel.js");
+        load("guest_vm/indexed_view_policy.js");
+        load("guest_vm/property_semantics_kernel.js");
+        load("guest_vm/string_key_kernel.js");
+        load("guest_vm/object_operations_kernel.js");
+        load("guest_vm/memory_transfer_kernel.js");
+        load("guest_vm/lexical_environment_kernel.js");
+        load("guest_vm/aot/kernel_slots.js");
+        load("guest_vm/aot/kernel_compiler.js");
+        load("guest_vm/aot/backend_js.js");
+        load("guest_vm/aot/x86_assembler.js");
+        load("guest_vm/aot/snapshot_output.js");
+        load("guest_vm/aot/standalone_format.js");
+        load("guest_vm/aot/backend_x86.js");
+        load("guest_vm/aot/record_initializer.js");
+        load("guest_vm/aot/free_index_kernel.js");
+        load("guest_vm/aot/heap_sweeper.js");
+        load("guest_vm/aot/bytecode_numeric_backend.js");
+        load("guest_vm/aot/native_interpreter.js");
+        load("guest_vm/threaded_compiler.js");
+        load("guest_vm/buffer.js");
+        load("guest_vm/typed_array.js");
+        load("guest_vm/json.js");
+        load("guest_vm/date.js");
+        load("guest_vm/error.js");
+        load("guest_vm/runtime.js");
+        load("guest_vm/interpreter.js");
+        load("guest_vm/vm.js");
+    }
+}(this));

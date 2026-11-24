@@ -16,3 +16,5 @@
 !/postscript_cc/artifacts/placeholder
 /cpp_test/artifacts/*
 !/cpp_test/artifacts/placeholder
+/mmvm_v2_tests/artifacts/*
+!/mmvm_v2_tests/artifacts/placeholder

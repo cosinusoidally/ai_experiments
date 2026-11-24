@@ -1,0 +1,996 @@
+# Octane guest-VM bring-up and performance approach
+
+Mandreel follow-up, 2026-11-15: **fixed in `6b89c2a`**. Its loading failure was
+compiler source-location storage requiring a large contiguous guest vector.
+Paged statement boundaries preserve diagnostics without changing the 512 MiB
+cap. Full stock Mandreel retest passes, aggregate **346**, **129.83 s**,
+exit zero. Node/js_min core, full Linux Test262 (3292/3292), GC, eight demos,
+three servers, Linux/Windows shell integration and self-build identity pass.
+Matched fresh-process Richards/PdfJS/CodeLoad scores are **84.7/727/91.6**
+versus control **85.3/678/89.8**; individual pairs, not an all-suite speedup.
+See [the follow-up validation](LINUX_ECMA_OCTANE_2026-11-15.md#post-fix-validation-6b89c2a).
+The full fifteen-suite sweep below is the pre-fix audit; it was not repeated.
+
+Latest full Linux executable sweep, 2026-11-15 (VM sources `5163ff6`):
+**14/15 suites pass; Mandreel regressed with an allocation failure during
+source loading at the unchanged 512 MiB heap maximum**. Every suite was
+attempted; no watchdog expiry or skip. The fourteen passing score ratios
+have geometric mean +2.44% versus the November 14 sweep, but this is not an
+all-suite improvement because Mandreel now fails. PdfJS is 5.95% lower in
+the individual observations. Complete scores/time/RSS, failure diagnostic
+and next investigation are in [the current Linux audit](LINUX_ECMA_OCTANE_2026-11-15.md).
+
+Previous all-passing executable sweep, 2026-11-14 (`fa4b98f`, including Penguin fix
+`3dd1363`): **15/15 stock suites pass**, including RegExp and Mandreel, each
+in a separate serial process with correctness checks enabled. Current scores,
+timing/RSS and both historical launcher baselines are in
+[the serial performance audit](PERFORMANCE_AUDIT_2026-11-14.md). Geometric mean
+is +1.31% against the preceding full sweep, but -9.71% against the November 13
+executable scores; the older regression is unresolved. These are historical
+single observations, not isolated attribution experiments.
+
+Previous full audit, 2026-11-13: **all 15 stock suites pass under both js_runner
+and the packaged executable**, including Mandreel and RegExp. Full current
+scores, elapsed times, executable RSS and comparisons with the November 12
+archive are in [the full VM validation report](FULL_VALIDATION_2026-11-13.md).
+The dated bring-up entries below are historical, not the current failing set.
+
+## Objective
+
+### 2026-10-31 follow-up: Typescript stock pass
+
+The unchanged Typescript benchmark now passes standalone stock validation:
+latest score **1003**, wall **138.73 s**, peak RSS **437468 KiB**; fresh
+Node --jitless score **10428**, wall **12.42 s**, peak RSS **218124 KiB**.
+The earlier checkpoint scored 889 with 532060 KiB peak RSS. General
+fixes expose module search paths, install locale case methods on the existing
+case intrinsics, and handle signed ordinary-object property names without a
+host transition. There are now fourteen known stock-passing suites; Mandreel
+remains unresolved. This is a follow-up, not a new full fifteen-suite sweep.
+See [Typescript bring-up and validation](guest_vm/TYPESCRIPT_BRINGUP.md).
+
+### 2026-10-31 follow-up: PdfJS stock pass
+
+PdfJS now passes its unchanged stock canvas-log length/hash checks under
+standalone js_runner. In the fresh complete sweep it scores **776**,
+wall **19.45 s**, peak RSS **254752 KiB**. Earlier checkpoints scored
+800, 813 and 738; these remain historical observations, not the current
+comparison. All fifteen suites were attempted serially: **13 pass / 2 fail /
+0 timeout / 0 crash / 0 skip**. Node v24.14.1 with `--jitless` passes all
+fifteen. Mandreel reaches an allocation failure; Typescript requires the
+unimplemented platform module `module`. See the
+[complete October 31 jitless comparison](OCTANE_COMPARISON_2026-10-31.md)
+for every score, resource measurement and exact failure diagnostics.
+
+The fixes are general guest operations: typed-view byte metadata/copying,
+guest forEach/trim, heap-backed bound calls, native own-key enumeration,
+heap-owned lexical binding names/dynamic reads, primitive ownership checks
+and primitive joins. A stock-only bind cache/representation crash was found
+and fixed before recording the pass. Hosted i386 GC validation also exposed
+and fixed blanket rooting of guest-created native callables; host callbacks
+now use an explicit heap-linked root list. See
+[PdfJS implementation and validation](guest_vm/PDFJS_BRINGUP.md).
+
+### 2026-10-30 follow-up: CodeLoad stock pass
+
+CodeLoad now passes both unchanged Closure/jQuery workloads under standalone
+js_runner. Initial stock score 96.4; the final validated image scores
+**104**, **28.60 s**, **393,600 KiB peak RSS**. All eleven
+previous standalone passes still pass quick correctness, including RegExp.
+This is a CodeLoad stock follow-up plus regression checks, not a new complete
+stock sweep. The working set of passing suites is now twelve; PdfJS,
+Mandreel and Typescript remain unresolved. See
+[CodeLoad implementation and validation](guest_vm/CODELOAD_BRINGUP.md).
+The complete Test262 rerun passes all 3,292 tests after fixing the two
+intermediate literal-definition regressions. Node, js_min and self-hosted
+snapshot outputs again compare byte-identically.
+
+### 2026-10-30: complete stock sweep including RegExp and Mandreel
+
+Latest full standalone result: **11 passed / 4 failed / 0 timed out /
+0 crashed / 0 skipped**, all 15 suites attempted in fresh serial processes.
+The current Node v24.14.1 default-JIT reference passes all 15. All ten
+previous standalone passes remain passing; RegExp additionally passes stock
+correctness with score **2.66** in **618.63 s**. PdfJS, Mandreel, CodeLoad
+and Typescript remain failing. Mandreel now takes **629.95 s** to reach its
+allocation failure, versus 63.38 s previously; this is a negative result,
+not a benchmark improvement.
+
+Current stock scores are Richards 98.5, DeltaBlue 91.1, Crypto 190,
+RayTrace 247, EarleyBoyer 445, RegExp 2.66, Splay 669 combined,
+NavierStokes 281, Gameboy 1051, Box2D 376 and zlib 588. zlib peak RSS is
+115,968 KiB; EarleyBoyer peak RSS is higher than in the previous sweep.
+No engine or external benchmark changes were made for these measurements.
+See [the complete October 30 comparison](OCTANE_SCORES_2026-10-30.md) for
+Node score ratios, historical changes, memory/timing data, exact image
+identity and failure diagnostics. Older entries below remain historical.
+
+### 2026-10-27 evening: large-backing memory follow-up
+
+The general native Buffer/ArrayBuffer allocator now uses GC-owned calloc
+storage for large backings, while retaining canonical inline snapshots.
+Uninstrumented stock zlib passes at **133,888 KiB peak RSS**, versus
+263,424 KiB before, approximately 49% lower. That run scores 501 in
+305.42 s; the earlier stock result is 560 in 273.53 s, so it is not presented
+as a speedup. A subsequent serial old/new quick-correctness pair measures
+48.10/46.91 s, and the final-image quick run passes in 44.85 s at 132,480 KiB.
+All ten previously working suites pass final-image quick correctness. This
+is not another full 14-suite stock sweep, and it does not resolve the other
+four suites. No benchmark/demos were modified. Full ownership design,
+memory limitations and regression/build validation are in
+[OCTANE_MEMORY.md](OCTANE_MEMORY.md).
+
+### 2026-10-27: complete current standalone stock sweep
+
+The fresh 14-suite `js_runner` sweep is complete: **10 passed, four failed,
+zero timed out, zero crashed**. RegExp remains excluded at the user's request.
+Current scores are Richards 99.5, DeltaBlue 90.3, Crypto 183, RayTrace 234,
+EarleyBoyer 442, Splay 703 (combined throughput/latency), NavierStokes 272,
+Gameboy 995, Box2D 311 and zlib 560. PdfJS, Mandreel, CodeLoad and Typescript
+still fail without scores. All eight suites that passed the October 22 stock
+sweep still pass, plus Box2D and Gameboy. Full timings, image identity and
+failure diagnostics are recorded in
+[OCTANE_SCORES_2026-10-27.md](OCTANE_SCORES_2026-10-27.md).
+No Node comparison was rerun. The following milestone text retains the
+earlier individual measurements and regression checks as history.
+
+### 2026-10-27: Box2D and Gameboy stock passes
+
+Before the complete sweep above, the October 22 stock results were the last
+complete stock sweep.
+Box2D now completes both unchanged standalone quick correctness and a full
+stock run: **score 315, 18.47 s elapsed, 143,872 KiB peak RSS**. This follows
+native configurable accessor-descriptor updates, numeric `parseInt`, unary
+numeric conversion and guarded default object relational conversion were
+implemented. Final-image stock checks report **Box2D 316, 18.45 s,
+134,016 KiB peak RSS**, and **Gameboy 1060, 15.03 s, 116,864 KiB peak RSS**,
+including Gameboy's unchanged processor-state comparison. The preceding
+Gameboy run scored 1042 in 15.50 s; these single-run differences are not
+presented as an optimization result.
+Mandreel is deferred at the user's request. These are individual follow-up
+stock runs, not a repeat of the entire October 22 stock sweep.
+
+Gameboy exposed sloppy writes to string `length`, dynamic Function construction
+and bitwise coercion. Dynamic Function compilation now enters the guest-owned
+parser/compiler through a native continuation, with the resulting callable
+assigned to the caller's realm. It does not ask the bootstrap host to compile
+the body. Standalone diagnostics now include collection count, last live-byte
+count and allocator tail/limit/maximum, using named engine layout fields.
+Float32 indexed loads/stores now use the shared compiler's binary32 memory
+operations and named x87 macros. Typed-array subarrays retain their backing,
+element-sized byte offset and prototype. `Array.isArray` is native. JSON's
+existing parser/serializer is shared between the embedding representation and
+ordinary guest values; the standalone image installs guest-bytecode JSON
+entry points rather than retaining host callbacks.
+
+Mandreel's 5 MB input exposed compiler allocation pressure at the existing
+512 MiB guest-heap ceiling (not an absent CALL opcode). Before lifetime
+changes, a stopped run reported 312,181,432 live bytes; consuming parser-owned
+function AST bodies reduced that to 287,450,552 at a subsequent allocation
+failure, but did not by itself complete the workload. The structured backend
+and public non-consuming compile API retain their ASTs. The self-hosted
+executable closure now releases its temporary program descriptor after adoption.
+An experimental 3/2 growth policy still failed to complete Mandreel, so it was
+not retained. Host and kernel now share the existing doubling policy with
+overflow validation. The heap ceiling has not been increased. No external
+benchmark or demo sources were modified.
+
+The ordinary Node-hosted project suite passes 270 guest assertions. All eight
+previous standalone Octane passes also pass quick correctness again; zlib took
+45.78 s versus 45.41 s at the preceding checkpoint (single runs, not a speedup
+claim). The final image repeats all eight quick passes (zlib 43.84 s) and
+passes 24 bounded GC rounds with 47 automatic native collections. The 12
+selected external JSON files pass 908 assertions under stock Node, our codec
+in Node, the js_min-hosted guest, and standalone execution; see
+[JSON_CHECKS.md](JSON_CHECKS.md).
+The js_min project/CLI/context checks passed in 142.75 s. Executable
+contract 61 is independent of bytecode-layout contract 60, so native kernel
+changes can invalidate old images without changing the layout version or
+fingerprinting sources at load time.
+
+Final regression checkpoint (2026-10-27):
+
+- The complete Test262 authored-program run reports **3,139 pass, 153 fail,
+  zero not run**. A serial control run of revision `81d1545` has exactly the
+  same failing IDs and strict/sloppy variants, not merely matching totals.
+  See [TEST262_STATUS.md](TEST262_STATUS.md) for timings and known limitations.
+- Node and js_min project suites pass 270 guest assertions. The final lexical
+  constant cleanup preserves all 395,307 native interpreter machine-code bytes;
+  Node checks, both stock benchmarks, bounded standalone GC and compiler
+  dependency integration were repeated after that cleanup.
+- Node, js_min and genuine self-hosted builds produce byte-identical images.
+  The final js_min build took 89.20 s and the self-hosted build 88.30 s.
+  Self-hosting really recompiles the sources; it does not copy the input image.
+- The bounded embedding GC check completes 24 rounds, 67 collections and 27
+  structural audits, including 221 property-index audits. The standalone check
+  completes 24 rounds and 47 collections. An independent reachable-heap audit
+  finds 29,069 records and zero missing marks.
+- Demos 1 through 7 were exercised in live X11 windows. Demo8 was exercised in
+  garage and auto-drive modes, with screenshots inspected, followed by a clean
+  menu exit. These are bounded integration checks, not long-duration stability
+  or sustained-20-FPS claims: observed garage/auto-drive periods were about
+  16.9/19.0 FPS at 320x240.
+- Both libc `net.js` and `node_web.js` serve text, byte-identical binary data,
+  directory listings and default index files through the standalone image.
+  Native-compiler dependency checks pass under Node, raw js_min and standalone
+  guest execution. Demo and external test sources remain unchanged.
+
+The full js_min suite, Test262 comparison and GUI checks preceded the final
+lexical-only kernel cleanup; the unchanged emitted interpreter bytes and the
+repeated checks above distinguish that cleanup from a fresh full-suite rerun.
+Measurements are serial, single-run observations, not statistical performance
+claims. JSON remains deliberately bounded rather than a claim of complete
+ES5.1 JSON conformance.
+
+Post-reboot recheck (2026-10-27, source revision `713cfbe`):
+
+- Standalone GC stress passes again: 24 rounds and 47 automatic native
+  collections. The instrumented js_min check also passes: 67 embedding
+  collections, 27 structural audits, 71,981 checked edges and 221
+  property-index audits, with an 8 MiB guest-heap cap and a maximum observed
+  bump of 395,632 bytes. Its workload/check phase took 31,469 ms.
+- `sh guest_vm/tests/run_standalone_snapshot_test.sh both` passes in
+  285.97 s total (281.39 s user, 2.87 s system). It builds two js_min images
+  under different environments/program arguments, compares a Node-built
+  image, checks hello/alternate programs and launch-time environment values,
+  then genuinely recompiles under the standalone image and compares that
+  output byte-for-byte. All comparisons pass. Tests ran serially.
+
+Latest paired stock comparison (historical Node baseline):
+[2026-10-22 standalone versus Node](OCTANE_COMPARISON_2026-10-22.md).
+Including the two follow-up passes above, ten of the 14 requested suites now
+have confirmed standalone stock passes. PdfJS, Mandreel, CodeLoad and
+Typescript remain unresolved. RegExp was excluded explicitly by the user.
+There is still no complete guest Octane score, and earlier scores have not
+been presented as newly measured results.
+
+The external Octane 2.0 checkout is a demanding integration workload for the
+ES5.1 guest VM. The immediate goal is to execute every suite correctly. Once
+that is true, its stock score will help guide improvements to general-purpose
+guest JavaScript performance.
+
+The longer-term architectural goal remains a VM whose guest heap, bytecode
+execution, language semantics, garbage collector, and native services are
+independent of the bootstrap host. On MMVM, ordinary execution should stay in
+the native interpreter and use the guest's native service/FFI boundary. The
+Node backend must implement the same observable VM using the shared front and
+middle ends, although Node necessarily remains the low-level execution host.
+
+## External test tree
+
+Octane is expected at `../../js_tests/octane`, relative to
+`mmvm_v2_tests`. That external tree is read-only for this work. The checked-in
+`octane_runner.js` loads the original files in place and contains the selection
+and reporting logic needed by the guest VM. It must never copy, rewrite, or
+patch an Octane source file.
+
+The normal form for an individual stock run is:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe \
+  guest_runner.js --vm-native octane_runner.js Richards
+```
+
+The same unmodified wrapper can run from a generic standalone image:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap octane_runner.js Richards
+```
+
+The snapshot must have been generated from the current interpreter sources.
+It contains the initialized VM and native interpreter, not an Octane program;
+`octane_runner.js` and the selected external suite are read and compiled after
+launch. `--quick` has the same correctness-only meaning on both paths.
+
+Passing `all` selects every suite. With no suite argument, all suites are also
+selected. `--quick` changes each loaded benchmark to one deterministic,
+non-warmup iteration. This mode is only a bring-up and correctness diagnostic;
+it does not produce or claim an Octane score. A suite counts as fully working
+only after its original, stock timing and warmup configuration completes with
+all of its own validation checks enabled.
+
+## Correctness sequence
+
+### Reproducible standalone / Node comparison
+
+`octane_node_runner.js` supplies only the shell-style `load`, `print`, and
+argument globals needed to run the existing wrapper directly on Node. It
+uses builtin `fs`/`vm` APIs, no npm packages and no guest interpreter.
+
+`octane_compare.js` supervises separate processes sequentially: first all 15
+Node reference suites, then all 15 standalone guest suites. Node is needed
+for this comparison harness, not as an implementation dependency of the
+standalone guest. Both engines execute the same external sources via the
+same stock wrapper. The guest command is simply
+`js_runner.exe snapshot octane_runner.js SUITE`.
+
+```sh
+# Build the small existing launcher and a generic image from current sources.
+gcc -ansi -m32 js_runner.c -o artifacts/js_runner.exe -ldl
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js --vm-native \
+  --snapshot artifacts/octane-comparison.snap
+
+# Select the Node binary to compare by using it to start the supervisor.
+node octane_compare.js --snapshot artifacts/octane-comparison.snap \
+  --output artifacts/octane-comparison-run --timeout 900
+
+# Deliberately omit a suite on both engines when requested.
+node octane_compare.js --snapshot artifacts/octane-comparison.snap \
+  --output artifacts/octane-comparison-without-regexp --exclude RegExp
+
+# An individual direct reference run uses exactly the same wrapper.
+node octane_node_runner.js zlib
+```
+
+The output directory must be new and below ignored `artifacts/`. Incremental
+`results.json` and per-process logs retain status, score, exit code, wall and
+CPU times, peak RSS, timestamps, platform, and the snapshot hash. GNU `time`
+and `timeout` are required. Core dumps are disabled for benchmark children.
+One child benchmark runs at a time; a failed suite does not stop later suites.
+An i386 execution/sandbox failure stops the sweep instead of invoking an
+emulation workaround.
+
+Only exit-zero runs that emit a stock score count as passes. Timeouts and
+semantic exits do not receive scores. Compare Node/guest stock score ratios
+for performance: adaptive stock suites can execute different repetition
+counts, so total process wall-time ratios are not normalized throughput ratios.
+Splay's suite score includes its latency component. Single runs are useful
+baselines, not statistically stable cross-machine performance claims.
+Explicit `--exclude` names are retained in the result metadata and are never
+silently counted as passes, failures, or completed benchmark measurements.
+
+Suites are brought up individually in their original order. For each failure:
+
+1. Reproduce the smallest relevant language-level behaviour without modifying
+   the external suite.
+2. Decide whether the failure is missing ES5.1 semantics, a VM correctness
+   defect, exhausted guest resources, or unsupported host-facing behaviour.
+3. Implement the general VM facility at its proper layer. Add coverage to an
+   existing high-level language, embedding, heap, or compiler test when that
+   protects a meaningful contract.
+4. Run the complete Node-hosted and js_min-hosted guest test suites.
+5. Recheck already-working Octane suites and the existing demo smoke tests
+   before committing a stable milestone.
+
+The original Octane assertions, checksums, and error paths remain authoritative.
+Completing a script or printing a timing is not by itself a pass.
+
+## Performance policy
+
+No optimization may recognize an Octane suite, benchmark function, source
+string, filename, constant, or call site. There will be no benchmark-specific
+bytecode, intrinsic, native helper, precomputed answer, source rewrite, or
+special allocation policy.
+
+Profiling data is used to identify general costs such as:
+
+- bytecode dispatch and operand decoding;
+- guest property lookup, shapes, prototypes, and inline caches;
+- calls, frames, closures, and lexical environments;
+- numeric representation and integer/binary64 operations;
+- arrays, strings, regular expressions, and typed-array-like storage;
+- allocation rate, tracing, collection, and heap growth;
+- semantic exits from the native interpreter;
+- compilation, program registration, and startup work;
+- native service and FFI transitions.
+
+Improvements should make the underlying operation faster for arbitrary guest
+programs and should normally be expressed in the kernel dialect, shared IR,
+heap-record accessors, or reusable runtime data structures. Named record-field
+accessors remain mandatory; raw offset arithmetic must not spread through the
+interpreter. Native code must be produced through the JavaScript macro
+assembler rather than embedded instruction blobs.
+
+The shared front and middle ends remain the semantic authority for both
+backends. Where a fast native implementation is introduced, the Node backend
+gets the corresponding general implementation and equivalence coverage. Work
+should progressively remove dependence on host objects and callbacks rather
+than making a fast path that only functions because SpiderMonkey owns part of
+the guest state.
+
+## Measurements and regression gates
+
+Before score optimization, record stock per-suite time and score plus native
+interpreter profile data. Compare changes at the same host, snapshot mode,
+suite selection, and build. Startup/compilation time and measured benchmark
+time are reported separately.
+
+An improvement is accepted only if:
+
+- all previously passing guest language, buffer, heap, embedding, compiler,
+  networking, and context tests still pass under Node and js_min;
+- already-working Octane suites retain correctness;
+- the existing demo command paths continue to compile and run correctly;
+- representative interactive demos do not lose frame rate or stability; and
+- Node-hosted guest performance is not needlessly regressed by an MMVM-native
+  optimization.
+
+Octane score work begins only after all suites complete correctly with stock
+settings. Optimization commits should state the affected general mechanism,
+the before/after measurements, and the regression checks performed.
+
+Regular-expression work is intentionally demand-driven during the remaining
+suite bring-up. If another benchmark depends on a RegExp feature, that feature
+must be correct and reasonably implemented in the guest VM. A highly tuned
+standalone RegExp benchmark is not an immediate milestone; broader bytecode,
+object, string, allocation, and self-hosting bottlenecks take priority.
+
+## Bring-up status
+
+### PdfJS native-semantics checkpoint, 2026-09-28
+
+PdfJS now completes the self-hosted source read/compile stage and executes the
+benchmark body. A standalone profiled run measured approximately 2.96 seconds
+to read and 23.09 seconds to compile `pdfjs.js`, followed by about 0.11 seconds
+for its top-level initialization. These are uncached operations performed by
+the guest frontend after the generic snapshot starts.
+
+The bring-up exposed and corrected several general guest-runtime defects:
+
+- native string uppercase IDs were incorrectly classified as typed-array
+  constructor IDs by an open-ended arity range;
+- arithmetic coercion converted already-numeric integer subtraction operands
+  to doubles, breaking integer bytecode indices emitted by the self-hosted
+  compiler;
+- `in` did not recognize exact integral values stored with the double tag;
+- typed-array `.buffer` was present only on the hosted semantic path, so a
+  standalone `new Uint8Array(existingView.buffer)` received `undefined`; and
+- expanding an array to a high index created explicit `undefined` values in
+  intervening slots rather than absent holes, making `index in array` report
+  false cache entries as present.
+
+After these fixes the hosted native path reaches PdfJS's Octane result check in
+approximately 66.0 seconds at about 312 MiB peak RSS. It does not yet pass:
+PdfJS reports `Unknown command "eq"`, then produces `6 1694498816` instead of
+the expected `36788 939524096`. The next task is to identify that remaining
+rendering-semantic discrepancy. No score is recorded for PdfJS until its stock
+validation succeeds.
+
+Regression status at this checkpoint:
+
+- Node and i386 js_min guest suites: 12 programs, 266 assertions, pass;
+- guest hello, net.js, node_web.js, demo1, demo2, and three-context paths:
+  pass;
+- program-independent standalone snapshot and byte-identical fixed point:
+  pass; and
+- unchanged demos 1 through 8: live native-guest X11 smoke pass at 64x64.
+
+### Complete standalone stock sweep, 2026-09-27
+
+All 15 Octane 2.0 suites were run individually through the generic standalone
+image on 2026-09-27 between approximately 10:51 and 11:23 BST. This is the
+first complete stock sweep that records standalone scores rather than carrying
+forward scores from the js_min-hosted guest path.
+
+The measured revision and image were:
+
+- repository commit: `5956d6957a875d0fcbe5c9609f17ea081fa08ddf`;
+- snapshot size: 16,437,872 bytes, non-sparse;
+- snapshot SHA-256:
+  `c21fad71ac9743810d11bc74629607c25ed179936eb255bf2bd1ded5ebb6267d`;
+- host: Linux 6.8.0-138-generic on a QEMU Virtual CPU version 2.5+; and
+- limit: 900 wall-clock seconds per stock suite.
+
+The stock command shape was:
+
+```sh
+/usr/bin/time -f \
+  'wall=%e user=%U sys=%S maxrss_kib=%M exit=%x' \
+  timeout --signal=TERM --kill-after=10s 900 \
+  ./artifacts/js_runner.exe artifacts/snap octane_runner.js SUITE
+```
+
+The complete stock result is 4 passing/scored suites, 2 timeouts, 1 native
+crash, and 8 standalone semantic exits. There is no valid aggregate Octane
+score because all suites must finish successfully before the harness may
+produce one.
+
+| Suite | Current standalone stock status | Score | Wall time | Peak RSS |
+| --- | --- | ---: | ---: | ---: |
+| Richards | pass | 77.5 | 3.52 s | 39,552 KiB |
+| DeltaBlue | pass | 83.9 | 4.92 s | 62,208 KiB |
+| Crypto | pass | 125 | 33.53 s | 60,544 KiB |
+| RayTrace | `SIGSEGV` after entering the benchmark | — | 3.02 s | 106,368 KiB |
+| EarleyBoyer | timed out; no validation result | — | 900.00 s | 77,952 KiB |
+| RegExp | timed out; no validation result | — | 900.03 s | 541,568 KiB |
+| Splay | standalone semantic exit, status 70 | — | 0.50 s | 38,400 KiB |
+| NavierStokes | pass | 236 | 11.83 s | 43,776 KiB |
+| PdfJS | semantic exit during load/initialization, status 70 | — | 2.95 s | 42,880 KiB |
+| Mandreel | semantic exit during load/initialization, status 70 | — | 8.36 s | 54,016 KiB |
+| Gameboy | semantic exit during load/initialization, status 70 | — | 1.99 s | 47,488 KiB |
+| CodeLoad | standalone semantic exit after benchmark entry, status 70 | — | 0.67 s | 41,472 KiB |
+| Box2D | semantic exit during load/initialization, status 70 | — | 6.48 s | 99,584 KiB |
+| zlib | standalone semantic exit after benchmark entry, status 70 | — | 12.00 s | 100,736 KiB |
+| Typescript | semantic exit during load/initialization, status 70 | — | 8.12 s | 88,704 KiB |
+
+Every non-scoring suite was subsequently rerun with one deterministic
+iteration and no warmup by placing `--quick` after `octane_runner.js`. A quick
+run deliberately produces no Octane score. It exists only to separate a stock
+repetition/performance failure from failure of the benchmark's basic
+correctness path.
+
+- RayTrace passes quick correctness in 1.05 seconds at 70,016 KiB peak RSS.
+  Its stock crash is therefore repetition, lifecycle, or collection related,
+  rather than a failure of its first deterministic result.
+- EarleyBoyer passes quick correctness in 6.51 seconds at 85,376 KiB peak RSS.
+  Its current stock limitation is throughput.
+- RegExp passes quick correctness in 114.84 seconds at 317,440 KiB peak RSS.
+  Its stock run remains both too slow and memory intensive: it reaches the
+  900-second ceiling and peaks at approximately 529 MiB.
+- Splay, PdfJS, Mandreel, Gameboy, CodeLoad, Box2D, zlib, and Typescript all
+  reproduce standalone status 70 in quick mode. They are not current
+  standalone correctness passes.
+
+The `--vm-profile` standalone option also returned status 70 before loading
+each diagnostic program in this image, so it could not identify the operation
+behind the semantic exits. The statuses above consequently do not claim a
+more specific cause than the output establishes.
+
+This yields a secondary quick-correctness summary of 7/15 passing: the four
+stock-scored suites plus RayTrace, EarleyBoyer, and RegExp. Quick correctness
+does not promote the latter three to stock passes and is never used as an
+Octane score.
+
+### Post-sweep progress, 2026-09-27
+
+Commit `82d1da7` removes Splay's first standalone semantic exit by sharing the
+native number-to-string formatter with `String(number)`. More importantly, the
+self-hosted collector now grows its logical limit when a collection shows that
+live records occupy at least two thirds of the current limit. Previously it
+could rescan an approximately 100 MiB mostly-live graph after every 1 MiB of
+new allocation.
+
+With the unchanged external suite and a newly generated generic image:
+
+- Splay quick correctness fell from more than 180 seconds to 2.12 seconds;
+- stock Splay passed in 4.28 seconds with score 784 (`Splay` 484 and
+  `SplayLatency` 1272) and 375,808 KiB peak RSS;
+- RayTrace no longer segfaulted after three seconds and retained its quick
+  correctness pass, although stock execution still exceeded a separate
+  180-second diagnostic ceiling; and
+- Richards, DeltaBlue, Crypto, and NavierStokes retained stock passes, with
+  observed scores of 79.6, 85.2, 124, and 227 respectively.
+
+The Splay result increases the current standalone stock total to 5/15. The
+remaining work deliberately excludes tuning the RegExp benchmark itself;
+regular-expression functionality will still be completed or improved where a
+different suite depends on it.
+
+### Earlier bring-up history
+
+Standalone-snapshot validation is tracked independently from the older
+js_min-hosted baselines below. At the 2026-09-25 checkpoint, Richards,
+DeltaBlue, Crypto, RayTrace, EarleyBoyer, and NavierStokes passed quick
+correctness through `js_runner.exe`. zlib compiled its wrapper and 185 KiB
+generated-data source, then exposed a native semantic exit after its benchmark
+began. This distinction prevents a host-assisted pass from being reported as
+self-hosted execution.
+
+Richards standalone bring-up added general native facilities for
+`Array.prototype.indexOf`, `Math.log`, `Number.prototype.toPrecision`, Date
+construction, and Date-to-number arithmetic. The generic source runner now
+instantiates top-level declarations before adopted bytecode begins, matching
+ordinary script entry. Platform services are an explicit compiled-interpreter
+parameter; the standalone bootstrap and js_min entry use the same ABI.
+Subsequent bring-up added guest-native ES5 property definition, number
+formatting, random numbers, string-to-number coercion, primitive receiver
+boxing, boxed-string methods, object construction, and `Array.prototype.splice`.
+The splice implementation also removed the last host dependency encountered by
+the self-hosted front end while compiling EarleyBoyer.
+
+The next standalone bring-up stage moved the initialization operations used by
+zlib into the same compiled interpreter: Boolean conversion, `Date.now`, array
+reversal, URI-component encoding, Annex B unescaping, typed-array bulk set,
+and ArrayBuffer/typed-array construction. Typed views are not host objects:
+the constructor allocates a guest backing record, a guest ArrayBuffer view,
+and a guest typed view, and obtains their prototypes from rooted, named runtime
+support slots. Length, ordinary-array-copy, and shared-ArrayBuffer forms are
+covered by the standalone integration path. In a fresh 15-second execution
+profile after initialization, zlib passed one million interpreted bytecodes
+without typed-array constructor or set callbacks. It has not yet been promoted
+to a standalone quick-correctness pass; remaining exits are being handled as
+general VM facilities.
+
+ES5 bracket indexing on strings is also handled directly by the compiled
+interpreter. Latin-1 results reuse the rooted one-character table, while other
+UTF-16 code units allocate a one-character guest string. This removed zlib's
+three numeric string-property exits; a repeat initialization profile fell from
+23 semantic exits to 20 without changing the external benchmark source.
+
+The first standalone zlib front-end baseline took 151.8 seconds and peaked at
+540.8 MiB RSS. The source contains one large generated string split by regular
+backslash line continuations. Once the tokenizer encountered the first escape,
+its slow path appended every subsequent ordinary character to an immutable
+prefix, making decoding quadratic. The general string scanner now advances
+over ordinary runs directly, records decoded fragments, and combines them in
+a balanced reduction. Compiling the same unchanged 185 KiB file through the
+self-hosted front end now takes 19.2 seconds and peaks at 136.4 MiB, including
+native-interpreter compilation and front-end module loading. No parsed result
+or source-specific cache is involved.
+
+The faster path exposed a collector stability bug during the first full zlib
+iteration. A host-triggered native collection rooted the string-support vector
+explicitly but relied on structural discovery for the engine state and its
+platform-service child. The service record was reclaimed and reused as an
+ordinary object; `Number.prototype.toFixed` later read `0x1` from the former
+`snprintf` slot. Both authoritative records are now explicit roots. The
+unchanged quick-correctness run completes with the original checksum in 75.2
+seconds at 305.5 MiB peak RSS.
+
+The following baselines include native-interpreter compilation and process
+startup in the wall-clock time. They are not directly comparable with the
+score's internal benchmark interval.
+
+| Suite | Stock correctness | Score | Total wall time | Notes |
+| --- | --- | ---: | ---: | --- |
+| Richards | passing | 76.4 | 15.36 s | Native loose equality reduced a quick run to about 40 semantic exits. |
+| DeltaBlue | passing | 116 | 15.45 s | Native `Function.call`, `Array.pop`, and `Array` construction reduced a quick run from 2,912 semantic exits to 40. |
+| Crypto | passing | 129 | 48.02 s | Required general compound `<<=`, `>>=`, and `>>>=` parsing and bytecode lowering. |
+| RayTrace | passing | 104 | 37.66 s | Passed with the existing ES5.1 and native-interpreter facilities. |
+| EarleyBoyer | passing | 138 | 119.65 s | Added `in`, native `instanceof`, `try`/`finally`, script-level `this`, and extensible guest string prototypes. |
+| RegExp | bring-up passing on Node; native stock baseline pending | — | — | Added regexp literals beginning with `=`, `String.match`, regexp `split`, cached host patterns, native substring/fromCharCode, and corrected the single-character replace fast path so semantic escapes cannot be treated as literal characters. Native execution remains dominated by general RegExp semantic transitions. |
+| Splay | quick correctness passing; stock baseline pending | — | 20.65 s quick | Added `Date.now`. The old 256 MiB maximum could not contain the live tree and caused futile repeated collections. Exact-capacity Array literals subsequently reduced the guest bump from 269,996,280 to 183,119,272 bytes. |
+| NavierStokes | passing | 283 | 26.05 s | Added ES5.1 non-strict receiver normalization for bare calls and `Function.call`/`apply` with nullish receivers. |
+| PdfJS | bring-up in progress | — | — | Object-literal accessors, heap-backed ArrayBuffer/typed arrays, `bind`, `forEach`, `splice`, `trim`, and JSON are implemented. The renderer now reaches asynchronous font loading; its stock checksum is not yet passing. |
+| zlib | passing | 257 | 600.14 s | Original ten-iteration validation, using an explicitly selected unchecked native snapshot. Quick correctness passes in 141.70 s. |
+
+The times above were measured on the current development machine with no
+snapshot. They are working baselines, not claimed stable performance numbers
+for other systems.
+
+The zlib row is the stated exception to the no-snapshot measurements. Its exact
+stock invocation was:
+
+```sh
+LD_LIBRARY_PATH=../../firefox-1.0.8/lib \
+  ../../mmvm_v2/artifacts/js_min.exe guest_runner.js \
+  --with-snapshot artifacts/zlib-native.snapshot \
+  --skip-snapshot-hash octane_runner.js zlib
+```
+
+The snapshot affects native-interpreter startup only; Zlib's dynamically
+evaluated 185 KiB generated program is still parsed and compiled on every run.
+The snapshot file is an ignored temporary artifact and is not part of the
+repository.
+
+The self-hosted zlib path now has a native indirect-eval continuation. Its
+generated source enters the guest tokenizer, parser, verifier, and bytecode
+adopter through a retained guest function, and the resulting executable is
+called by the normal guest frame engine. This is a general implementation of
+indirect global eval rather than a zlib source hook. Direct eval remains a
+distinct lexical operation and is deliberately not redirected through this
+global-code path.
+
+The generic standalone `js_runner` image now passes zlib quick correctness as
+well. The 2026-09-29 validation completed in 81.96 seconds at 257,664 KiB peak
+RSS. The indirect-eval compiler returns the actual guest callable and its
+global-declaration metadata, allowing the interpreter to bind the callable to
+the caller's JSContext instead of accidentally retaining the compiler
+module's global realm. Consequently the generated program reaches the normal
+guest `require` loader; neither `fs` nor `path` is special-cased by the
+interpreter. The standalone bootstrap also resumes ordinary instruction-budget
+yields, which is required because quick zlib executes slightly more than one
+2,147,483,647-instruction slice. Native `DELETE_NAME` completes the benchmark's
+global teardown.
+
+Zlib bring-up added general ES5 facilities rather than source accommodations:
+indirect global eval, labelled statements and labelled abrupt control flow,
+the global `NaN`, `Infinity`, and `Boolean` bindings, Annex B `escape` and
+`unescape`, signed 8- and 16-bit typed arrays, and the Node-compatible POSIX
+`path` subset. A 128 MiB ArrayBuffer allocation exposed that typed-array
+prototype tables were missing from the collector's strong root set; both
+collector backends now retain those runtime-owned prototypes explicitly.
+
+The dominant initial execution bottleneck was also general. Generated code
+uses non-short-circuit `&` and `|` to combine boolean comparisons. The native
+interpreter previously accepted only numeric-tagged operands for bitwise
+operations, causing repeated semantic exits even though ES conversion is
+simple. Native `ToInt32` handling now covers booleans, null, and undefined for
+all bitwise operations, while strings and objects retain the semantic path.
+
+PdfJS exposed a separate Node-host memory problem in the low-level heap
+emulator. Storing each written guest byte as a property on one host object
+exhausted Node's heap during the renderer. `host_memory.js` now uses lazily
+allocated 64 KiB byte pages. This remains a peek/poke-style linear-memory
+backend: guest objects and typed-array elements are not represented by host
+objects, and the MMVM `calloc` backing is unchanged.
+
+For memory context, the initial corrected quick Splay run peaked at 442,860
+KiB RSS in the guest VM. Emitting an initial-capacity operand for `MAKE_ARRAY`
+reduced that to 358,156 KiB by preventing literal construction from allocating
+and abandoning multiple successively larger element vectors. Node v24.14.1
+running the same unmodified suite and quick wrapper peaks at 134,792 KiB RSS
+and takes 0.43 s. The guest's current representation stores
+each ordinary property in a separate 48-byte linked heap record and each value
+cell in 16 bytes. Splay creates roughly half a million recursively nested
+payload objects, so compact per-object property storage and denser value cells
+are high-value general representation work, independent of Octane.
+
+The measured preallocation heap delta is 86,877,008 bytes: value-vector records
+fell from 776,068 records / 134,766,064 bytes to 258,951 records / 47,888,968
+bytes. The bytecode verifier bounds the capacity operand, and both the native
+and JavaScript interpreter backends implement the same instruction. Dynamic
+arrays retain their ordinary growth behavior.
+
+Native heap-pressure profiling reports bump, current logical limit, reserved
+maximum, next pressure point, growth count, and collection count. Once a full
+collection leaves a large live graph above the normal three-quarter pressure
+mark, the next pressure point is placed at least 1 MiB above the surviving
+bump. Actual allocation failure still forces collection; an unchanged live set
+does not cause collection again at every semantic boundary.
+
+The RegExp workload also exposed a cross-context collector invariant: a yield
+must publish the youngest active frame separately for each owning `JSContext`.
+Publishing a loaded script's callee under the entry context could leave a freed
+frame reachable after return. Frame construction is now rooted before any
+allocation-capable value conversion, frame release clears its owning context,
+and yielded executions publish active roots per context.
+
+## 2026-09-27: standalone pressure and compact RegExp instructions
+
+`octane_runner.js --setup-only <suite>` loads the ordinary external suite,
+invokes every selected benchmark's stock `Setup`, reports its elapsed time,
+and then invokes `TearDown`. It does not replace benchmark data or correctness
+logic. This isolates construction and warm-up costs without editing anything
+under `../../js_tests/`.
+
+Standalone snapshots previously installed the full 512 MiB reserved maximum
+as the allocator's active limit. Consequently, allocation-heavy code did not
+ask the native collector to run until it had touched essentially the complete
+reservation. Engine state now records the maximum separately from the active
+pressure limit. A standalone image starts at the same ordinary pressure point
+as hosted execution, reuses swept free records first, and increases headroom
+after a collection in proportion to reclaimed bytes. In a stopped RegExp
+setup diagnostic this changed resident memory from approximately 541 MiB to
+66--82 MiB. The setup was still far too slow, so this is a memory/collector
+correction rather than a claim that RegExp is complete.
+
+The following general matcher costs were then removed:
+
+- an unquantified atom no longer goes through four counted-repeat instructions
+  or consumes two repeat-state slots;
+- the matcher loop no longer allocates `push` and `fail` closures for every
+  candidate position; and
+- compiled matcher instructions are parallel opcode/operand arrays rather than
+  per-dispatch objects. Character-class and lookahead objects remain only for
+  operations that require structured data.
+
+A fixed 30-second Node kernel profile still reaches the same 11,001,861
+bytecode budget, but native-kernel time fell from about 31.5 seconds before
+these changes to about 29.9 seconds. Constant-property operations in that
+slice fell by roughly 600,000. The remaining runtime is dominated by general
+guest bytecode/property/array work; it must be improved without recognizing
+Octane sources or delegating regular expressions to the host.
+
+## 2026-09-27: typed RegExp machine storage
+
+The setup-only runner now calls `BenchmarkSuite.ResetRNG()` before entering
+the selected setup functions, as the stock Octane harness does. Without that
+step, both stock Node RegExp and the guest matcher correctly reject the final
+checksum because the generated input variants are nondeterministic. With the
+seed restored, the benchmark's own checksum is authoritative in this mode.
+
+Matcher start metadata now retains the longest common literal prefix across
+alternatives, not merely a common first character. The search remains
+conservative: only consecutive, exactly-once literal atoms participate, and
+case-insensitive patterns retain their explicit character scan.
+
+Compiled instructions use one fixed-width `Int32Array`. Capture state and the
+backtracking PC, input-position, and saved-state stacks use reusable typed
+arrays that double only when their previous high-water mark is exceeded.
+These are guest heap buffer-backing records; neither backend stores a host
+array as guest state. Structured character classes and nested lookahead
+programs remain in a side table.
+
+On the deterministic stock setup checksum:
+
+- hosted native execution changed from 100.5 seconds total / 86.3 seconds in
+  setup to 86.2 / 72.3 seconds;
+- standalone execution changed from 108.1 seconds total / 106.1 seconds in
+  setup to 76.5 / 74.6 seconds; and
+- standalone peak RSS changed from approximately 211 MiB to 194 MiB.
+
+A profiling run still records approximately 2.51 billion guest bytecodes.
+Typed storage makes those operations cheaper and avoids many heap records, but
+the next major improvement must reduce matcher control-flow work itself, most
+likely by moving the low-level executor into the kernel dialect while keeping
+parsing and compilation guest-owned.
+
+## 2026-09-27: matcher invariants and reclaimed-region growth
+
+The matcher now reads flags, input length, state-slot count, and current stack
+capacity once per invocation. These values do not change during its inner
+instruction loop. Hoisting them reduced one hosted deterministic setup from
+72.3 to 65.9 seconds without changing its checksum.
+
+That run also exposed an allocator policy error: the hosted collector doubled
+the logical heap whenever its untouched tail was exhausted, even when the
+sweep had produced hundreds of MiB of reusable records and a single very large
+contiguous arena. The speed measurement consequently touched nearly the full
+heap reservation and peaked at 602 MiB RSS despite a 6--7 MiB live set.
+
+An exhausted tail now causes fragmentation growth only when the largest
+reusable block is less than one sixteenth of total reusable bytes. Persistent
+live-set pressure and a genuine inability to supply the minimum native arena
+remain independent growth reasons. The next measured run peaked at 257 MiB and
+took 91.7 seconds total, still better than the original 100.5-second hosted
+baseline but slower than consuming fresh tail pages. This is the intended
+trade: further speed must come from less matcher work and better native region
+execution, not unbounded heap expansion.
+
+## 2026-09-27: literal runs and simple quantifiers
+
+The guest regex compiler now coalesces consecutive exactly-once literal atoms
+into one instruction. It also lowers quantified literals, dot, classes, and
+class escapes to a simple-quantifier instruction. The latter scans the atom
+once, then records possible continuation positions in the same LIFO order as
+the generic greedy/lazy backtracking machine. Groups, captures, lookahead, and
+backreferences continue through the general instruction sequence.
+
+Simple quantifier alternatives all begin with the same capture state. Stack
+entries therefore carry a typed-array snapshot index: the quantifier copies
+state once and all of its alternatives reference that immutable slot. Normal
+branches continue to own one snapshot each. This preserves later restoration
+when intervening instructions mutate captures.
+
+With stock deterministic input and the conservative reclaimed-region policy,
+literal runs reduced hosted total time from 91.7 to 89.9 seconds. Simple
+quantifiers reduced it to 85.1 seconds, and shared state snapshots to 82.6
+seconds. Setup itself moved from 78.2 to 67.8 seconds. Peak RSS remained around
+255--261 MiB and the Octane checksum passed after each stage.
+
+## 2026-09-27: PdfJS enters standalone execution
+
+Native guest implementations of object-literal accessors, `Object.create`,
+primitive string-addition coercions, and `in` removed PdfJS's initialization
+exits. These are ordinary ES5 operations over guest records; none recognizes
+PdfJS or delegates semantics to the bootstrap host. The generic standalone
+image now reads, self-host parses, compiles, and initializes the unmodified
+external source before printing `PdfJS: running (quick correctness)`.
+
+With standalone phase timing enabled, the current quick run reads
+`pdfjs.js` in about 2.6 seconds and compiles it in about 20.9 seconds. It then
+runs for roughly a minute before exhausting a string-concatenation allocation
+at `ADD`; this remains a failure, not a quick correctness pass.
+
+A hosted allocation trace explains the pathology. The flat-string
+implementation copies and re-hashes the complete accumulated string for each
+small append. PdfJS contains several general byte/string construction loops,
+including base64 conversion. In one stopped trace, the live heap remained near
+19 MiB and a contiguous free region remained near 47 MiB, yet more than 100
+full collections occurred because copied flat strings rapidly consumed that
+region. Raising the heap maximum would only defer the same quadratic work.
+The next string improvement must therefore change the general representation
+or construction algorithm (for example, a guest-owned rope/concatenation
+representation with bounded-depth traversal or flattening), while preserving
+ES5 string immutability and both backends' semantics.
+
+## 2026-10-27: Mandreel frontend allocation investigation
+
+The unchanged stock Mandreel run on the current standalone image fails during
+compilation, not because `SET_PROPERTY` or `CALL` is missing. The native exit
+reports `allocation 1`: the 512 MiB heap has reached its limit. The baseline
+run took 64.28 seconds, reached 532,060 KiB peak RSS, and reported 287,452,208
+live bytes after 17 collections. A read-only memory trace confirms the peak
+overlaps the parsed AST with the compiler's growing vectors.
+
+The frontend work targets representation and lifetime, not benchmark names:
+
+- Share immutable identifier leaves only in compiler-owned ASTs; public AST
+  identity and mutability remain unchanged.
+- Complete scope/return analysis before lowering and release completed root
+  statements in consuming mode. Replayed `finally` bodies remain intact.
+- Adopt verified nested programs as they complete, so parent compilation
+  retains executable templates rather than every child's builder arrays.
+
+Identifier sharing plus statement release alone is insufficient. An
+instrumented run still failed after 39 collections with 197,901,672 live bytes
+and 338,969,096 free bytes: fragmentation, not just live-data size, matters.
+Early nested-program adoption was retained after regression checks, but did
+not make stock Mandreel pass. No Mandreel pass is claimed by these partial
+results. An experimental in-place optimizer rewrite was excluded after a
+standalone regression; the established instruction-rewrite algorithm remains.
+
+## 2026-10-28: measured native frontend costs (Mandreel still unresolved)
+
+The previous tuned frontend reached `mandreelAppInit` but failed after about
+952 seconds, with 50,655,128 live bytes in the 512 MiB reservation and a largest
+free record of only 2,723,656 bytes. This is **not** a Mandreel pass. Its very
+long compilation and fragmented contiguous-allocation failure remain open;
+raising the heap cap or adding a benchmark cache is not the intended fix.
+
+A bounded 25-second libc `profil` sample found approximately 41% of native
+samples in the interpreter body, 10% in bytecode call setup, 10% in intrinsic
+dispatch, 8% in constant-register copying, and 5% in allocation. Constant-name
+property reads were the largest approximate case region (12% of all samples).
+The percentages exclude libc and are not an end-to-end speedup measurement.
+
+General small-object key rejection checks reduced string-comparator samples
+from about 4.6% to 0.5% in a subsequent bounded sample. Checked cross-owner
+property-slot hints preserve descriptor lookup and cache invalidation semantics.
+A single EarleyBoyer quick timing changed from 2.87 to 2.78 seconds: modest,
+not evidence of a major improvement. No benchmark source was changed.
+
+The self-hosted program builder now installs a checked code-word array in one
+call instead of issuing a VM call for each bytecode word. A genuine self-hosted
+rebuild completed in 103.50 seconds at 477,696 KiB peak RSS and produced an
+image bit-identical to its Node cross-build. This confirms rebuild correctness,
+not that the Mandreel performance target has been met. The Node-hosted suite
+passed 12 guest programs / 270 assertions. The preceding property-lookup image
+also passed all ten previously working Octane quick workloads and the existing
+24-round / 47-native-collection GC workload. The range-installation image
+subsequently passed the same ten quick workloads and GC stress workload.
+
+See [bounded native profiling](guest_vm/tools/NATIVE_PROFILING.md) for the
+checked-in diagnostic commands. Generated images, symbols and raw logs remain
+ignored artifacts; no diagnostic code is required by ordinary snapshot startup.
+
+### General checkpoint; Mandreel investigation paused
+
+Work on Mandreel was paused at the user's request. The retained changes are
+general frontend lifetime/adoption interfaces, bounded optional analyses,
+checked range installation, ordinary-object lookup, and native allocation
+handling. There is no benchmark-name check, parsing cache, benchmark edit or
+new host-language implementation of guest features. Experimental largest-first
+declaration scheduling and call-count capacity hints were removed before this
+checkpoint; declaration lowering remains in source order.
+
+The simplified checkpoint passed the Node-hosted 12-program / 270-assertion
+suite and the 24-round / 47-native-collection GC workload. Its genuine
+self-hosted build completed in 111.67 seconds at 485,376 KiB peak RSS and was
+bit-identical to the Node-built image. This is not a controlled before/after
+timing, so no overall performance improvement is claimed. A focused 165-test
+Test262 comparison produced 164 passes and the same one failure on both the
+starting revision and this work; see `TEST262_STATUS.md`.
+
+Live standalone demos 1–7 ran at 320x240 and exited cleanly after their input
+tests. Demo8 also entered garage and free-drive auto-pilot modes and exited
+cleanly. Its transition sample was 17.1 FPS; subsequent samples were 19.8,
+19.4 and 20.0 FPS at the 20 FPS limit. These are short regression checks, not
+a long-duration stability guarantee. Demo files and the external corpus were
+not modified.
+
+Final checkpoint verification after removing the scheduling/capacity
+experiments:
+
+- Node and `js_min` project suites: 12 guest programs / 270 assertions each,
+  including the existing embedding and self-hosted frontend integration checks.
+- All ten previously working standalone Octane quick correctness workloads:
+  Richards, DeltaBlue, Crypto, RayTrace, EarleyBoyer, Splay (including latency),
+  NavierStokes, Box2D, Gameboy and zlib. These are not fresh stock scores.
+- Native GC workload: 24 rounds / 47 native collections.
+- Node, `js_min` and genuine self-hosted snapshot builds: byte-identical,
+  6,009,584 bytes; SHA-256
+  `09d9c16d27d10e0689871b2b52f67c060fe11a7f43321c7f690ed0165a3beae6`.
+- Both `net.js` and `node_web.js` under the final standalone image served
+  `hello.js`, the complete binary snapshot (byte-compared), and a directory
+  listing correctly over localhost. No HTTP fixture or demo was modified.
+
+RegExp was not investigated. No new full Test262 run, full stock Octane score
+table or Mandreel success is claimed. Work is paused pending further direction.
+
+## 2026-09-27: balanced guest strings and accessor calls
+
+The native heap now represents sufficiently large concatenations as immutable
+balanced string trees while retaining flat records for strings of at most 64
+UTF-16 code units. This is a general representation change: string character
+access, comparisons, hashing consumers, and both collectors understand the
+tree through the guest heap's named accessors. It does not recognize PdfJS or
+cache benchmark output. Keeping small strings flat is important because source
+tokens and property names dominate frontend access patterns; making every
+two-character concatenation a tree made parsing substantially slower.
+
+The first standalone PdfJS run with this representation reached benchmark
+execution in 28.9 seconds at 212,224 KiB peak RSS instead of repeatedly
+collecting until the 512 MiB heap limit. Native bytecode getter entry then
+advanced the same run to 26.6 seconds at 212,096 KiB. Its next exit identifies
+the general `String.fromCharCode` coercion path (intrinsic 48); that operation
+is being corrected as an ES5 semantic rather than special-cased for PdfJS.
+
+Standalone diagnostics now report the bytecode PC, opcode, callable record or
+intrinsic identifier, and whether allocation failed. These fields are intended
+for broad bring-up: a callable value such as `1048` names intrinsic 48, while
+`3004` names a bytecode-function heap record. They avoid mistaking an ordinary
+semantic gap for collector or heap-growth failure.

@@ -1,0 +1,212 @@
+# Historical ECMAScript coverage runners
+
+These runners complement Test262 with the external SpiderMonkey corpus's
+`ecma`, `ecma_2`, `ecma_3` and `ecma_5` trees: coverage written across the
+ES1--ES5.1 period. The goal is standard-language coverage, not implementation
+of SpiderMonkey's proprietary language modes, debugging APIs or extensions.
+The corpus is read from `../../js_tests/tests`; nothing there is modified.
+
+## Running
+
+From `mmvm_v2_tests`, with a current generic standalone image:
+
+```sh
+./artifacts/js_runner.exe artifacts/snap ecma_tests_runner.js
+node ecma_tests_runner_node.js
+```
+
+For a Windows guest executable, use the same runner from `mmvm_v2_tests`:
+
+```bat
+artifacts\js.exe ecma_tests_runner.js
+artifacts\js.exe ecma_tests_runner.js --verbose ecma/Boolean
+```
+
+The executable uses the guest interpreter, not Node or a Windows JavaScript
+engine. Corpus discovery and harness loading use the existing Windows-backed
+filesystem API; preserve the relative `../../js_tests/tests` layout.
+
+On Windows, the runner invokes the shared guest backend directly, reusing
+the Test262 baseline-restoration and context lifecycle. It does not import
+the Linux fork/pipe supervisor or emulate fork. The default ten-second
+per-test deadline is cooperative: the existing execution-slice observer
+checks it between slices, and phase boundaries check elapsed time after
+compilation/execution returns. A timeout aborts that execution and is reported
+as a failure/timeout before continuing to the next file. This cannot contain
+a native crash or preempt compilation/native code that does not return.
+The Linux process-isolated path and the direct Node reference path are
+unchanged. No threads or additional executable dependencies are introduced.
+
+For a filename-level old-Linux/new-Windows comparison, first capture a complete
+ordinary Linux run, then use
+`guest_vm/tools/compare_ecma_windows.js LINUX_LOG SNAPSHOT LINUX_EXE WINDOWS_EXE artifacts/NEW_DIRECTORY`
+under Node with the Wine prefix activated. This diagnostic supervisor verifies
+the common embedded snapshot and runs every Linux-passing filename serially
+through Wine. It does not replace the Linux harness or infer Windows passes
+for Linux-failing tests. Commands, results and limitations are documented in
+[the 2026-11-16 comparison](ECMA_LINUX_WIN32_COMPARISON_2026-11-16.md).
+
+If needed, construct an image from the current sources with the existing
+snapshot workflow; no C source or js_min rebuild is required:
+
+```sh
+node guest_runner.js --vm-native --snapshot artifacts/snap
+```
+
+Selectors are corpus-relative paths or directory prefixes. Overlapping
+selectors execute each file only once. With no selector, all four trees run.
+Four known pathological cases are skipped by default on both engines:
+
+- `ecma_3/Array/regress-322135-03.js`
+- `ecma_3/Array/regress-322135-04.js`
+- `ecma_3/RegExp/regress-307456.js`
+- `ecma_3/RegExp/regress-330684.js`
+
+Use `--include-slow` to run them, including when selecting one explicitly.
+With Node's uncapped default, doing so can hang indefinitely; use an explicit
+`--timeout-ms` if you want a bounded diagnostic of those cases.
+Default full runs therefore execute 1329 of the 1333 selected files and
+report four skips. Skips are separate from failures and from files not run
+because of `--fail-fast`. `--list` lists runnable files and reports the
+selected/skipped totals. A selection containing only skipped files needs no
+test runtime or worker.
+
+```sh
+./artifacts/js_runner.exe artifacts/snap ecma_tests_runner.js ecma/Array
+node ecma_tests_runner_node.js ecma_5/JSON
+node ecma_tests_runner_node.js --list
+./artifacts/js_runner.exe artifacts/snap ecma_tests_runner.js --fail-fast ecma_3
+```
+
+By default each completed file prints PASS/FAIL and elapsed milliseconds.
+`--quiet` suppresses passing rows; `--summary-only` prints only totals;
+`--verbose` also prints RUN before execution and the guest instruction count
+after each result. `--fail-fast` is optional:
+normally failures, native worker exits and timeouts do not stop the suite.
+The summary gives per-tree and total pass/fail counts, timeout subsets,
+executed/skipped/not-run counts and elapsed time. A failure produces exit status 1;
+timeouts are failures, never passes or skips. Invalid selections are errors.
+
+Node has **no timeout by default**, either for VM scripts or the external
+worker. `--timeout-ms COUNT` optionally enables both limits; a positive Node
+limit also has a one-second startup/transport grace for the worker. Explicit
+`--timeout-ms 0` disables Node timeouts again. The 128 MiB V8 old-space limit
+and serial worker isolation remain in effect.
+
+The guest runner retains its 10000 ms default watchdog; its `--timeout-ms`
+must be positive. Removing Node's timeout does not remove the guest limits.
+The guest runner has no total-instruction cap by default. It still resumes
+the VM in finite execution slices and retains the 10000 ms process watchdog.
+`--instruction-limit COUNT` enables an optional total cap for diagnostics;
+Node rejects this flag because V8 has no equivalent counter. This ECMA
+policy does not change the Test262 harness or its limits.
+Instruction and wall-clock limits measure different resources. Specify them
+when recording a baseline, and do not mistake a bounded timeout for a proven
+semantic defect. Timings include isolation/harness overhead and are not
+interpreter-throughput benchmarks.
+
+For a guest-only diagnostic, `--sample-functions` samples the published
+native top frame at the existing instruction-budget yields and prints the
+ten most frequent source previews per test. It does not rebuild an
+instrumented interpreter, start a sampling thread, change the instruction
+limit or change pass/fail rules. It is coarse instruction-period sampling,
+not exact per-function CPU accounting, and its overhead must be excluded
+from clean performance measurements. It uses `inspectNativeFrames(1)`;
+the direct Node runner rejects this guest-specific diagnostic option.
+
+For reproducible Date tests, use the same timezone for both engines, e.g.:
+
+```sh
+TZ=UTC ./artifacts/js_runner.exe artifacts/snap ecma_tests_runner.js \
+  --verbose --timeout-ms 5000 --instruction-limit 2000000
+TZ=UTC node ecma_tests_runner_node.js --timeout-ms 5000
+```
+
+The Node control uses the installed Node engine directly, not the guest VM,
+and only built-in Node modules. Modern Node's non-contextified realm global
+is used when available so `Object.preventExtensions(this)` is not rejected
+merely by a contextifying proxy. Older Node versions fall back to ordinary
+`vm.createContext`, with that proxy limitation. The scripts use ES3-compatible
+syntax; the Node supervisor requires `child_process.spawnSync`.
+
+## Execution and isolation
+
+The shared controller is `ecma_tests_runner.js`. It discovers JavaScript
+files dynamically: no generated manifest is checked in. The infrastructure
+files `shell.js`, `browser.js`, `jsref.js`, `template.js`, and
+`ecma_5/Object/defineProperty-setup.js` (explicitly marked "not a test")
+are not standalone tests. Discovery selects 1333 files, including extensions
+and tests Mozilla's driver marks skipped. Only the four explicit default
+exclusions listed above are skipped by this runner, unless `--include-slow`
+is supplied. Browser harnesses are not loaded.
+
+Execution preserves separate script boundaries, filenames, and authored
+sloppy/strict directives:
+
+1. Install logging-only `print`/`dump`, then the unchanged root `shell.js`.
+2. Run ancestor `shell.js` files from tree root to the test's directory.
+3. Install the report-failure recorder and execute the original test script.
+4. Check every legacy `gTestcases` entry and recorded `reportFailure` call.
+   Original assertion functions and legacy comparison tolerances are retained.
+
+`-n.js` files follow the historical expected-uncaught-exception convention;
+typed `|reftest| error:...` directives constrain the exception name. Harness
+errors, worker failures and timeouts cannot satisfy a negative expectation.
+No synthetic strict variant is added. An ordinary completed crash-regression
+test may legitimately have no assertions; a completed script containing
+failed `TestCase` records is not considered passing.
+
+`load(path)` executes a real script in the same global environment, resolving
+paths relative to the corpus root. It does not paste source into another
+script, use eval as a substitute, or alter a test's directives. The guest
+embedding uses a temporary shared-global execution context for nested loads;
+the loader, filesystem access, compilation and test semantics all execute
+inside the standalone guest image. No Node or host JavaScript engine serves
+guest language operations. Other engine-specific shell functions are not
+faked to make tests pass.
+
+Tests mutate fundamental prototypes, and some currently terminate native
+guest execution or spend uninterruptible time in Node built-ins. Consequently
+both backends isolate tests in **serial child processes**, not threads:
+
+- Node starts one memory-bounded worker per file, with a fresh bare realm
+  and a 128 MiB V8 old-space limit. Its kill/reap watchdog and VM-script timer
+  are enabled only when a positive `--timeout-ms` is supplied.
+- The Linux/i386 guest supervisor prepares one test runtime, then uses libc
+  `fork` and copy-on-write isolation. There is at most one worker executing a
+  test. Each inherits the pristine parent state; test mutations never return
+  to the parent. It also uses the existing Test262 baseline-restoration path,
+  because a fresh context alone currently shares intrinsic objects. The
+  inner runtime starts at 8 MiB with a 128 MiB guest-heap cap. A libc watchdog
+  kills and reaps timed-out children; core dumps are disabled and children
+  receive SIGKILL if the parent dies. No new C code is used.
+
+These are heap limits, not promises that total RSS is below 128 MiB. Forked
+RSS includes shared copy-on-write pages. No tests run concurrently. Ancestor
+harness bytecode may be reused within an isolated worker; test source/results
+are not cached. Native failures are reported as `WorkerExit`, including the
+exit status or signal; line/column zero means the process returned no JS
+exception location. SIGSYS stops the guest supervisor for environment
+investigation rather than being worked around.
+
+On Linux, `ulimit -c 0` before a batch also prevents large core files from a
+fatal Node worker; the guest worker disables its own core dumps. These resource
+guards are not a security sandbox for executing an untrusted corpus.
+
+## Interpreting results
+
+Raw corpus pass rate is not a pure ES5.1 compliance score. These historical
+directories include unfinished tests, old Unicode tables, implementation-
+specific error text, proprietary APIs, and expectations changed in later
+ECMAScript editions. Modern Node is a useful control, not an ES5.1 mode.
+Review source rather than teaching the guest VM nonstandard behavior to
+match every Node failure. The bring-up ledger and reviewed discrepancies
+are recorded in [ECMA_TESTS_STATUS.md](ECMA_TESTS_STATUS.md).
+
+## Harness preparation performance
+
+The guest supervisor prepares shared support-script bytecode before forking;
+each worker still executes that setup and its original test independently.
+Use `--no-harness-preload` to disable this preparation for comparisons.
+See [ECMA_HARNESS_PERFORMANCE.md](ECMA_HARNESS_PERFORMANCE.md) for the design,
+measured gains and the distinction between runner overhead and test execution.

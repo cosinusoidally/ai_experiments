@@ -7,39 +7,34 @@ function nodeResolveSymbol(name) {
     return pointer;
 }
 
-var NodeLibcSymbols = {
-    socket: nodeResolveSymbol("socket"),
-    connect: nodeResolveSymbol("connect"),
-    setsockopt: nodeResolveSymbol("setsockopt"),
-    getsockopt: nodeResolveSymbol("getsockopt"),
-    bind: nodeResolveSymbol("bind"),
-    listen: nodeResolveSymbol("listen"),
-    accept: nodeResolveSymbol("accept"),
-    fcntl: nodeResolveSymbol("fcntl"),
-    poll: nodeResolveSymbol("poll"),
-    read: nodeResolveSymbol("read"),
-    write: nodeResolveSymbol("write"),
-    close: nodeResolveSymbol("close"),
-    calloc: nodeResolveSymbol("calloc"),
-    free: nodeResolveSymbol("free"),
-    memmove: nodeResolveSymbol("memmove"),
-    inet_aton: nodeResolveSymbol("inet_aton"),
-    getsockname: nodeResolveSymbol("getsockname"),
-    signal: nodeResolveSymbol("signal"),
-    gettimeofday: nodeResolveSymbol("gettimeofday"),
-    getenv: nodeResolveSymbol("getenv"),
-    errno_location: nodeResolveSymbol("__errno_location"),
-    fopen: nodeResolveSymbol("fopen"),
-    fseek: nodeResolveSymbol("fseek"),
-    ftell: nodeResolveSymbol("ftell"),
-    fread: nodeResolveSymbol("fread"),
-    fclose: nodeResolveSymbol("fclose"),
-    opendir: nodeResolveSymbol("opendir"),
-    readdir: nodeResolveSymbol("readdir"),
-    closedir: nodeResolveSymbol("closedir")
+var NodeLibcSymbolNames = {
+    socket: "socket", connect: "connect", setsockopt: "setsockopt",
+    getsockopt: "getsockopt", bind: "bind", listen: "listen",
+    accept: "accept", fcntl: "fcntl", poll: "poll", read: "read",
+    write: "write", close: "close", calloc: "calloc", free: "free",
+    memmove: "memmove", inet_aton: "inet_aton", getsockname: "getsockname",
+    signal: "signal", gettimeofday: "gettimeofday", getenv: "getenv",
+    errno_location: "__errno_location", fopen: "fopen", fseek: "fseek",
+    ftell: "ftell", fread: "fread", fclose: "fclose", opendir: "opendir",
+    readdir: "readdir", closedir: "closedir", open: "open"
 };
+var NodeLibcSymbols = {};
+for (var NodeLibcSymbolKey in NodeLibcSymbolNames) {
+    if (Object.prototype.hasOwnProperty.call(
+            NodeLibcSymbolNames, NodeLibcSymbolKey)) {
+        NodeLibcSymbols[NodeLibcSymbolKey] = nodeResolveSymbol(
+            NodeLibcSymbolNames[NodeLibcSymbolKey]);
+    }
+}
 
 var NodeLibc = {
+    platformName: function () {
+        /* Resolve at application startup, not snapshot construction. */
+        return ffi_call(NodeDlsymPointer, 0, "GetModuleHandleA") ? "win32" : "linux";
+    },
+    open: function (path, flags, mode) {
+        return ffi_call(NodeLibcSymbols.open, path, flags, mode);
+    },
     socket: function (domain, type, protocol) {
         return ffi_call(NodeLibcSymbols.socket, domain, type, protocol);
     },
@@ -161,6 +156,56 @@ var NodeEncoding = {
             }
         }
         return bytes;
+    },
+    utf8String: function (bytes, start, end) {
+        start = start || 0;
+        end = end === undefined ? bytes.length : end;
+        var value = "";
+        var index = start;
+        while (index < end) {
+            var first = bytes[index++] & 255;
+            var code;
+            var needed;
+            var minimum;
+            if (first < 128) {
+                value += String.fromCharCode(first);
+                continue;
+            } else if (first >= 194 && first <= 223) {
+                code = first & 31; needed = 1; minimum = 128;
+            } else if (first >= 224 && first <= 239) {
+                code = first & 15; needed = 2; minimum = 2048;
+            } else if (first >= 240 && first <= 244) {
+                code = first & 7; needed = 3; minimum = 65536;
+            } else {
+                value += "\uFFFD";
+                continue;
+            }
+            var continuationStart = index;
+            var valid = index + needed <= end;
+            var continuation = 0;
+            while (valid && continuation < needed) {
+                var next = bytes[index++] & 255;
+                if ((next & 192) !== 128) {
+                    valid = false;
+                    index--;
+                    break;
+                }
+                code = (code << 6) | (next & 63);
+                continuation++;
+            }
+            if (!valid || code < minimum || code > 1114111 ||
+                code >= 55296 && code <= 57343) {
+                value += "\uFFFD";
+                if (index === continuationStart) index++;
+            } else if (code <= 65535) {
+                value += String.fromCharCode(code);
+            } else {
+                code -= 65536;
+                value += String.fromCharCode(55296 + (code >>> 10),
+                                             56320 + (code & 1023));
+            }
+        }
+        return value;
     },
     byteString: function (bytes) {
         var value = "";

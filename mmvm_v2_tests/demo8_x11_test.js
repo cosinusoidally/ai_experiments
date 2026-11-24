@@ -117,7 +117,7 @@ function parseOptions(argv) {
         else if (option === "--help" || option === "-h") {
             console.log("usage: demo8_x11_test.js [--title TEXT] [--count N] " +
                         "[--delay MS] [--depth N] [--keys LIST] " +
-                        "[--drag X1,Y1:X2,Y2] [--hold KEY:MS]");
+                        "[--drag X1,Y1:X2,Y2] [--hold KEY[+KEY]:MS]");
             process.exit(0);
         } else throw new Error("unknown option: " + option);
     }
@@ -143,7 +143,7 @@ function parseOptions(argv) {
     }
     if (options.hold) {
         var holdMatch = /^([^:]+):([0-9]+)$/.exec(options.hold);
-        if (!holdMatch) throw new Error("--hold must be KEY:MS");
+        if (!holdMatch) throw new Error("--hold must be KEY[+KEY]:MS");
         options.holdName = holdMatch[1];
         options.holdMilliseconds = parseInt(holdMatch[2], 10);
         if (options.holdMilliseconds < 1 || options.holdMilliseconds > 60000) {
@@ -151,7 +151,12 @@ function parseOptions(argv) {
         }
     }
     options.lookupNames = options.keyNames.slice(0);
-    if (options.holdName) options.lookupNames.push(options.holdName);
+    if (options.holdName) {
+        options.holdNames = options.holdName.split("+");
+        for (var heldIndex = 0; heldIndex < options.holdNames.length; heldIndex++) {
+            options.lookupNames.push(options.holdNames[heldIndex]);
+        }
+    }
     return options;
 }
 
@@ -380,14 +385,21 @@ X11TestClient.prototype.finishInput = function () {
     var client = this;
     if (this.options.holdName) {
         var holdName = this.options.holdName;
-        var holdKeysym = keysymForName(holdName);
-        var holdKeycode = this.keycodes[holdKeysym];
+        var holdKeycodes = [];
+        for (var index = 0; index < this.options.holdNames.length; index++) {
+            var holdKeysym = keysymForName(this.options.holdNames[index]);
+            holdKeycodes.push(this.keycodes[holdKeysym]);
+        }
         this.options.holdName = null;
-        this.sendKeyEvent(2, 1, holdKeycode);
+        for (index = 0; index < holdKeycodes.length; index++) {
+            this.sendKeyEvent(2, 1, holdKeycodes[index]);
+        }
         console.log("holding " + holdName + " for " +
                     this.options.holdMilliseconds + " ms");
         setTimeout(function () {
-            client.sendKeyEvent(3, 2, holdKeycode);
+            for (var index = 0; index < holdKeycodes.length; index++) {
+                client.sendKeyEvent(3, 2, holdKeycodes[index]);
+            }
             console.log("released " + holdName);
             client.finishInput();
         }, this.options.holdMilliseconds);

@@ -1,0 +1,348 @@
+(function (root) {
+    function assert(condition, message) {
+        if (!condition) throw new Error(message);
+    }
+
+    function runRuntimeContextExecutionTest(VM) {
+        var JSRuntime = VM.JSRuntime;
+        var firstRuntime = new JSRuntime();
+        var firstContext = firstRuntime.createContext();
+        var secondContext = firstRuntime.createContext();
+        var otherRuntime = new JSRuntime();
+        var otherContext = otherRuntime.createContext();
+
+        firstContext.installGlobal("contextMarker", 11);
+        secondContext.installGlobal("contextMarker", 22);
+        firstContext.run("var contextValue = contextMarker + 1;", "first_context.js");
+        secondContext.run("var contextValue = contextMarker + 2;", "second_context.js");
+        assert(firstRuntime.runtime.getGlobal(firstContext, "contextValue") === 12,
+               "first context global environment was not isolated");
+        assert(firstRuntime.runtime.getGlobal(secondContext, "contextValue") === 24,
+               "second context global environment was not isolated");
+
+        var firstObject = firstRuntime.runtime.makeObject();
+        firstContext.installGlobal("owned", firstObject);
+        secondContext.installGlobal("sharedOwned", firstObject);
+        firstRuntime.runtime.setProperty(firstObject, "value", 37);
+        secondContext.run("var sharedObjectValue = sharedOwned.value;",
+                          "shared_runtime_object.js");
+        assert(firstRuntime.runtime.getGlobal(secondContext,
+                                              "sharedObjectValue") === 37,
+               "contexts in one runtime did not share a runtime-owned object");
+        firstContext.run(
+            "var homeValue = 40;" +
+            "function exportedAdd(amount) { homeValue += amount; return homeValue; }",
+            "cross_context_function_owner.js");
+        var exportedAdd = firstRuntime.runtime.getGlobal(firstContext, "exportedAdd");
+        secondContext.installGlobal("exportedAdd", exportedAdd);
+        secondContext.run("var exportedResult = exportedAdd(2);",
+                          "cross_context_function_caller.js");
+        assert(firstRuntime.runtime.getGlobal(firstContext, "homeValue") === 42 &&
+               firstRuntime.runtime.getGlobal(secondContext,
+                                              "exportedResult") === 42,
+               "cross-context function did not use its home context globals");
+        var rejectedForeignObject = false;
+        try {
+            otherContext.installGlobal("foreign", firstObject);
+        } catch (error) {
+            rejectedForeignObject = true;
+        }
+        assert(rejectedForeignObject, "context accepted an object from another runtime");
+        var rejectedForeignRoot = false;
+        try { otherRuntime.retain(firstObject); }
+        catch (foreignRootError) { rejectedForeignRoot = true; }
+        assert(rejectedForeignRoot, "runtime retained an object owned by another runtime");
+        /* A persistent root belongs to the runtime, not the creating context.
+         * Exercise collection after removing the only context-owned binding. */
+        var rootContext = firstRuntime.createContext();
+        rootContext.run("var rootSurvivor = {answer: 42, bytes: Buffer.alloc(8)};" +
+                        "rootSurvivor.bytes[0] = 91;", "embedding-root-owner.js");
+        var rootSurvivor = firstRuntime.runtime.getGlobal(rootContext, "rootSurvivor");
+        var survivorToken = firstRuntime.retain(rootSurvivor);
+        rootContext.destroy();
+        firstRuntime.collect();
+        var retainedSurvivor = firstRuntime.retained(survivorToken);
+        assert(firstRuntime.runtime.getProperty(retainedSurvivor, "answer") === 42,
+               "context teardown invalidated a runtime-owned root");
+        var survivorBytes = firstRuntime.runtime.getProperty(retainedSurvivor, "bytes");
+        assert(firstRuntime.runtime.bufferSupport.read(survivorBytes, 0) === 91,
+               "collection lost the graph reachable from a persistent root");
+        firstRuntime.release(survivorToken);
+        var rejectedReleasedRoot = false;
+        try { firstRuntime.retained(survivorToken); }
+        catch (releasedRootError) { rejectedReleasedRoot = true; }
+        assert(rejectedReleasedRoot, "released root token remained usable");
+        assert(firstRuntime.internString("shared-name") ===
+               firstRuntime.internString("shared-name"),
+               "runtime did not intern repeated strings");
+        var atomAddress = firstRuntime.runtime.internStringAddress("shared-name");
+        assert(firstRuntime.runtime.linearHeap.recordType(atomAddress) ===
+               firstRuntime.runtime.linearHeap.constructor.Types.STRING,
+               "runtime atom is not an authoritative heap string");
+        assert(firstRuntime.runtime.stringAddresses !==
+               otherRuntime.runtime.stringAddresses,
+               "independent runtimes shared an intern table");
+        assert(firstRuntime.runtime.computedStringAddress("shared-name") ===
+               atomAddress,
+               "computed and interned spellings did not share a live string");
+
+        var budgetExecution = firstContext.start(
+            "var total = 0;" +
+            "function add(value) { return value + 1; }" +
+            "for (var i = 0; i < 20; i++) total = add(total);",
+            "budget_resume.js");
+        var budgetResult = budgetExecution.resume(0);
+        assert(budgetResult.status === "budget" && budgetResult.instructions === 0,
+               "zero budget did not yield without executing");
+        var heapTypes = firstRuntime.runtime.linearHeap.constructor.Types;
+        assert(firstRuntime.runtime.linearHeap.recordType(
+                   budgetExecution.frames[0].heapAddress) === heapTypes.FRAME,
+               "suspended activation is not represented by a guest frame record");
+        assert(firstRuntime.runtime.heapRecords.framePC(
+                   budgetExecution.frames[0].heapAddress) === 0,
+               "suspended frame PC was not spilled to the guest heap");
+        assert(firstRuntime.runtime.heapRecords.contextGlobal(
+                   firstContext.heapAddress) === firstContext.globalObject.heapAddress,
+               "context record does not own its global object");
+        var budgetYields = 0;
+        do {
+            budgetResult = budgetExecution.resume(3);
+            if (budgetResult.status === "budget") budgetYields++;
+        } while (budgetResult.status === "budget");
+        assert(budgetResult.status === "completed", "budgeted execution did not complete");
+        assert(budgetYields > 5, "execution did not repeatedly preserve its continuation");
+        assert(firstRuntime.runtime.getGlobal(firstContext, "total") === 20,
+               "resumed guest frames produced the wrong result");
+
+        var hostCalls = 0;
+        firstContext.installGlobal("hostAdd", firstContext.makeHostFunction(
+            "hostAdd", function (receiver, args) {
+                hostCalls++;
+                return Number(args[0]) + Number(args[1]);
+            }));
+        var hostExecution = firstContext.start(
+            "var hostAnswer = hostAdd(20, 22); hostAnswer = hostAnswer + 1;",
+            "host_yield.js");
+        var hostResult = hostExecution.resume(Infinity);
+        assert(hostResult.status === "hostCall", "external host function did not yield");
+        assert(firstRuntime.runtime.heapRecords.framePC(
+                   hostExecution.frames[0].heapAddress) > 0,
+               "host-call yield did not spill its frame PC");
+        assert(hostCalls === 0, "host callback ran before the embedder serviced it");
+        firstRuntime.collect();
+        assert(!firstRuntime.runtime.linearHeap.isFreeRecord(
+                   hostExecution.pendingHostCall.callable.heapAddress),
+               "collection lost the callable of a suspended host request");
+        assert(hostResult.call.name === "hostAdd" &&
+               hostResult.call.arguments[0] === 20 &&
+               hostResult.call.arguments[1] === 22,
+               "host-call request did not preserve its arguments");
+        hostExecution.completeHostCall(42);
+        hostResult = hostExecution.resume(Infinity);
+        assert(hostResult.status === "completed", "host-call execution did not resume");
+        assert(firstRuntime.runtime.getGlobal(firstContext, "hostAnswer") === 43,
+               "host-call result was not installed in the caller register");
+        assert(hostCalls === 0, "manual host completion unexpectedly invoked callback");
+
+        var servicedExecution = firstContext.start(
+            "var servicedAnswer = hostAdd(3, 4);", "serviced_host.js");
+        var servicedResult = servicedExecution.resume(Infinity);
+        assert(servicedResult.status === "hostCall", "second host call did not yield");
+        servicedExecution.serviceHostCall();
+        servicedResult = servicedExecution.resume(Infinity);
+        assert(servicedResult.status === "completed" && hostCalls === 1,
+               "embedder host-call service path failed");
+        assert(firstRuntime.runtime.getGlobal(firstContext, "servicedAnswer") === 7,
+               "serviced host return value was incorrect");
+
+        firstContext.installGlobal("inlineAdd", firstRuntime.runtime.makeNativeFunction(
+            "inlineAdd", function (receiver, args) { return args[0] + args[1]; }));
+        var inlineExecution = firstContext.start(
+            "var inlineAnswer = inlineAdd(8, 9);", "inline_intrinsic.js");
+        var inlineResult = inlineExecution.resume(Infinity);
+        assert(inlineResult.status === "completed" &&
+               firstRuntime.runtime.getGlobal(firstContext, "inlineAnswer") === 17,
+               "explicit inline intrinsic unexpectedly yielded");
+
+        firstContext.installGlobal("hostFailure", firstContext.makeHostFunction(
+            "hostFailure", function () { throw new Error("host failed"); }));
+        var failedExecution = firstContext.start(
+            "hostFailure();", "failed_host.js");
+        var failedResult = failedExecution.resume(Infinity);
+        assert(failedResult.status === "hostCall", "failing host call did not yield first");
+        failedExecution.serviceHostCall();
+        failedResult = failedExecution.resume(Infinity);
+        assert(failedResult.status === "threw" &&
+               String(failedResult.exception).indexOf("host failed") >= 0,
+               "host failure was not injected when execution resumed");
+
+        var injectedExecution = firstContext.start(
+            "try { hostFailure(); } catch (problem) { var injectedAnswer = problem.answer; }",
+            "injected_guest_failure.js");
+        assert(injectedExecution.resume(Infinity).status === "hostCall",
+               "guest-valued host failure did not suspend");
+        var foreignFailureRejected = false;
+        try { injectedExecution.failHostCall(otherRuntime.runtime.makeObject()); }
+        catch (foreignFailureError) { foreignFailureRejected = true; }
+        assert(foreignFailureRejected && injectedExecution.pendingHostCall,
+               "foreign failure was accepted or consumed the pending request");
+        var injectedValue = firstRuntime.runtime.makeObject();
+        firstRuntime.runtime.setProperty(injectedValue, "answer", 99);
+        injectedExecution.failHostCall(injectedValue);
+        firstRuntime.collect();
+        assert(injectedExecution.resume(Infinity).status === "completed" &&
+               firstRuntime.runtime.getGlobal(firstContext, "injectedAnswer") === 99,
+               "collection lost an injected guest exception before resume");
+
+        var forbiddenCallbackCount = 0;
+        var forbiddenRuntime = new JSRuntime({forbidHostCalls: true});
+        var forbiddenContext = forbiddenRuntime.createContext();
+        forbiddenContext.installGlobal("forbiddenHost",
+            forbiddenContext.makeHostFunction("forbiddenHost", function () {
+                forbiddenCallbackCount++;
+            }));
+        var forbiddenExecution = forbiddenContext.start(
+            "forbiddenHost();", "forbidden_host.js");
+        var forbiddenResult = forbiddenExecution.resume(Infinity);
+        assert(forbiddenResult.status === "threw" &&
+               forbiddenResult.exception.name === "HostCallError" &&
+               String(forbiddenResult.exception).indexOf("forbiddenHost") >= 0,
+               "no-host-calls mode did not reject an embedder callback");
+        assert(forbiddenCallbackCount === 0,
+               "no-host-calls mode invoked the forbidden callback");
+        forbiddenContext.run(
+            "var noHostEvalResult = eval('6 * 7');",
+            "no_host_direct_eval.js");
+        assert(forbiddenRuntime.runtime.getGlobal(
+                   forbiddenContext, "noHostEvalResult") === 42,
+               "direct eval crossed the embedder boundary in no-host mode");
+        forbiddenRuntime.destroy();
+
+        var gcExecution = firstContext.start(
+            "var suspendedBytes = Buffer.alloc(4);" +
+            "suspendedBytes[0] = 63;" +
+            "for (var k = 0; k < 8; k++) suspendedBytes[1] = k;",
+            "suspended_gc.js");
+        var gcResult = gcExecution.resume(12);
+        assert(gcResult.status === "budget", "GC continuation test did not suspend");
+        firstRuntime.collect();
+        do {
+            gcResult = gcExecution.resume(12);
+        } while (gcResult.status === "budget");
+        var retainedBytes = firstRuntime.runtime.getGlobal(
+            firstContext, "suspendedBytes");
+        assert(gcResult.status === "completed" &&
+               firstRuntime.runtime.bufferSupport.read(retainedBytes, 0) === 63,
+               "collection did not retain a suspended execution value");
+
+        var abortedExecution = firstContext.start(
+            "while (true) {}", "aborted_execution.js");
+        var abortedResult = abortedExecution.resume(8);
+        assert(abortedResult.status === "budget",
+               "abort lifecycle test did not suspend");
+        var abortedFrameAddress = abortedExecution.frames[0].heapAddress;
+        abortedExecution.abort();
+        assert(abortedExecution.status === "aborted" &&
+               abortedExecution.frames.length === 0,
+               "abort retained the execution frame stack");
+        assert(firstRuntime.runtime.heapRecords.contextActiveFrame(
+                   firstContext.heapAddress) === 0,
+               "abort retained the context's published frame root");
+        assert(firstRuntime.runtime.linearHeap.isFreeRecord(abortedFrameAddress),
+               "abort did not release the guest frame record");
+
+        /* Exercise a saved environment as an owner, not just the currently
+         * running context. Two snapshots share the original backing while
+         * repeated mutation grows/retires replacements across collection. */
+        firstContext.run("var snapshotBag = {};" +
+            "var snapshotBytes = Buffer.alloc(1024 * 1024 + 3);" +
+            "snapshotBytes[0] = 19; snapshotBytes[snapshotBytes.length - 1] = 37;" +
+            "for (var saved = 0; saved < 48; saved++) " +
+            "snapshotBag['key' + saved] = {value: saved};",
+            "saved_context_dictionary.js");
+        var savedContextA = firstContext.createSnapshot();
+        var savedContextB = firstContext.createSnapshot();
+        var mutateSavedContext = "snapshotBytes[0] = 77;" +
+            "snapshotBytes[snapshotBytes.length - 1] = 88;" +
+            "for (var changed = 0; changed < 48; changed++) {" +
+            "delete snapshotBag['key' + changed];" +
+            "snapshotBag['replacement' + changed] = {value: -changed};}";
+        firstContext.run(mutateSavedContext, "mutated_context_dictionary.js");
+        firstRuntime.collect();
+        firstContext.restoreSnapshot(savedContextA);
+        firstContext.run("if (snapshotBytes[0] !== 19 || " +
+            "snapshotBytes[snapshotBytes.length - 1] !== 37 || snapshotBytes[12345] !== 0) " +
+            "throw new Error('saved backing bytes were not restored');" +
+            "if (snapshotBag.key7.value !== 7 || " +
+            "Object.keys(snapshotBag).join(',') !== " +
+            "(function () {var names = []; for (var n = 0; n < 48; n++) " +
+            "names.push('key' + n); return names.join(',');}())) " +
+            "throw new Error('saved context values/order were not restored');",
+            "restored_context_dictionary.js");
+        firstRuntime.runtime.destroyHeapStateSnapshot(savedContextA.heapState);
+        firstContext.run(mutateSavedContext, "second_context_mutation.js");
+        firstRuntime.collect();
+        firstContext.restoreSnapshot(savedContextB);
+        firstContext.run("if (snapshotBytes[0] !== 19 || " +
+            "snapshotBytes[snapshotBytes.length - 1] !== 37) " +
+            "throw new Error('remaining snapshot lost backing contents');" +
+            "if (snapshotBag.key47.value !== 47) " +
+            "throw new Error('remaining snapshot lost its backing');",
+            "remaining_context_snapshot.js");
+        firstRuntime.runtime.destroyHeapStateSnapshot(savedContextB.heapState);
+
+        /* Canonical images carry payloads outside compact descriptors and
+         * contain image-relative offsets, never live process pointers. */
+        var records = firstRuntime.runtime.heapRecords;
+        var heap = firstRuntime.runtime.linearHeap, memory = heap.memory;
+        var savedBytes = firstRuntime.runtime.getGlobal(firstContext, "snapshotBytes");
+        var backing = firstRuntime.runtime.bufferSupport.viewBacking(savedBytes);
+        var livePointer = records.bufferBackingPointer(backing);
+        var savedPointers = records.suspendBufferPointersForSnapshot();
+        var snapshotLength = records.layoutExternalBufferSnapshot(savedPointers, heap.bump);
+        var image = null;
+        try {
+            image = memory.host.allocate(snapshotLength, false);
+            memory.host.copyAllocationRange(image, 0, memory.allocation, 0, heap.bump);
+            records.writeSnapshotBufferPointers(image, savedPointers);
+            records.copyExternalBufferDataToSnapshot(image, savedPointers);
+            var dataAddress = records.bufferBackingDataAddress(backing);
+            var external = 0, snapshotPointer = 0;
+            for (var savedIndex = 0; savedIndex < savedPointers.length; savedIndex++) {
+                if (savedPointers[savedIndex].address === backing &&
+                        (savedPointers[savedIndex].flags & heap.constructor.BufferBackingPolicy.EXTERNAL)) {
+                    dataAddress = savedPointers[savedIndex].snapshotOffset;
+                    snapshotPointer = dataAddress;
+                    external = heap.constructor.BufferBackingPolicy.EXTERNAL;
+                }
+            }
+            assert(memory.host.read8(image, dataAddress) === 19 &&
+                   memory.host.read8(image, dataAddress + 1024 * 1024 + 2) === 37 &&
+                   memory.host.read8(image, dataAddress + 1) === 0,
+                   "portable snapshot lost large backing contents");
+            assert(memory.host.read32LE(image, backing + heap.constructor.HeaderFields.FLAGS) === external,
+                   "portable snapshot lost backing representation");
+            assert(memory.host.read32LE(image, backing +
+                records.standaloneBufferRebindLayout().bufferPointer) === snapshotPointer,
+                "portable snapshot retained a process-local buffer pointer");
+        } finally {
+            records.restoreBufferPointersAfterSnapshot(savedPointers);
+            if (image) memory.destroySnapshot(image);
+        }
+        assert(records.bufferBackingPointer(backing) === livePointer,
+               "snapshot conversion relocated the live buffer");
+
+        firstRuntime.destroy();
+        otherRuntime.destroy();
+        var rejectedDestroyedRoot = false;
+        try { firstRuntime.retain(undefined); }
+        catch (destroyedRootError) { rejectedDestroyedRoot = true; }
+        assert(rejectedDestroyedRoot, "destroyed runtime accepted a new root");
+        return "runtime/context isolation and resumable execution passed";
+    }
+
+    root.GuestVMRunRuntimeContextExecutionTest = runRuntimeContextExecutionTest;
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = runRuntimeContextExecutionTest;
+    }
+}(this));

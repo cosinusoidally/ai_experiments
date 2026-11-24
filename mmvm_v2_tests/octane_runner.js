@@ -1,0 +1,208 @@
+/* Guest-VM runner for the external, unmodified Octane 2.0 checkout.
+ *
+ * From mmvm_v2_tests:
+ *   js_min.exe guest_runner.js --vm-native octane_runner.js Richards
+ *   js_min.exe guest_runner.js --vm-native octane_runner.js --quick all
+ *   js_min.exe guest_runner.js --vm-native octane_runner.js --setup-only RegExp
+ *
+ * The external suite is deliberately loaded in place.  Nothing below copies
+ * or patches ../../js_tests/octane.
+ */
+(function (runnerArguments) {
+    /* Keep the wrapper usable directly by the ES3-era js_min host as a
+     * reference run. Octane's harness assumes this ES5 Array method even
+     * before an individual benchmark is entered. */
+    if (Array.prototype && !Array.prototype.indexOf) {
+        Array.prototype.indexOf = function (value) {
+            var index = 0;
+            while (index < this.length) {
+                if (index in this && this[index] === value) return index;
+                index++;
+            }
+            return -1;
+        };
+    }
+    var octaneDirectory = "../../js_tests/octane/";
+    var suiteFiles = {
+        Richards: ["richards.js"],
+        DeltaBlue: ["deltablue.js"],
+        Crypto: ["crypto.js"],
+        RayTrace: ["raytrace.js"],
+        EarleyBoyer: ["earley-boyer.js"],
+        RegExp: ["regexp.js"],
+        Splay: ["splay.js"],
+        NavierStokes: ["navier-stokes.js"],
+        PdfJS: ["pdfjs.js"],
+        Mandreel: ["mandreel.js"],
+        Gameboy: ["gbemu-part1.js", "gbemu-part2.js"],
+        CodeLoad: ["code-load.js"],
+        Box2D: ["box2d.js"],
+        zlib: ["zlib.js", "zlib-data.js"],
+        Typescript: ["typescript.js", "typescript-input.js",
+                     "typescript-compiler.js"]
+    };
+    var suiteOrder = [
+        "Richards", "DeltaBlue", "Crypto", "RayTrace", "EarleyBoyer",
+        "RegExp", "Splay", "NavierStokes", "PdfJS", "Mandreel",
+        "Gameboy", "CodeLoad", "Box2D", "zlib", "Typescript"
+    ];
+
+    function fail(message) {
+        throw new Error("octane runner: " + message);
+    }
+
+    function asciiLower(value) {
+        value = String(value);
+        var result = "";
+        var index = 0;
+        while (index < value.length) {
+            var code = value.charCodeAt(index++);
+            if (code >= 65 && code <= 90) code += 32;
+            result += String.fromCharCode(code);
+        }
+        return result;
+    }
+
+    function canonicalSuiteName(name) {
+        var lowered = asciiLower(name);
+        var index = 0;
+        while (index < suiteOrder.length) {
+            if (asciiLower(suiteOrder[index]) === lowered) {
+                return suiteOrder[index];
+            }
+            index++;
+        }
+        return null;
+    }
+
+    var quick = false;
+    var setupOnly = false;
+    var diagnostics = false;
+    var requested = [];
+    var argumentIndex = 0;
+    while (argumentIndex < runnerArguments.length) {
+        var argument = String(runnerArguments[argumentIndex++]);
+        if (argument === "--quick") {
+            quick = true;
+        } else if (argument === "--diagnostics") {
+            diagnostics = true;
+        } else if (argument === "--setup-only") {
+            setupOnly = true;
+        } else if (argument === "all") {
+            requested = suiteOrder.slice(0);
+        } else {
+            var suiteName = canonicalSuiteName(argument);
+            if (!suiteName) fail("unknown suite " + argument);
+            requested.push(suiteName);
+        }
+    }
+    if (!requested.length) requested = suiteOrder.slice(0);
+
+    load(octaneDirectory + "base.js");
+    var requestedIndex = 0;
+    while (requestedIndex < requested.length) {
+        var files = suiteFiles[requested[requestedIndex++]];
+        var fileIndex = 0;
+        while (fileIndex < files.length) {
+            load(octaneDirectory + files[fileIndex++]);
+        }
+    }
+
+    if (quick) {
+        BenchmarkSuite.config.doWarmup = false;
+        BenchmarkSuite.config.doDeterministic = true;
+        var loadedSuiteIndex = 0;
+        while (loadedSuiteIndex < BenchmarkSuite.suites.length) {
+            var benchmarks = BenchmarkSuite.suites[loadedSuiteIndex++].benchmarks;
+            var benchmarkIndex = 0;
+            while (benchmarkIndex < benchmarks.length) {
+                benchmarks[benchmarkIndex].deterministicIterations = 1;
+                benchmarks[benchmarkIndex].minIterations = 1;
+                benchmarkIndex++;
+            }
+        }
+    }
+
+    if (setupOnly) {
+        /* RunSuites performs this before entering the suites. Setup routines
+         * such as RegExp construct deterministic input variants and their
+         * stock checksum depends on the same seeded generator. */
+        BenchmarkSuite.ResetRNG();
+        var setupSuiteIndex = 0;
+        while (setupSuiteIndex < BenchmarkSuite.suites.length) {
+            var setupSuite = BenchmarkSuite.suites[setupSuiteIndex++];
+            var setupBenchmarkIndex = 0;
+            while (setupBenchmarkIndex < setupSuite.benchmarks.length) {
+                var setupBenchmark =
+                    setupSuite.benchmarks[setupBenchmarkIndex++];
+                var setupStarted = new Date().getTime();
+                setupBenchmark.Setup();
+                var setupFinished = new Date().getTime();
+                print(setupSuite.name + "/" + setupBenchmark.name +
+                      ": setup passed in " +
+                      (setupFinished - setupStarted) + " ms");
+                setupBenchmark.TearDown();
+            }
+        }
+        return;
+    }
+
+    var failed = false;
+    function reportResult(name, result) {
+        if (quick) print(name + ": passed (quick correctness)");
+        else print(name + ": " + result);
+        if (diagnostics && !quick) {
+            /* Read the stock harness's completed measurements. No timed
+             * callback or benchmark function is wrapped/replaced. */
+            for (var suiteIndex = 0; suiteIndex < BenchmarkSuite.suites.length; suiteIndex++) {
+                var suite = BenchmarkSuite.suites[suiteIndex];
+                if (suite.name !== name) continue;
+                for (var resultIndex = 0; resultIndex < suite.results.length; resultIndex++) {
+                    var measurement = suite.results[resultIndex];
+                    print("benchmark " + measurement.benchmark.name +
+                        ": mean_us=" + measurement.time +
+                        "; latency=" + measurement.latency);
+                }
+            }
+        }
+    }
+    function reportError(name, error) {
+        failed = true;
+        /* Print stored fields before implicit Error coercion: that coercion
+         * may itself be the unsupported operation masking the original fault.
+         * This is wrapper diagnostics, not a change to external validation. */
+        if (diagnostics && error && typeof error === "object") {
+            print(name + " failure name: " + error.name);
+            print(name + " failure message: " + error.message);
+            if (error.stack) print(error.stack);
+        }
+        var location = "";
+        if (error && error.fileName) {
+            location = " at " + error.fileName + ":" +
+                (error.lineNumber || 1) + ":" + (error.columnNumber || 1);
+        }
+        print(name + ": FAILED: " + error + location);
+    }
+    function reportScore(score) {
+        if (!failed && !quick) {
+            print("----");
+            print("Score (version " + BenchmarkSuite.version + "): " + score);
+        }
+    }
+
+    var benchmarkRunner = {
+        NotifyStart: function (name) {
+            print(name + ": running" + (quick ? " (quick correctness)" : ""));
+        },
+        NotifyResult: reportResult,
+        NotifyError: reportError
+    };
+    /* A quick run verifies benchmark results but deliberately does not claim
+     * a score. Avoid asking the stock harness to format a meaningless score
+     * after a single deterministic iteration. */
+    if (!quick) benchmarkRunner.NotifyScore = reportScore;
+    BenchmarkSuite.RunSuites(benchmarkRunner);
+
+    if (failed) fail("one or more suites failed");
+    if (quick) print("Octane quick correctness run passed");
+}(arguments));
