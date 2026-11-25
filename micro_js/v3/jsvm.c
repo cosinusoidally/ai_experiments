@@ -129,8 +129,12 @@ static Val val(int t, double n, Cell *p) {
     v.index=0;
     if(t>=STR) {
         v.u.p=p;
-        if(t>=LREF)v.index=(int)n;
-    }else v.u.n=n;
+        if(t>=LREF) {
+            v.index=(int)n;
+        }
+    }else {
+        v.u.n=n;
+    }
     return v;
 }
 static Val undef(void) {
@@ -148,12 +152,16 @@ static Val object(Obj *o) {
 static void die(VM *m, const char *s) {
     sprintf(m->error,"%.250s",s);
     m->thrown=0;
-    if(m->trap)longjmp(*m->trap,1);
+    if(m->trap) {
+        longjmp(*m->trap,1);
+    }
     longjmp(m->fail,1);
 }
 static void *mem(VM *m, void *p, size_t n) {
     void *q=realloc(p,n?n:1);
-    if(!q) die(m,"out of memory");
+    if(!q) {
+        die(m,"out of memory");
+    }
     return q;
 }
 static Cell *cell(VM *m, size_t n, int kind) {
@@ -170,11 +178,14 @@ static Val strn(VM *m,const char *s,size_t n) {
     unsigned h=5381, slot=0;
     size_t i;
     if(n<=32) {
-        for(i=0;i<n;i++)h=h*33+(unsigned char)s[i];
+        for(i=0;i<n;i++) {
+            h=h*33+(unsigned char)s[i];
+        }
         slot=(h^(h>>16))%STRING_CACHE_SIZE;
         p=m->strings[slot];
-        if(p&&p->hash==h&&p->len==n&&!memcmp(p->s,s,n))
-        return val(STR,0,(Cell *)p);
+        if(p&&p->hash==h&&p->len==n&&!memcmp(p->s,s,n)) {
+            return val(STR,0,(Cell *)p);
+        }
     }
     p=(Str *)cell(m,sizeof(Str)+n,CSTR);
     p->len=n;
@@ -202,8 +213,12 @@ static unsigned hash(Val s) {
     Str *p=(Str *)s.u.p;
     unsigned h=5381;
     size_t i;
-    if(p->hash)return p->hash;
-    for(i=0;i<p->len;i++) h=h*33+(unsigned char)p->s[i];
+    if(p->hash) {
+        return p->hash;
+    }
+    for(i=0;i<p->len;i++) {
+        h=h*33+(unsigned char)p->s[i];
+    }
     return p->hash=h;
 }
 static int iskey(Val k,const char *s) {
@@ -223,8 +238,14 @@ static Env *env(VM *m,Env *up) {
 static Prop *own(Obj *o,Val k) {
     unsigned h=hash(k);
     Prop *p;
-    if(!o->cap) return 0;
-    for(p=o->tab[h%o->cap];p;p=p->next) if(p->hash==h && seq(p->key,k)) return p;
+    if(!o->cap) {
+        return 0;
+    }
+    for(p=o->tab[h%o->cap];p;p=p->next) {
+        if(p->hash==h && seq(p->key,k)) {
+            return p;
+        }
+    }
     return 0;
 }
 static void resize(VM *m,Obj *o) {
@@ -232,10 +253,12 @@ static void resize(VM *m,Obj *o) {
     Prop **t=mem(m,0,n*sizeof(*t));
     Prop *p,*q;
     memset(t,0,n*sizeof(*t));
-    for(i=0;i<o->cap;i++) for(p=o->tab[i];p;p=q) {
+    for(i=0;i<o->cap;i++) {
+        for(p=o->tab[i];p;p=q) {
         q=p->next;
         p->next=t[p->hash%n];
         t[p->hash%n]=p;
+    }
     }
     free(o->tab);
     o->tab=t;
@@ -246,7 +269,9 @@ static int indexof(Val k) {
     const char *s=p->s;
     int n=0;
     size_t i;
-    if(p->idx)return p->idx-2;
+    if(p->idx) {
+        return p->idx-2;
+    }
     if(!p->len||(*s=='0'&&p->len>1)){
         p->idx=1;
         return -1;
@@ -264,7 +289,9 @@ static int indexof(Val k) {
 /* Dense slots use tag -1 for a hole, distinct from undefined. */
 static int denseindex(Obj *o, Val k) {
     int i;
-    if(!o->array) return -1;
+    if(!o->array) {
+        return -1;
+    }
     i=indexof(k);
     return i>=0&&(unsigned)i<o->densecap ? i : -1;
 }
@@ -275,8 +302,12 @@ static int ownkey(Obj *o, Val k) {
 static int del(Obj *o,Val k) {
     Prop **p,*q;
     int i=denseindex(o,k);
-    if(i>=0) o->dense[i]=val(-1,0,0);
-    if(!o->cap) return 1;
+    if(i>=0) {
+        o->dense[i]=val(-1,0,0);
+    }
+    if(!o->cap) {
+        return 1;
+    }
     p=&o->tab[hash(k)%o->cap];
     while(*p) {
         if(seq((*p)->key,k)) {
@@ -292,17 +323,23 @@ static int del(Obj *o,Val k) {
 }
 static int denseput(VM *m,Obj *o,int i,Val k,Val v) {
     unsigned n,j;
-    if(i>=o->length&&i<INT_MAX)o->length=i+1;
+    if(i>=o->length&&i<INT_MAX) {
+        o->length=i+1;
+    }
     if((unsigned)i<o->densecap&&o->dense[i].t!=-1) {
         o->dense[i]=v;
         return 1;
     }
     if((unsigned)i>(o->densecap?o->densecap:3)||
-       (o->count&&own(o,k)))return 0;
+       (o->count&&own(o,k))) {
+        return 0;
+    }
     if((unsigned)i>=o->densecap) {
         n=o->densecap?o->densecap*2:4;
         o->dense=mem(m,o->dense,n*sizeof(Val));
-        for(j=o->densecap;j<n;j++)o->dense[j]=val(-1,0,0);
+        for(j=o->densecap;j<n;j++) {
+            o->dense[j]=val(-1,0,0);
+        }
         o->densecap=n;
     }
     o->dense[i]=v;
@@ -314,7 +351,9 @@ static void put(VM *m,Obj *o,Val k,Val v) {
     unsigned j;
     if(o->array) {
         if(iskey(k,"length")) {
-            if(v.t!=NUM || !(v.u.n>=0 && v.u.n<=INT_MAX) || v.u.n!=(int)v.u.n) die(m,"invalid array length");
+            if(v.t!=NUM || !(v.u.n>=0 && v.u.n<=INT_MAX) || v.u.n!=(int)v.u.n) {
+                die(m,"invalid array length");
+            }
             o->length=(int)v.u.n;
             if(!o->length) {
                 free(o->dense);
@@ -322,13 +361,16 @@ static void put(VM *m,Obj *o,Val k,Val v) {
                 o->densecap=0;
             } else {
                 unsigned n=o->densecap;
-                while(n>4&&(unsigned)o->length<=n/4)n/=2;
+                while(n>4&&(unsigned)o->length<=n/4) {
+                    n/=2;
+                }
                 if(n<o->densecap) {
                     o->dense=mem(m,o->dense,n*sizeof(Val));
                     o->densecap=n;
                 }
-                for(j=(unsigned)o->length;j<o->densecap;j++)
-                o->dense[j]=val(-1,0,0);
+                for(j=(unsigned)o->length;j<o->densecap;j++) {
+                    o->dense[j]=val(-1,0,0);
+                }
             }
             for(j=0;j<o->cap;j++) {
                 Prop **q=&o->tab[j];
@@ -339,17 +381,23 @@ static void put(VM *m,Obj *o,Val k,Val v) {
                         *q=p->next;
                         free(p);
                         o->count--;
-                    } else q=&(*q)->next;
+                    } else {
+                        q=&(*q)->next;
+                    }
                 }
             }
             return;
         }
         i=indexof(k);
-        if(i>=0&&denseput(m,o,i,k,v))return;
+        if(i>=0&&denseput(m,o,i,k,v)) {
+            return;
+        }
     }
     p=own(o,k);
     if(!p) {
-        if(o->count>=o->cap*2 || !o->cap) resize(m,o);
+        if(o->count>=o->cap*2 || !o->cap) {
+            resize(m,o);
+        }
         p=mem(m,0,sizeof(*p));
         p->hash=hash(k);
         p->hidden=0;
@@ -365,16 +413,26 @@ static Val get(Obj *o,Val k) {
     Prop *p;
     int i;
     for(;o;o=o->proto) {
-        if(o->array && iskey(k,"length")) return num(o->length);
+        if(o->array && iskey(k,"length")) {
+            return num(o->length);
+        }
         i=denseindex(o,k);
-        if(i>=0&&o->dense[i].t!=-1) return o->dense[i];
+        if(i>=0&&o->dense[i].t!=-1) {
+            return o->dense[i];
+        }
         p=own(o,k);
-        if(p) return p->value;
+        if(p) {
+            return p->value;
+        }
     }
     return undef();
 }
 static int has(Obj *o,Val k) {
-    for(;o;o=o->proto) if(ownkey(o,k)||(o->array&&iskey(k,"length"))) return 1;
+    for(;o;o=o->proto) {
+        if(ownkey(o,k)||(o->array&&iskey(k,"length"))) {
+            return 1;
+        }
+    }
     return 0;
 }
 static void named(VM *m,Obj *o,const char *k,Val v) {
@@ -389,13 +447,17 @@ static Prop *binding(Env *e,Val k) {
     Prop *p;
     for(;e;e=e->up) {
         p=own(e->vars,k);
-        if(p)return p;
+        if(p) {
+            return p;
+        }
     }
     return 0;
 }
 static Val lookup(VM *m,Env *e,Val k) {
     Prop *p=binding(e,k);
-    if(!p)die(m,"undefined identifier");
+    if(!p) {
+        die(m,"undefined identifier");
+    }
     return p->value;
 }
 static int truth(Val v) {
@@ -427,11 +489,19 @@ static double number(Val v) {
         return 0;
         case STR:
         s=chars(v);
-        while(isspace((unsigned char)*s)) s++;
-        if(!*s)return s==chars(v)+(int)slen(v)?0:nanval();
+        while(isspace((unsigned char)*s)) {
+            s++;
+        }
+        if(!*s) {
+            return s==chars(v)+(int)slen(v)?0:nanval();
+        }
         n=strtod(s,&end);
-        if(end==s)return nanval();
-        while(isspace((unsigned char)*end))end++;
+        if(end==s) {
+            return nanval();
+        }
+        while(isspace((unsigned char)*end)) {
+            end++;
+        }
         return *end||end!=chars(v)+slen(v)?nanval():n;
         default:
         return nanval();
@@ -450,7 +520,9 @@ static Val tostring(VM *m,Val v) {
         case BOOL:
         return str(m,v.u.n?"true":"false");
         case NUM:
-        if(v.u.n!=v.u.n)return str(m,"NaN");
+        if(v.u.n!=v.u.n) {
+            return str(m,"NaN");
+        }
         if(v.u.n>=0&&v.u.n<=INT_MAX&&v.u.n==(unsigned)v.u.n){
             n=(unsigned)v.u.n;
             p=b+sizeof(b);
@@ -473,20 +545,31 @@ static Val property(VM *m,Val b,Val k) {
         i=(int)k.u.n;
         if(b.t==OBJ) {
             Obj *o=(Obj *)b.u.p;
-            if((unsigned)i<o->densecap&&o->dense[i].t!=-1)
-            return o->dense[i];
+            if((unsigned)i<o->densecap&&o->dense[i].t!=-1) {
+                return o->dense[i];
+            }
         }
-        if(b.t==STR&&(size_t)i<slen(b))return strn(m,chars(b)+i,1);
+        if(b.t==STR&&(size_t)i<slen(b)) {
+            return strn(m,chars(b)+i,1);
+        }
     }
     k=tostring(m,k);
-    if(b.t==OBJ)return get((Obj *)b.u.p,k);
+    if(b.t==OBJ) {
+        return get((Obj *)b.u.p,k);
+    }
     if(b.t==STR) {
-        if(iskey(k,"length"))return num((double)slen(b));
+        if(iskey(k,"length")) {
+            return num((double)slen(b));
+        }
         i=indexof(k);
-        if(i>=0&&(size_t)i<slen(b))return strn(m,chars(b)+i,1);
+        if(i>=0&&(size_t)i<slen(b)) {
+            return strn(m,chars(b)+i,1);
+        }
         return get(m->sp,k);
     }
-    if(b.t==U||b.t==NIL)die(m,"property access on null/undefined");
+    if(b.t==U||b.t==NIL) {
+        die(m,"property access on null/undefined");
+    }
     return undef();
 }
 static Val reference(VM *m,Env *e,Val b,Val k) {
@@ -499,11 +582,19 @@ static Val reference(VM *m,Env *e,Val b,Val k) {
 }
 static Val readval(VM *m,Val v) {
     Ref *r;
-    if(v.t==LREF)return ((Env *)v.u.p)->slots[v.index]->value;
-    if(v.t==AREF)return property(m,object((Obj *)v.u.p),num(v.index));
-    if(v.t!=REF)return v;
+    if(v.t==LREF) {
+        return ((Env *)v.u.p)->slots[v.index]->value;
+    }
+    if(v.t==AREF) {
+        return property(m,object((Obj *)v.u.p),num(v.index));
+    }
+    if(v.t!=REF) {
+        return v;
+    }
     r=(Ref *)v.u.p;
-    if(r->env)return lookup(m,r->env,r->key);
+    if(r->env) {
+        return lookup(m,r->env,r->key);
+    }
     return property(m,r->base,r->key);
 }
 static void store(VM *m,Val v,Val x) {
@@ -516,17 +607,29 @@ static void store(VM *m,Val v,Val x) {
     if(v.t==AREF) {
         Obj *o=(Obj *)v.u.p;
         Val k=o->count?tostring(m,num(v.index)):undef();
-        if(!denseput(m,o,v.index,k,x))put(m,o,tostring(m,num(v.index)),x);
+        if(!denseput(m,o,v.index,k,x)) {
+            put(m,o,tostring(m,num(v.index)),x);
+        }
         return;
     }
-    if(v.t!=REF)die(m,"invalid assignment");
+    if(v.t!=REF) {
+        die(m,"invalid assignment");
+    }
     r=(Ref *)v.u.p;
     if(r->env) {
         p=binding(r->env,r->key);
-        if(p)p->value=x;
-        else put(m,m->global->vars,r->key,x);
-    } else if(r->obj)put(m,r->obj,r->key,x);
-    else if(r->base.t==U||r->base.t==NIL)die(m,"invalid property assignment");
+        if(p) {
+            p->value=x;
+        }
+        else {
+            put(m,m->global->vars,r->key,x);
+        }
+    } else if(r->obj) {
+        put(m,r->obj,r->key,x);
+    }
+    else if(r->base.t==U||r->base.t==NIL) {
+        die(m,"invalid property assignment");
+    }
 }
 static int equal(Val a,Val b,int strict) {
     if(a.t==b.t) {
@@ -542,12 +645,24 @@ static int equal(Val a,Val b,int strict) {
             return a.u.n==b.u.n;
         }
     }
-    if(strict)return 0;
-    if((a.t==U||a.t==NIL)&&(b.t==U||b.t==NIL))return 1;
-    if(a.t==BOOL)a=num(a.u.n);
-    if(b.t==BOOL)b=num(b.u.n);
-    if((a.t==STR&&b.t==NUM)||(a.t==NUM&&b.t==STR))return number(a)==number(b);
-    if(a.t==NUM&&b.t==NUM)return a.u.n==b.u.n;
+    if(strict) {
+        return 0;
+    }
+    if((a.t==U||a.t==NIL)&&(b.t==U||b.t==NIL)) {
+        return 1;
+    }
+    if(a.t==BOOL) {
+        a=num(a.u.n);
+    }
+    if(b.t==BOOL) {
+        b=num(b.u.n);
+    }
+    if((a.t==STR&&b.t==NUM)||(a.t==NUM&&b.t==STR)) {
+        return number(a)==number(b);
+    }
+    if(a.t==NUM&&b.t==NUM) {
+        return a.u.n==b.u.n;
+    }
     return 0;
 }
 static void mark(VM *m,Cell *c) {
@@ -558,11 +673,15 @@ static void mark(VM *m,Cell *c) {
     }
 }
 static void mv(VM *m,Val v) {
-    if(v.t>=STR)mark(m,v.u.p);
+    if(v.t>=STR) {
+        mark(m,v.u.p);
+    }
 }
 static void markfun(VM *m,Fun *f) {
     int i;
-    if(!f||f->mark)return;
+    if(!f||f->mark) {
+        return;
+    }
     f->mark=1;
     mark(m,(Cell *)f->cache);
     mv(m,f->name);
@@ -570,9 +689,15 @@ static void markfun(VM *m,Fun *f) {
         mv(m,f->code[i].v);
         markfun(m,f->code[i].fn);
     }
-    for(i=0;i<f->nhd;i++)mv(m,f->handlers[i].name);
-    for(i=0;i<f->argc;i++)mv(m,f->params[i]);
-    for(i=0;i<f->nv;i++)mv(m,f->vars[i]);
+    for(i=0;i<f->nhd;i++) {
+        mv(m,f->handlers[i].name);
+    }
+    for(i=0;i<f->argc;i++) {
+        mv(m,f->params[i]);
+    }
+    for(i=0;i<f->nv;i++) {
+        mv(m,f->vars[i]);
+    }
     for(i=0;i<f->nh;i++) {
         mv(m,f->names[i]);
         markfun(m,f->hoist[i]);
@@ -590,10 +715,14 @@ static void scan(VM *m,Cell *c) {
         mark(m,(Cell *)o->proto);
         mark(m,(Cell *)o->scope);
         markfun(m,o->fun);
-        for(i=0;i<o->densecap;i++) mv(m,o->dense[i]);
-        for(i=0;i<o->cap;i++)for(p=o->tab[i];p;p=p->next) {
+        for(i=0;i<o->densecap;i++) {
+            mv(m,o->dense[i]);
+        }
+        for(i=0;i<o->cap;i++) {
+            for(p=o->tab[i];p;p=p->next) {
             mv(m,p->key);
             mv(m,p->value);
+        }
         }
         break;
         case CENV:
@@ -626,14 +755,18 @@ static void release(Cell *c) {
     Prop *p,*q;
     if(c->kind==COBJ) {
         o=(Obj *)c;
-        for(i=0;i<o->cap;i++)for(p=o->tab[i];p;p=q) {
+        for(i=0;i<o->cap;i++) {
+            for(p=o->tab[i];p;p=q) {
             q=p->next;
             free(p);
+        }
         }
         free(o->dense);
         free(o->tab);
     }
-    if(c->kind==CENV)free(((Env *)c)->slots);
+    if(c->kind==CENV) {
+        free(((Env *)c)->slots);
+    }
     free(c);
 }
 static void gc(VM *m) {
@@ -647,7 +780,9 @@ static void gc(VM *m) {
     mark(m,(Cell *)m->ap);
     mark(m,(Cell *)m->fp);
     mark(m,(Cell *)m->sp);
-    for(i=0;i<m->top;i++)mv(m,m->stack[i]);
+    for(i=0;i<m->top;i++) {
+        mv(m,m->stack[i]);
+    }
     for(r=m->frame;r;r=r->prev) {
         mark(m,(Cell *)r->env);
         mv(m,r->self);
@@ -721,9 +856,15 @@ static int ident(int c) {
     return isalnum((unsigned char)c)||c=='_'||c=='$'||(unsigned char)c>=128;
 }
 static int hex(int c) {
-    if(c>='0'&&c<='9')return c-'0';
-    if(c>='a'&&c<='f')return c-'a'+10;
-    if(c>='A'&&c<='F')return c-'A'+10;
+    if(c>='0'&&c<='9') {
+        return c-'0';
+    }
+    if(c>='a'&&c<='f') {
+        return c-'a'+10;
+    }
+    if(c>='A'&&c<='F') {
+        return c-'A'+10;
+    }
     return -1;
 }
 static void next(Parser *p) {
@@ -738,20 +879,28 @@ static void next(Parser *p) {
     l->previous=l->line;
     for(;;) {
         while(isspace((unsigned char)*s)) {
-            if(*s=='\n')l->line++;
+            if(*s=='\n') {
+                l->line++;
+            }
             s++;
         }
         if(s[0]=='/'&&s[1]=='/') {
-            while(*s&&*s!='\n')s++;
+            while(*s&&*s!='\n') {
+                s++;
+            }
             continue;
         }
         if(s[0]=='/'&&s[1]=='*') {
             s+=2;
             while(*s&&!(s[0]=='*'&&s[1]=='/')) {
-                if(*s=='\n')l->line++;
+                if(*s=='\n') {
+                    l->line++;
+                }
                 s++;
             }
-            if(!*s)syntax(p,"unterminated comment");
+            if(!*s) {
+                syntax(p,"unterminated comment");
+            }
             s+=2;
             continue;
         }
@@ -770,7 +919,9 @@ static void next(Parser *p) {
         if(c=='0'&&(*s=='x'||*s=='X')) {
             double d=0;
             s++;
-            if(hex(*s)<0)syntax(p,"bad hex literal");
+            if(hex(*s)<0) {
+                syntax(p,"bad hex literal");
+            }
             while((h=hex(*s))>=0) {
                 d=d*16+h;
                 s++;
@@ -783,12 +934,16 @@ static void next(Parser *p) {
         l->t=KNUM;
     }
     else if(ident(c)) {
-        while(ident(*s))s++;
+        while(ident(*s)) {
+            s++;
+        }
         l->v=strn(p->m,a,(size_t)(s-a));
         l->t=KID;
-        for(i=0;i<(int)(sizeof(kw)/sizeof(*kw));i++)if(iskey(l->v,kw[i])) {
+        for(i=0;i<(int)(sizeof(kw)/sizeof(*kw));i++) {
+            if(iskey(l->v,kw[i])) {
             l->t=KVAR+i;
             break;
+        }
         }
     }
     else if(c=='\''||c=='"') {
@@ -796,7 +951,9 @@ static void next(Parser *p) {
         n=0;
         a=s;
         while(*a&&*a!=q) {
-            if(*a=='\\'&&a[1])a++;
+            if(*a=='\\'&&a[1]) {
+                a++;
+            }
             a++;
         }
         b=mem(p->m,0,(size_t)(a-s)+1);
@@ -816,8 +973,11 @@ static void next(Parser *p) {
                 c=(unsigned char)*s++;
                 {
                     const char *esc="nrtbfv0",*hit=strchr(esc,c);
-                    if(hit)c="\n\r\t\b\f\v\0"[hit-esc];
-                    else switch(c) {
+                    if(hit) {
+                        c="\n\r\t\b\f\v\0"[hit-esc];
+                    }
+                    else {
+                        switch(c) {
                     case '\n':
                     l->line++;
                     continue;
@@ -838,17 +998,24 @@ static void next(Parser *p) {
                     default:
                     break;
                     }
+                    }
                 }
             }
-            if(c<128)b[n++]=(char)c;
+            if(c<128) {
+                b[n++]=(char)c;
+            }
             else if(c<256&&escaped) {
                 b[n++]=(char)(192|(c>>6));
                 b[n++]=(char)(128|(c&63));
             }else if(c>=256) {
-                if(c>=2048)b[n++]=(char)(224|(c>>12));
+                if(c>=2048) {
+                    b[n++]=(char)(224|(c>>12));
+                }
                 b[n++]=(char)((c>=2048?128:192)|(c>>6&63));
                 b[n++]=(char)(128|(c&63));
-            }else b[n++]=(char)c;
+            }else {
+                b[n++]=(char)c;
+            }
         }
         if(!*s) {
             free(b);
@@ -875,12 +1042,16 @@ static void next(Parser *p) {
     l->s=s;
 }
 static int accept(Parser *p,int t) {
-    if(p->l.t!=t)return 0;
+    if(p->l.t!=t) {
+        return 0;
+    }
     next(p);
     return 1;
 }
 static void need(Parser *p,int t) {
-    if(!accept(p,t))syntax(p,"unexpected token");
+    if(!accept(p,t)) {
+        syntax(p,"unexpected token");
+    }
 }
 static Val id(Parser *p) {
     Val v=p->l.v;
@@ -947,12 +1118,22 @@ static void localhints(VM *m,Fun *f) {
     Obj *map=obj(m,0);
     Prop *p;
     int i;
-    for(i=0;i<f->argc;i++)put(m,map,f->params[i],num(i+1));
-    for(i=0;i<f->nv;i++)put(m,map,f->vars[i],num(f->argc+i+1));
-    for(i=0;i<f->nh;i++)put(m,map,f->names[i],num(f->argc+f->nv+i+1));
-    for(i=0;i<f->n;i++)if(f->code[i].op==NAME) {
+    for(i=0;i<f->argc;i++) {
+        put(m,map,f->params[i],num(i+1));
+    }
+    for(i=0;i<f->nv;i++) {
+        put(m,map,f->vars[i],num(f->argc+i+1));
+    }
+    for(i=0;i<f->nh;i++) {
+        put(m,map,f->names[i],num(f->argc+f->nv+i+1));
+    }
+    for(i=0;i<f->n;i++) {
+        if(f->code[i].op==NAME) {
         p=own(map,f->code[i].v);
-        if(p)f->code[i].a=(int)p->value.u.n;
+        if(p) {
+                f->code[i].a=(int)p->value.u.n;
+            }
+    }
     }
 }
 static Fun *function(Parser *p,Val name) {
@@ -964,14 +1145,18 @@ static Fun *function(Parser *p,Val name) {
     p->iters=0;
     f->name=name;
     need(p,'(');
-    if(p->l.t!=')')do {
+    if(p->l.t!=')') {
+        do {
         f->params=mem(p->m,f->params,(f->argc+1)*sizeof(Val));
         f->params[f->argc++]=id(p);
     }
     while(accept(p,','));
+    }
     need(p,')');
     need(p,'{');
-    while(p->l.t!='}'&&p->l.t!=KEND)stmt(p);
+    while(p->l.t!='}'&&p->l.t!=KEND) {
+        stmt(p);
+    }
     need(p,'}');
     out(p,PUSH,0);
     out(p,RET,0);
@@ -985,20 +1170,32 @@ static int prec(int t) {
     static const char *groups[]={",","=","?","","","|","^","&","","<>","","+-","*/%"};
     static const unsigned char extended[]={9,9,9,9,10,10,5,4,0,0,2,2,2,2,2,11,11,11,2,2,2};
     int i;
-    if(t>=KEQ&&t<=KBX)return extended[t-KEQ];
-    if(t==KIN||t==KINSTANCE)return 10;
-    if(t>0&&t<128)for(i=0;i<13;i++)if(strchr(groups[i],t))return i+1;
+    if(t>=KEQ&&t<=KBX) {
+        return extended[t-KEQ];
+    }
+    if(t==KIN||t==KINSTANCE) {
+        return 10;
+    }
+    if(t>0&&t<128) {
+        for(i=0;i<13;i++) {
+            if(strchr(groups[i],t)) {
+                return i+1;
+            }
+        }
+    }
     return 0;
 }
 static int args(Parser *p) {
     int n=0;
     need(p,'(');
-    if(p->l.t!=')')do {
+    if(p->l.t!=')') {
+        do {
         expr(p,2);
         out(p,GET,0);
         n++;
     }
     while(accept(p,','));
+    }
     need(p,')');
     return n;
 }
@@ -1008,7 +1205,9 @@ static void member(Parser *p,int calls) {
         if(accept(p,'.')) {
             out(p,GET,0);
             k=p->l.v;
-            if(k.t!=STR)syntax(p,"expected property name");
+            if(k.t!=STR) {
+                syntax(p,"expected property name");
+            }
             next(p);
             emit(p,PUSH,0,k);
             out(p,PROP,0);
@@ -1020,7 +1219,9 @@ static void member(Parser *p,int calls) {
         }else if(calls&&p->l.t=='(') {
             out(p,PRECALL,0);
             out(p,CALL,args(p));
-        }else break;
+        }else {
+            break;
+        }
     }
 }
 static void primary(Parser *p) {
@@ -1052,16 +1253,21 @@ static void primary(Parser *p) {
         break;
         case KFUNCTION:
         k=undef();
-        if(p->l.t==KID)k=id(p);
+        if(p->l.t==KID) {
+            k=id(p);
+        }
         f=function(p,k);
         n=out(p,CLOSURE,0);
         p->f->code[n].fn=f;
         break;
         case '{':
         out(p,OBJECT,0);
-        if(p->l.t!='}')do {
+        if(p->l.t!='}') {
+            do {
             k=p->l.v;
-            if(k.t!=STR&&k.t!=NUM)syntax(p,"expected object key");
+            if(k.t!=STR&&k.t!=NUM) {
+                    syntax(p,"expected object key");
+                }
             next(p);
             need(p,':');
             out(p,DUP,0);
@@ -1072,6 +1278,7 @@ static void primary(Parser *p) {
             out(p,DROP,0);
         }
         while(accept(p,',')&&p->l.t!='}');
+        }
         need(p,'}');
         break;
         case '[':
@@ -1090,12 +1297,16 @@ static void primary(Parser *p) {
             expr(p,2);
             out(p,SET,0);
             out(p,DROP,0);
-            if(!accept(p,','))break;
+            if(!accept(p,',')) {
+                break;
+            }
         }
         need(p,']');
         break;
         case KNEW:
-        if(++p->depth>512)syntax(p,"new nesting limit");
+        if(++p->depth>512) {
+            syntax(p,"new nesting limit");
+        }
         primary(p);
         p->depth--;
         member(p,0);
@@ -1109,14 +1320,24 @@ static void primary(Parser *p) {
 }
 static void prefix(Parser *p) {
     int t=p->l.t;
-    if(++p->depth>512)syntax(p,"prefix nesting limit");
+    if(++p->depth>512) {
+        syntax(p,"prefix nesting limit");
+    }
     if(t=='!'||t=='~'||t=='+'||t=='-'||t==KTYPEOF||t==KVOID||t==KDELETE||t==KINC||t==KDEC) {
         next(p);
         prefix(p);
-        if(t==KINC||t==KDEC)out(p,INC,t==KINC?1:-1);
-        else if(t==KTYPEOF)out(p,TYPE,0);
-        else if(t==KDELETE)out(p,DEL,0);
-        else out(p,UN,t);
+        if(t==KINC||t==KDEC) {
+            out(p,INC,t==KINC?1:-1);
+        }
+        else if(t==KTYPEOF) {
+            out(p,TYPE,0);
+        }
+        else if(t==KDELETE) {
+            out(p,DEL,0);
+        }
+        else {
+            out(p,UN,t);
+        }
     }else {
         primary(p);
         member(p,1);
@@ -1150,7 +1371,9 @@ static int compound(int t) {
 }
 static void expr(Parser *p,int min) {
     int t,k,j,h;
-    if(++p->depth>512)syntax(p,"expression nesting limit");
+    if(++p->depth>512) {
+        syntax(p,"expression nesting limit");
+    }
     prefix(p);
     while((k=prec(p->l.t))>=min) {
         t=p->l.t;
@@ -1166,7 +1389,9 @@ static void expr(Parser *p,int min) {
                 out(p,GET,0);
             }
             expr(p,k);
-            if(t!='=')out(p,BIN,compound(t));
+            if(t!='=') {
+                out(p,BIN,compound(t));
+            }
             out(p,SET,0);
         }else if(t=='?') {
             out(p,GET,0);
@@ -1196,7 +1421,9 @@ static void expr(Parser *p,int min) {
     p->depth--;
 }
 static void semi(Parser *p) {
-    if(!accept(p,';')&&p->l.t!='}'&&p->l.t!=KEND&&p->l.previous==p->l.line)syntax(p,"expected semicolon");
+    if(!accept(p,';')&&p->l.t!='}'&&p->l.t!=KEND&&p->l.previous==p->l.line) {
+        syntax(p,"expected semicolon");
+    }
 }
 static void vars(Parser *p) {
     Val v;
@@ -1215,7 +1442,9 @@ static void vars(Parser *p) {
 static int forin(Parser *p) {
     Lex saved=p->l;
     int yes;
-    if(p->l.t==KVAR)next(p);
+    if(p->l.t==KVAR) {
+        next(p);
+    }
     if(p->l.t!=KID) {
         p->l=saved;
         return 0;
@@ -1235,19 +1464,31 @@ static void switchtable(Parser *p,int start,int entry,int end,int def) {
             continue;
         }
         if(j+4>=end||c[j].op!=NAME||c[j+1].op!=GET||c[j+2].op!=PUSH||
-           c[j+3].op!=BIN||c[j+3].a!=KSE||c[j+4].op!=JF||c[j+2].v.t!=NUM)return;
-        if(!(c[j+2].v.u.n>=0&&c[j+2].v.u.n<512))return;
+           c[j+3].op!=BIN||c[j+3].a!=KSE||c[j+4].op!=JF||c[j+2].v.t!=NUM) {
+            return;
+        }
+        if(!(c[j+2].v.u.n>=0&&c[j+2].v.u.n<512)) {
+            return;
+        }
         k=(int)c[j+2].v.u.n;
-        if(k!=c[j+2].v.u.n)return;
+        if(k!=c[j+2].v.u.n) {
+            return;
+        }
         if(!map[k]) {
             map[k]=j+5;
-            if(k<lo)lo=k;
-            if(k>hi)hi=k;
+            if(k<lo) {
+                lo=k;
+            }
+            if(k>hi) {
+                hi=k;
+            }
             n++;
         }
         j=c[j+4].a;
     }
-    if(n<3||hi-lo+1>4*n)return;
+    if(n<3||hi-lo+1>4*n) {
+        return;
+    }
     c[start].op=c[entry-2].op=JMP;
     c[start].a=start+1;
     c[entry-2].a=entry-1;
@@ -1255,7 +1496,9 @@ static void switchtable(Parser *p,int start,int entry,int end,int def) {
     c[entry-1].a=p->f->n;
     target=def>=0?def:p->f->n+hi-lo+3;
     emit(p,INIT,hi-lo+1,num(lo));
-    for(k=lo;k<=hi;k++)out(p,JMP,map[k]?map[k]:target);
+    for(k=lo;k<=hi;k++) {
+        out(p,JMP,map[k]?map[k]:target);
+    }
     out(p,JMP,target);
 }
 static void stmt(Parser *p) {
@@ -1263,14 +1506,18 @@ static void stmt(Parser *p) {
     Val v;
     Fun *f;
     Loop l;
-    if(++p->depth>512)syntax(p,"statement nesting limit");
+    if(++p->depth>512) {
+        syntax(p,"statement nesting limit");
+    }
     switch(t) {
         case ';':
         next(p);
         break;
         case '{':
         next(p);
-        while(p->l.t!='}'&&p->l.t!=KEND)stmt(p);
+        while(p->l.t!='}'&&p->l.t!=KEND) {
+            stmt(p);
+        }
         need(p,'}');
         break;
         case KVAR:
@@ -1286,7 +1533,9 @@ static void stmt(Parser *p) {
         break;
         case KRETURN:
         next(p);
-        if(p->l.t==';'||p->l.t=='}'||p->l.t==KEND||p->l.previous!=p->l.line)out(p,PUSH,0);
+        if(p->l.t==';'||p->l.t=='}'||p->l.t==KEND||p->l.previous!=p->l.line) {
+            out(p,PUSH,0);
+        }
         else {
             expr(p,1);
             out(p,GET,0);
@@ -1296,7 +1545,9 @@ static void stmt(Parser *p) {
         break;
         case KTHROW:
         next(p);
-        if(p->l.previous!=p->l.line)syntax(p,"newline after throw");
+        if(p->l.previous!=p->l.line) {
+            syntax(p,"newline after throw");
+        }
         expr(p,1);
         out(p,THROW,0);
         semi(p);
@@ -1313,7 +1564,9 @@ static void stmt(Parser *p) {
             patch(p,j);
             stmt(p);
             patch(p,h);
-        }else patch(p,j);
+        }else {
+            patch(p,j);
+        }
         break;
         case KTRY:
         {
@@ -1324,7 +1577,9 @@ static void stmt(Parser *p) {
             g->handlers[h].start=g->n;
             g->handlers[h].iter=p->iters;
             next(p);
-            if(p->l.t!='{')syntax(p,"expected try block");
+            if(p->l.t!='{') {
+                syntax(p,"expected try block");
+            }
             stmt(p);
             g->handlers[h].end=g->n;
             skip=out(p,JMP,0);
@@ -1334,7 +1589,9 @@ static void stmt(Parser *p) {
             need(p,')');
             g->handlers[h].target=g->n;
             out(p,CATCH,h);
-            if(p->l.t!='{')syntax(p,"expected catch block");
+            if(p->l.t!='{') {
+                syntax(p,"expected catch block");
+            }
             stmt(p);
             g->handlers[h].finish=g->n;
             patch(p,skip);
@@ -1371,24 +1628,36 @@ static void stmt(Parser *p) {
                     out(p,BIN,KSE);
                     test=out(p,JF,0);
                 }else if(p->l.t==KDEFAULT) {
-                    if(def>=0)syntax(p,"duplicate default");
+                    if(def>=0) {
+                        syntax(p,"duplicate default");
+                    }
                     next(p);
                     need(p,':');
                     patch(p,test);
                     test=out(p,JMP,0);
                     def=p->f->n;
-                }else syntax(p,"expected case/default");
+                }else {
+                    syntax(p,"expected case/default");
+                }
                 bodypc=p->f->n;
-                if(fall>=0)p->f->code[fall].a=bodypc;
-                while(p->l.t!=KCASE&&p->l.t!=KDEFAULT&&p->l.t!='}'&&p->l.t!=KEND)stmt(p);
+                if(fall>=0) {
+                    p->f->code[fall].a=bodypc;
+                }
+                while(p->l.t!=KCASE&&p->l.t!=KDEFAULT&&p->l.t!='}'&&p->l.t!=KEND) {
+                    stmt(p);
+                }
                 fall=out(p,JMP,0);
             }
             need(p,'}');
             patch(p,test);
             skip=out(p,JMP,def>=0?def:p->f->n+1);
             switchtable(p,start,entry,skip,def);
-            if(def<0)patch(p,skip);
-            if(fall>=0)patch(p,fall);
+            if(def<0) {
+                patch(p,skip);
+            }
+            if(fall>=0) {
+                patch(p,fall);
+            }
             chain(p,l.br,p->f->n);
             p->loop=l.up;
             break;
@@ -1408,7 +1677,9 @@ static void stmt(Parser *p) {
             if(forin(p)) {
                 int declare=accept(p,KVAR);
                 v=id(p);
-                if(declare)variable(p,v);
+                if(declare) {
+                    variable(p,v);
+                }
                 need(p,KIN);
                 expr(p,1);
                 need(p,')');
@@ -1431,7 +1702,9 @@ static void stmt(Parser *p) {
                 p->loop=l.up;
                 break;
             }
-            if(accept(p,KVAR))vars(p);
+            if(accept(p,KVAR)) {
+                vars(p);
+            }
             else if(p->l.t!=';') {
                 expr(p,1);
                 out(p,GET,0);
@@ -1488,12 +1761,20 @@ static void stmt(Parser *p) {
         case KBREAK:
         case KCONTINUE:
         next(p);
-        if(!p->loop)syntax(p,"not inside loop");
-        if(t==KBREAK)p->loop->br=out(p,JMP,p->loop->br);
+        if(!p->loop) {
+            syntax(p,"not inside loop");
+        }
+        if(t==KBREAK) {
+            p->loop->br=out(p,JMP,p->loop->br);
+        }
         else {
             Loop *q=p->loop;
-            while(q&&q->is_switch)q=q->up;
-            if(!q)syntax(p,"continue outside loop");
+            while(q&&q->is_switch) {
+                q=q->up;
+            }
+            if(!q) {
+                syntax(p,"continue outside loop");
+            }
             q->co=out(p,JMP,q->co);
         }
         semi(p);
@@ -1515,7 +1796,9 @@ static Fun *compile(VM *m,const char *s) {
     p.l.line=1;
     p.f=fun(m);
     next(&p);
-    while(p.l.t!=KEND)stmt(&p);
+    while(p.l.t!=KEND) {
+        stmt(&p);
+    }
     out(&p,PUSH,0);
     out(&p,RET,0);
     return p.f;
@@ -1528,7 +1811,9 @@ static void push(VM *m,Val v) {
     m->stack[m->top++]=v;
 }
 static Val pop(VM *m) {
-    if(!m->top)die(m,"stack underflow");
+    if(!m->top) {
+        die(m,"stack underflow");
+    }
     return m->stack[--m->top];
 }
 static Val take(VM *m) {
@@ -1544,7 +1829,9 @@ static Val keynum(VM *m,int i) {
 }
 static void append(VM *m,Val a,Val v) {
     Obj *o=(Obj *)a.u.p;
-    if(o->length==INT_MAX)die(m,"array too long");
+    if(o->length==INT_MAX) {
+        die(m,"array too long");
+    }
     store(m,val(AREF,o->length,(Cell *)o),v);
 }
 static int callable(Val v) {
@@ -1561,9 +1848,13 @@ static Val closure(VM *m,Fun *f,Env *e) {
     return v;
 }
 static unsigned long bits(double d) {
-    if(d!=d||d==0||d>1.7976931348623157e308||d< -1.7976931348623157e308)return 0;
+    if(d!=d||d==0||d>1.7976931348623157e308||d< -1.7976931348623157e308) {
+        return 0;
+    }
     d=fmod(d<0?ceil(d):floor(d),4294967296.0);
-    if(d<0)d+=4294967296.0;
+    if(d<0) {
+        d+=4294967296.0;
+    }
     return (unsigned long)d;
 }
 static double signedbits(unsigned long u) {
@@ -1578,17 +1869,31 @@ static Val binary(VM *m,int t,Val a,Val b) {
     size_t n,k;
     Obj *o;
     int c;
-    if(t==KEQ||t==KNE||t==KSE||t==KSNE)return boolean(equal(a,b,t==KSE||t==KSNE)^(t==KNE||t==KSNE));
+    if(t==KEQ||t==KNE||t==KSE||t==KSNE) {
+        return boolean(equal(a,b,t==KSE||t==KSNE)^(t==KNE||t==KSNE));
+    }
     if(t==KIN) {
-        if(b.t!=OBJ)die(m,"in requires object");
+        if(b.t!=OBJ) {
+            die(m,"in requires object");
+        }
         return boolean(has((Obj *)b.u.p,tostring(m,a)));
     }
     if(t==KINSTANCE) {
-        if(!callable(b))die(m,"instanceof requires function");
+        if(!callable(b)) {
+            die(m,"instanceof requires function");
+        }
         s=property(m,b,str(m,"prototype"));
-        if(s.t!=OBJ)die(m,"invalid prototype");
-        if(a.t!=OBJ)return boolean(0);
-        for(o=((Obj *)a.u.p)->proto;o;o=o->proto)if((Cell *)o==s.u.p)return boolean(1);
+        if(s.t!=OBJ) {
+            die(m,"invalid prototype");
+        }
+        if(a.t!=OBJ) {
+            return boolean(0);
+        }
+        for(o=((Obj *)a.u.p)->proto;o;o=o->proto) {
+            if((Cell *)o==s.u.p) {
+                return boolean(1);
+            }
+        }
         return boolean(0);
     }
     if(t=='+'&&(a.t==STR||b.t==STR||a.t==OBJ||b.t==OBJ)) {
@@ -1606,7 +1911,9 @@ static Val binary(VM *m,int t,Val a,Val b) {
     if(a.t==STR&&b.t==STR&&(t=='<'||t=='>'||t==KLE||t==KGE)) {
         n=slen(a)<slen(b)?slen(a):slen(b);
         c=memcmp(chars(a),chars(b),n);
-        if(!c)c=slen(a)<slen(b)?-1:slen(a)>slen(b);
+        if(!c) {
+            c=slen(a)<slen(b)?-1:slen(a)>slen(b);
+        }
         return boolean(t=='<'?c<0:t=='>'?c>0:t==KLE?c<=0:c>=0);
     }
     x=number(a);
@@ -1663,13 +1970,21 @@ static Val arg(VM *m,int base,int argc,int i) {
 }
 static int integer(Val a) {
     double n=number(a);
-    if(n!=n)return 0;
-    if(n>=INT_MAX)return INT_MAX;
-    if(n<=INT_MIN)return INT_MIN;
+    if(n!=n) {
+        return 0;
+    }
+    if(n>=INT_MAX) {
+        return INT_MAX;
+    }
+    if(n<=INT_MIN) {
+        return INT_MIN;
+    }
     return (int)n;
 }
 static int bound(int i,int n) {
-    if(i<0)i=i< -n?0:i+n;
+    if(i<0) {
+        i=i< -n?0:i+n;
+    }
     return i>n?n:i;
 }
 static Val native(VM *m,int idn,Val self,int argc,int base) {
@@ -1687,25 +2002,37 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         m->host_base=base;
         m->host_argc=argc;
         m->host_result=undef();
-        if(!o->host(m,argc,o->user))die(m,"host callback failed");
+        if(!o->host(m,argc,o->user)) {
+            die(m,"host callback failed");
+        }
         r=m->host_result;
         m->host_result=undef();
         return r;
         case NPRINT:
         for(i=0;i<argc;i++) {
-            if(i)putchar(' ');
+            if(i) {
+                putchar(' ');
+            }
             s=tostring(m,arg(m,base,argc,i));
             fwrite(chars(s),1,slen(s),stdout);
         }
         putchar('\n');
         return undef();
         case NASSERT:
-        if(!truth(a))die(m,b.t==STR?chars(b):"assertion failed");
+        if(!truth(a)) {
+            die(m,b.t==STR?chars(b):"assertion failed");
+        }
         return undef();
         case NARRAY:
         r=arr(m);
-        if(argc==1&&a.t==NUM)put(m,(Obj *)r.u.p,str(m,"length"),a);
-        else for(i=0;i<argc;i++)append(m,r,arg(m,base,argc,i));
+        if(argc==1&&a.t==NUM) {
+            put(m,(Obj *)r.u.p,str(m,"length"),a);
+        }
+        else {
+            for(i=0;i<argc;i++) {
+            append(m,r,arg(m,base,argc,i));
+        }
+        }
         return r;
         case NOBJECT:
         return a.t==OBJ?a:object(obj(m,m->op));
@@ -1741,45 +2068,76 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         d=number(a);
         for(i=1;i<argc;i++) {
             double q=number(arg(m,base,argc,i));
-            if(q!=q)return num(q);
-            if((idn==NMAX&&q>d)||(idn==NMIN&&q<d))d=q;
+            if(q!=q) {
+                return num(q);
+            }
+            if((idn==NMAX&&q>d)||(idn==NMIN&&q<d)) {
+                d=q;
+            }
         }
         return num(d);
         case NPARSE:
         s=tostring(m,a);
         i=integer(b);
-        if(i&&(i<2||i>36))return num(nanval());
+        if(i&&(i<2||i>36)) {
+            return num(nanval());
+        }
         end=chars(s);
-        while(isspace((unsigned char)*end))end++;
-        if(*end=='+'||*end=='-')end++;
-        if(!i)i=end[0]=='0'&&(end[1]=='x'||end[1]=='X')?16:10;
+        while(isspace((unsigned char)*end)) {
+            end++;
+        }
+        if(*end=='+'||*end=='-') {
+            end++;
+        }
+        if(!i) {
+            i=end[0]=='0'&&(end[1]=='x'||end[1]=='X')?16:10;
+        }
         d=(double)strtol(chars(s),&end,i);
         return num(end==chars(s)?nanval():d);
         case NCREATE:
-        if(a.t!=NIL&&a.t!=OBJ)die(m,"invalid prototype");
+        if(a.t!=NIL&&a.t!=OBJ) {
+            die(m,"invalid prototype");
+        }
         return object(obj(m,a.t==OBJ?(Obj *)a.u.p:0));
         case NGETPROTO:
-        if(a.t!=OBJ)die(m,"object required");
+        if(a.t!=OBJ) {
+            die(m,"object required");
+        }
         o=((Obj *)a.u.p)->proto;
         return o?object(o):val(NIL,0,0);
         case NTOSTRING:
         return str(m,self.t==U?"[object Undefined]":self.t==NIL?"[object Null]":self.t==STR?"[object String]":self.t==NUM?"[object Number]":self.t==BOOL?"[object Boolean]":callable(self)?"[object Function]":((Obj *)self.u.p)->array?"[object Array]":"[object Object]");
         case NKEYS:
-        if(a.t!=OBJ)die(m,"Object.keys requires object");
+        if(a.t!=OBJ) {
+            die(m,"Object.keys requires object");
+        }
         r=arr(m);
         o=(Obj *)a.u.p;
-        for(u=0;u<o->densecap;u++)
-        if(o->dense[u].t!=-1) append(m,r,keynum(m,(int)u));
-        for(u=0;u<o->cap;u++)for(p=o->tab[u];p;p=p->next)if(!p->hidden)append(m,r,p->key);
+        for(u=0;u<o->densecap;u++) {
+            if(o->dense[u].t!=-1) {
+            append(m,r,keynum(m,(int)u));
+        }
+        }
+        for(u=0;u<o->cap;u++) {
+            for(p=o->tab[u];p;p=p->next) {
+                if(!p->hidden) {
+                    append(m,r,p->key);
+                }
+            }
+        }
         return r;
         case NHAS:
-        if(self.t!=OBJ)return boolean(0);
+        if(self.t!=OBJ) {
+            return boolean(0);
+        }
         o=(Obj *)self.u.p;
         k=tostring(m,a);
         return boolean(ownkey(o,k)||(o->array&&iskey(k,"length")));
         case NCALL:
         at=m->top;
-        for(i=1;i<argc;i++)push(m,arg(m,base,argc,i));
+        for(i=1;i<argc;i++) {
+            push(m,arg(m,base,argc,i));
+        }
         r=invoke(m,self,a,argc?argc-1:0,at,0);
         m->top=at;
         return r;
@@ -1788,8 +2146,12 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         n=0;
         if(b.t!=NIL&&b.t!=U) {
             n=integer(property(m,b,str(m,"length")));
-            if(n<0||n>1000000)die(m,"apply argument limit");
-            for(i=0;i<n;i++)push(m,property(m,b,keynum(m,i)));
+            if(n<0||n>1000000) {
+                die(m,"apply argument limit");
+            }
+            for(i=0;i<n;i++) {
+                push(m,property(m,b,keynum(m,i)));
+            }
         }
         r=invoke(m,self,a,n,at,0);
         m->top=at;
@@ -1804,26 +2166,38 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         switch(idn) {
             case NSPLIT:
             r=arr(m);
-            if(b.t==U)d=4294967295.0;
-            else d=(double)bits(number(b));
-            if(!d)return r;
+            if(b.t==U) {
+                d=4294967295.0;
+            }
+            else {
+                d=(double)bits(number(b));
+            }
+            if(!d) {
+                return r;
+            }
             if(a.t==U) {
                 append(m,r,s);
                 return r;
             }
             k=tostring(m,a);
             if(!slen(k)) {
-                for(i=0;i<n&&i<d;i++)append(m,r,strn(m,chars(s)+i,1));
+                for(i=0;i<n&&i<d;i++) {
+                    append(m,r,strn(m,chars(s)+i,1));
+                }
                 return r;
             }
             j=0;
             for(i=0;i<=n-(int)slen(k);) {
                 if(!memcmp(chars(s)+i,chars(k),slen(k))) {
                     append(m,r,strn(m,chars(s)+j,(size_t)(i-j)));
-                    if(((Obj *)r.u.p)->length>=d)return r;
+                    if(((Obj *)r.u.p)->length>=d) {
+                        return r;
+                    }
                     i+=(int)slen(k);
                     j=i;
-                }else i++;
+                }else {
+                    i++;
+                }
             }
             append(m,r,strn(m,chars(s)+j,(size_t)(n-j)));
             return r;
@@ -1850,21 +2224,32 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
             case NINDEX:
             k=tostring(m,a);
             i=integer(b);
-            if(i<0)i=0;
-            if(i>n)i=n;
-            for(;i<=n-(int)slen(k);i++)if(!memcmp(chars(s)+i,chars(k),slen(k)))return num(i);
+            if(i<0) {
+                i=0;
+            }
+            if(i>n) {
+                i=n;
+            }
+            for(;i<=n-(int)slen(k);i++) {
+                if(!memcmp(chars(s)+i,chars(k),slen(k))) {
+                    return num(i);
+                }
+            }
             return num(-1);
             case NLOWER:
             case NUPPER:
             buf=mem(m,0,(size_t)n+1);
-            for(i=0;i<n;i++)
-            buf[i]=(char)(idn==NLOWER?tolower((unsigned char)chars(s)[i]):toupper((unsigned char)chars(s)[i]));
+            for(i=0;i<n;i++) {
+                buf[i]=(char)(idn==NLOWER?tolower((unsigned char)chars(s)[i]):toupper((unsigned char)chars(s)[i]));
+            }
             r=strn(m,buf,(size_t)n);
             free(buf);
             return r;
             case NCONCAT:
             r=s;
-            for(i=0;i<argc;i++)r=binary(m,'+',r,tostring(m,arg(m,base,argc,i)));
+            for(i=0;i<argc;i++) {
+                r=binary(m,'+',r,tostring(m,arg(m,base,argc,i)));
+            }
             return r;
             default:
             die(m,"unsupported string method");
@@ -1877,33 +2262,51 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
     n=o->length;
     switch(idn) {
         case NPUSH:
-        for(i=0;i<argc;i++)append(m,self,arg(m,base,argc,i));
+        for(i=0;i<argc;i++) {
+            append(m,self,arg(m,base,argc,i));
+        }
         return num(o->length);
         case NSHIFT:
-        if(!n)return undef();
+        if(!n) {
+            return undef();
+        }
         r=get(o,keynum(m,0));
         for(i=1;i<n;i++) {
             k=keynum(m,i);
             s=keynum(m,i-1);
-            if(has(o,k))put(m,o,s,get(o,k));
-            else del(o,s);
+            if(has(o,k)) {
+                put(m,o,s,get(o,k));
+            }
+            else {
+                del(o,s);
+            }
         }
         del(o,keynum(m,n-1));
         o->length=n-1;
         return r;
         case NUNSHIFT:
-        if(argc>INT_MAX-n)die(m,"array too long");
+        if(argc>INT_MAX-n) {
+            die(m,"array too long");
+        }
         for(i=n-1;i>=0;i--) {
             k=keynum(m,i);
             s=keynum(m,i+argc);
-            if(has(o,k))put(m,o,s,get(o,k));
-            else del(o,s);
+            if(has(o,k)) {
+                put(m,o,s,get(o,k));
+            }
+            else {
+                del(o,s);
+            }
         }
-        for(i=0;i<argc;i++)put(m,o,keynum(m,i),arg(m,base,argc,i));
+        for(i=0;i<argc;i++) {
+            put(m,o,keynum(m,i),arg(m,base,argc,i));
+        }
         o->length=n+argc;
         return num(o->length);
         case NPOP:
-        if(!n)return undef();
+        if(!n) {
+            return undef();
+        }
         k=keynum(m,n-1);
         r=get(o,k);
         del(o,k);
@@ -1911,10 +2314,14 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         return r;
         case NINDEX:
         i=integer(b);
-        if(i<0)i=bound(i,n);
+        if(i<0) {
+            i=bound(i,n);
+        }
         for(;i<n;i++) {
             k=keynum(m,i);
-            if(has(o,k)&&equal(get(o,k),a,1))return num(i);
+            if(has(o,k)&&equal(get(o,k),a,1)) {
+                return num(i);
+            }
         }
         return num(-1);
         case NSLICE:
@@ -1923,8 +2330,12 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         j=argc>1&&b.t!=U?bound(integer(b),n):n;
         for(;i<j;i++) {
             k=keynum(m,i);
-            if(has(o,k))append(m,r,get(o,k));
-            else ((Obj *)r.u.p)->length++;
+            if(has(o,k)) {
+                append(m,r,get(o,k));
+            }
+            else {
+                ((Obj *)r.u.p)->length++;
+            }
         }
         return r;
         case NJOIN:
@@ -1954,7 +2365,9 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         {
             int width,left,mid,right,ia,ib,outidx,count=0,undefineds=0;
             Val src,dst,tmp,va,vb;
-            if(a.t!=U&&!callable(a))die(m,"invalid sort comparator");
+            if(a.t!=U&&!callable(a)) {
+                die(m,"invalid sort comparator");
+            }
             at=m->top;
             src=arr(m);
             dst=arr(m);
@@ -1964,7 +2377,9 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
                 k=keynum(m,i);
                 if(has(o,k)) {
                     x=get(o,k);
-                    if(x.t==U)undefineds++;
+                    if(x.t==U) {
+                        undefineds++;
+                    }
                     else {
                         append(m,src,x);
                         count++;
@@ -1978,8 +2393,12 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
                     ia=left;
                     ib=mid;
                     for(outidx=left;outidx<right;outidx++) {
-                        if(ia>=mid)j=0;
-                        else if(ib>=right)j=1;
+                        if(ia>=mid) {
+                            j=0;
+                        }
+                        else if(ib>=right) {
+                            j=1;
+                        }
                         else {
                             va=get((Obj *)src.u.p,keynum(m,ia));
                             vb=get((Obj *)src.u.p,keynum(m,ib));
@@ -2005,9 +2424,15 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
                 src=dst;
                 dst=tmp;
             }
-            for(i=0;i<count;i++)put(m,o,keynum(m,i),get((Obj *)src.u.p,keynum(m,i)));
-            for(;i<count+undefineds;i++)put(m,o,keynum(m,i),undef());
-            for(;i<n;i++)del(o,keynum(m,i));
+            for(i=0;i<count;i++) {
+                put(m,o,keynum(m,i),get((Obj *)src.u.p,keynum(m,i)));
+            }
+            for(;i<count+undefineds;i++) {
+                put(m,o,keynum(m,i),undef());
+            }
+            for(;i<n;i++) {
+                del(o,keynum(m,i));
+            }
             m->top=at;
             return self;
         }
@@ -2019,10 +2444,18 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
             y=get(o,s);
             j=has(o,k);
             h=has(o,s);
-            if(h)put(m,o,k,y);
-            else del(o,k);
-            if(j)put(m,o,s,x);
-            else del(o,s);
+            if(h) {
+                put(m,o,k,y);
+            }
+            else {
+                del(o,k);
+            }
+            if(j) {
+                put(m,o,s,x);
+            }
+            else {
+                del(o,s);
+            }
         }
         return self;
         case NCONCAT:
@@ -2033,10 +2466,16 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
                 Obj *q=(Obj *)x.u.p;
                 for(j=0;j<q->length;j++) {
                     k=keynum(m,j);
-                    if(has(q,k))append(m,r,get(q,k));
-                    else ((Obj *)r.u.p)->length++;
+                    if(has(q,k)) {
+                        append(m,r,get(q,k));
+                    }
+                    else {
+                        ((Obj *)r.u.p)->length++;
+                    }
                 }
-            }else append(m,r,x);
+            }else {
+                append(m,r,x);
+            }
         }
         return r;
         case NSOME:
@@ -2045,26 +2484,36 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
         case NMAP:
         case NFILTER:
         case NREDUCE:
-        if(!callable(a))die(m,"callback required");
+        if(!callable(a)) {
+            die(m,"callback required");
+        }
         at=m->top;
         push(m,self);
         r=idn==NREDUCE?b:arr(m);
         push(m,r);
         i=0;
         if(idn==NREDUCE&&argc<2) {
-            while(i<n&&!has(o,keynum(m,i)))i++;
-            if(i==n)die(m,"reduce of empty array");
+            while(i<n&&!has(o,keynum(m,i))) {
+                i++;
+            }
+            if(i==n) {
+                die(m,"reduce of empty array");
+            }
             m->stack[at+1]=get(o,keynum(m,i++));
         }
         for(;i<n;i++) {
             k=keynum(m,i);
             if(!has(o,k)) {
-                if(idn==NMAP)((Obj *)m->stack[at+1].u.p)->length++;
+                if(idn==NMAP) {
+                    ((Obj *)m->stack[at+1].u.p)->length++;
+                }
                 continue;
             }
             x=get(o,k);
             j=m->top;
-            if(idn==NREDUCE)push(m,m->stack[at+1]);
+            if(idn==NREDUCE) {
+                push(m,m->stack[at+1]);
+            }
             push(m,x);
             push(m,num(i));
             push(m,self);
@@ -2075,9 +2524,15 @@ static Val native(VM *m,int idn,Val self,int argc,int base) {
                 m->top=at;
                 return boolean(idn==NSOME);
             }
-            if(idn==NMAP)append(m,r,y);
-            else if(idn==NFILTER&&truth(y))append(m,r,x);
-            else if(idn==NREDUCE)m->stack[at+1]=y;
+            if(idn==NMAP) {
+                append(m,r,y);
+            }
+            else if(idn==NFILTER&&truth(y)) {
+                append(m,r,x);
+            }
+            else if(idn==NREDUCE) {
+                m->stack[at+1]=y;
+            }
         }
         r=m->stack[at+1];
         m->top=at;
@@ -2096,13 +2551,19 @@ static Val invoke(VM *m,Val callee,Val self,int argc,int base,int construct) {
     unsigned i;
     Fun *f;
     int saved=m->top;
-    if(!callable(callee))die(m,"not a function");
-    if(++m->depth>512)die(m,"call depth limit");
+    if(!callable(callee)) {
+        die(m,"not a function");
+    }
+    if(++m->depth>512) {
+        die(m,"call depth limit");
+    }
     o=(Obj *)callee.u.p;
     if(construct) {
         p=get(o,str(m,"prototype"));
         self=object(obj(m,p.t==OBJ?(Obj *)p.u.p:m->op));
-    }else if(self.t==U||self.t==NIL)self=object(m->global->vars);
+    }else if(self.t==U||self.t==NIL) {
+        self=object(m->global->vars);
+    }
     fr.prev=m->frame;
     fr.env=o->scope;
     fr.code=o->fun;
@@ -2110,18 +2571,27 @@ static Val invoke(VM *m,Val callee,Val self,int argc,int base,int construct) {
     fr.callee=callee;
     fr.base=base;
     m->frame=&fr;
-    if(o->native)r=native(m,o->native,self,argc,base);
+    if(o->native) {
+        r=native(m,o->native,self,argc,base);
+    }
     else {
         f=o->fun;
         e=f->cache;
         f->cache=0;
-        if(!e)e=env(m,o->scope);
-        else e->up=o->scope;
+        if(!e) {
+            e=env(m,o->scope);
+        }
+        else {
+            e->up=o->scope;
+        }
         fr.env=e;
         r=run(m,f,e,self,callee,argc,base);
         if(f->reusable&&!f->cache) {
-            for(i=0;i<e->vars->cap;i++)
-                for(q=e->vars->tab[i];q;q=q->next)q->value=undef();
+            for(i=0;i<e->vars->cap;i++) {
+                for(q=e->vars->tab[i];q;q=q->next) {
+                    q->value=undef();
+                }
+            }
             e->up=0;
             f->cache=e;
         }
@@ -2142,51 +2612,79 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
     Frame *fr=m->frame;
     jmp_buf trap,*outer=m->trap;
     Handler *hd;
-    if(callee.t==OBJ&&f->name.t==STR)put(m,e->vars,f->name,callee);
-    for(i=0;i<f->argc;i++)put(m,e->vars,f->params[i],arg(m,base,argc,i));
+    if(callee.t==OBJ&&f->name.t==STR) {
+        put(m,e->vars,f->name,callee);
+    }
+    for(i=0;i<f->argc;i++) {
+        put(m,e->vars,f->params[i],arg(m,base,argc,i));
+    }
     if(callee.t==OBJ) {
         if(!f->needsargs){
             f->needsargs=1;
             f->reusable=!f->nh;
             for(i=0;i<f->n;i++) {
-                if(f->code[i].op==NAME&&iskey(f->code[i].v,"arguments"))f->needsargs=2;
-                if(f->code[i].op==CLOSURE)f->reusable=0;
+                if(f->code[i].op==NAME&&iskey(f->code[i].v,"arguments")) {
+                    f->needsargs=2;
+                }
+                if(f->code[i].op==CLOSURE) {
+                    f->reusable=0;
+                }
             }
         }
         if(f->needsargs==2){
             Val r=arr(m);
-            for(i=0;i<argc;i++)append(m,r,arg(m,base,argc,i));
+            for(i=0;i<argc;i++) {
+                append(m,r,arg(m,base,argc,i));
+            }
             named(m,e->vars,"arguments",r);
         }
     }
     for(i=0;i<f->nv;i++) {
         if(!own(e->vars,f->vars[i])) {
             put(m,e->vars,f->vars[i],undef());
-            if(chars(f->vars[i])[0]==1)own(e->vars,f->vars[i])->hidden=1;
+            if(chars(f->vars[i])[0]==1) {
+                own(e->vars,f->vars[i])->hidden=1;
+            }
         }
     }
-    for(i=0;i<f->nh;i++)put(m,e->vars,f->names[i],closure(m,f->hoist[i],e));
+    for(i=0;i<f->nh;i++) {
+        put(m,e->vars,f->names[i],closure(m,f->hoist[i],e));
+    }
     if(callee.t==OBJ&&!e->slots) {
         e->slots=mem(m,0,(f->argc+f->nv+f->nh)*sizeof(Prop *));
-        for(i=0;i<f->argc;i++)e->slots[i]=own(e->vars,f->params[i]);
-        for(i=0;i<f->nv;i++)e->slots[f->argc+i]=own(e->vars,f->vars[i]);
-        for(i=0;i<f->nh;i++)e->slots[f->argc+f->nv+i]=own(e->vars,f->names[i]);
+        for(i=0;i<f->argc;i++) {
+            e->slots[i]=own(e->vars,f->params[i]);
+        }
+        for(i=0;i<f->nv;i++) {
+            e->slots[f->argc+i]=own(e->vars,f->vars[i]);
+        }
+        for(i=0;i<f->nh;i++) {
+            e->slots[f->argc+f->nv+i]=own(e->vars,f->names[i]);
+        }
     }
     m->trap=&trap;
     if(setjmp(trap)) {
         int best=-1;
         m->frame=fr;
         m->depth=depth;
-        for(i=0;i<f->nhd;i++)if(pc-1>=f->handlers[i].start&&pc-1<f->handlers[i].end&&(best<0||f->handlers[i].start>=f->handlers[best].start))best=i;
+        for(i=0;i<f->nhd;i++) {
+            if(pc-1>=f->handlers[i].start&&pc-1<f->handlers[i].end&&(best<0||f->handlers[i].start>=f->handlers[best].start)) {
+                best=i;
+            }
+        }
         if(best<0) {
             m->trap=outer;
-            if(outer)longjmp(*outer,1);
+            if(outer) {
+                longjmp(*outer,1);
+            }
             longjmp(m->fail,1);
         }
         hd=&f->handlers[best];
         pc=hd->target;
         m->top=saved+2*hd->iter;
-        if(!m->thrown)m->exception=str(m,m->error);
+        if(!m->thrown) {
+            m->exception=str(m,m->error);
+        }
         m->thrown=1;
     }
     while(pc<f->n) {
@@ -2195,8 +2693,12 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
             strcpy(m->error,"instruction limit exceeded");
             longjmp(m->fail,1);
         }
-        while(fr->env!=e&&(pc<fr->env->start||pc>=fr->env->end))fr->env=fr->env->up;
-        if(m->live>m->threshold)gc(m);
+        while(fr->env!=e&&(pc<fr->env->start||pc>=fr->env->end)) {
+            fr->env=fr->env->up;
+        }
+        if(m->live>m->threshold) {
+            gc(m);
+        }
         in=&f->code[pc++];
         t=in->a;
         switch(in->op) {
@@ -2208,20 +2710,32 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
                 if(!m->limit&&pc<f->n&&(f->code[pc].op==GET||f->code[pc].op==PRECALL)) {
                     i=f->code[pc++].op;
                     push(m,e->slots[t-1]->value);
-                    if(i==PRECALL)push(m,undef());
-                }else push(m,val(LREF,t-1,(Cell *)e));
+                    if(i==PRECALL) {
+                        push(m,undef());
+                    }
+                }else {
+                    push(m,val(LREF,t-1,(Cell *)e));
+                }
                 break;
             }
             if(!m->limit&&pc<f->n&&(f->code[pc].op==GET||f->code[pc].op==PRECALL)){
                 i=f->code[pc++].op;
                 push(m,lookup(m,fr->env,in->v));
-                if(i==PRECALL)push(m,undef());
-            }else push(m,reference(m,fr->env,undef(),in->v));
+                if(i==PRECALL) {
+                    push(m,undef());
+                }
+            }else {
+                push(m,reference(m,fr->env,undef(),in->v));
+            }
             break;
             case GET:
-            if(!m->top)die(m,"stack underflow");
+            if(!m->top) {
+                die(m,"stack underflow");
+            }
             a=m->stack[m->top-1];
-            if(a.t>=REF)m->stack[m->top-1]=readval(m,a);
+            if(a.t>=REF) {
+                m->stack[m->top-1]=readval(m,a);
+            }
             break;
             case PROP:
             b=take(m);
@@ -2229,11 +2743,16 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
             if(!m->limit&&pc<f->n&&(f->code[pc].op==GET||f->code[pc].op==PRECALL)){
                 i=f->code[pc++].op;
                 push(m,property(m,a,b));
-                if(i==PRECALL)push(m,a);
+                if(i==PRECALL) {
+                    push(m,a);
+                }
             }else if(a.t==OBJ&&((Obj *)a.u.p)->array&&b.t==NUM&&
-                     b.u.n>=0&&b.u.n<INT_MAX&&b.u.n==(int)b.u.n)
+                     b.u.n>=0&&b.u.n<INT_MAX&&b.u.n==(int)b.u.n) {
                 push(m,val(AREF,b.u.n,a.u.p));
-            else push(m,reference(m,0,a,tostring(m,b)));
+            }
+            else {
+                push(m,reference(m,0,a,tostring(m,b)));
+            }
             break;
             case SET:
             b=take(m);
@@ -2276,18 +2795,28 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
             break;
             case TYPE:
             a=pop(m);
-            if(a.t==REF&&((Ref *)a.u.p)->env&&!binding(((Ref *)a.u.p)->env,((Ref *)a.u.p)->key))a=undef();
-            else a=readval(m,a);
+            if(a.t==REF&&((Ref *)a.u.p)->env&&!binding(((Ref *)a.u.p)->env,((Ref *)a.u.p)->key)) {
+                a=undef();
+            }
+            else {
+                a=readval(m,a);
+            }
             push(m,str(m,a.t==U?"undefined":a.t==BOOL?"boolean":a.t==NUM?"number":a.t==STR?"string":callable(a)?"function":"object"));
             break;
             case DEL:
             a=pop(m);
             i=a.t!=LREF;
-            if(a.t==AREF)i=del((Obj *)a.u.p,tostring(m,num(a.index)));
+            if(a.t==AREF) {
+                i=del((Obj *)a.u.p,tostring(m,num(a.index)));
+            }
             if(a.t==REF) {
                 ref=(Ref *)a.u.p;
-                if(ref->env)i=0;
-                else if(ref->obj)i=del(ref->obj,ref->key);
+                if(ref->env) {
+                    i=0;
+                }
+                else if(ref->obj) {
+                    i=del(ref->obj,ref->key);
+                }
             }
             push(m,boolean(i));
             break;
@@ -2303,7 +2832,9 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
             i=t;
             if(a.t==NUM) {
                 a.u.n-=in->v.u.n;
-                if(a.u.n>=0&&a.u.n<t&&a.u.n==(int)a.u.n)i=(int)a.u.n;
+                if(a.u.n>=0&&a.u.n<t&&a.u.n==(int)a.u.n) {
+                    i=(int)a.u.n;
+                }
             }
             pc=f->code[pc+i].a;
             break;
@@ -2312,18 +2843,24 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
             break;
             case JF:
             a=take(m);
-            if(!truth(a))pc=t;
+            if(!truth(a)) {
+                pc=t;
+            }
             break;
             case JT:
             a=take(m);
-            if(truth(a))pc=t;
+            if(truth(a)) {
+                pc=t;
+            }
             break;
             case PRECALL:
             a=pop(m);
             b=a.t==AREF?object((Obj *)a.u.p):undef();
             if(a.t==REF) {
                 ref=(Ref *)a.u.p;
-                if(!ref->env)b=ref->base;
+                if(!ref->env) {
+                    b=ref->base;
+                }
             }
             push(m,readval(m,a));
             push(m,b);
@@ -2350,26 +2887,40 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
                 Obj *seen=obj(m,0);
                 unsigned u;
                 for(o=(Obj *)a.u.p;o;o=o->proto) {
-                    for(u=0;u<o->densecap;u++) if(o->dense[u].t!=-1) {
+                    for(u=0;u<o->densecap;u++) {
+                        if(o->dense[u].t!=-1) {
                         b=keynum(m,(int)u);
                         if(!own(seen,b)) {
                             put(m,seen,b,boolean(1));
                             append(m,r,b);
                         }
                     }
-                    for(u=0;u<o->cap;u++)for(p=o->tab[u];p;p=p->next)if(!own(seen,p->key)) {
+                    }
+                    for(u=0;u<o->cap;u++) {
+                        for(p=o->tab[u];p;p=p->next) {
+                            if(!own(seen,p->key)) {
                         put(m,seen,p->key,boolean(1));
-                        if(!p->hidden)append(m,r,p->key);
+                        if(!p->hidden) {
+                                    append(m,r,p->key);
+                                }
+                    }
+                        }
                     }
                 }
-            }else if(a.t==STR)for(i=0;i<(int)slen(a);i++)append(m,r,keynum(m,i));
+            }else if(a.t==STR) {
+                for(i=0;i<(int)slen(a);i++) {
+                    append(m,r,keynum(m,i));
+                }
+            }
             push(m,r);
             push(m,num(0));
             break;
             case NEXT:
             i=(int)m->stack[m->top-1].u.n;
             o=(Obj *)m->stack[m->top-2].u.p;
-            if(i>=o->length)pc=t;
+            if(i>=o->length) {
+                pc=t;
+            }
             else {
                 m->stack[m->top-1]=num(i+1);
                 push(m,get(o,keynum(m,i)));
@@ -2513,7 +3064,9 @@ void js_free(VM *m);
 /* Public embedding API: an engine retains its global scope between evaluations. */
 VM *js_new(void) {
     VM *volatile m=calloc(1,sizeof(*m));
-    if(!m)return 0;
+    if(!m) {
+        return 0;
+    }
     if(setjmp(m->fail)) {
         js_free(m);
         return 0;
@@ -2534,7 +3087,9 @@ static void execute(VM *m,Fun *f) {
     m->frame=0;
 }
 int js_eval(VM *m,const char *source) {
-    if(!m||!source||m->frame)return 0;
+    if(!m||!source||m->frame) {
+        return 0;
+    }
     m->remaining=m->limit;
     if(setjmp(m->fail)) {
         m->frame=0;
@@ -2555,13 +3110,19 @@ const char *js_error(VM *m) {
     return m->error;
 }
 void js_set_budget(VM *m,unsigned long instructions) {
-    if(m&&!m->frame)m->limit=instructions;
+    if(m&&!m->frame) {
+        m->limit=instructions;
+    }
 }
 int js_register(VM *m,const char *name,js_native callback,void *user) {
     Val v;
     Obj *o;
-    if(!m||m->frame||!name||!callback)return 0;
-    if(setjmp(m->fail))return 0;
+    if(!m||m->frame||!name||!callback) {
+        return 0;
+    }
+    if(setjmp(m->fail)) {
+        return 0;
+    }
     v=builtin(m,m->global->vars,name,NHOST);
     o=(Obj *)v.u.p;
     o->host=callback;
@@ -2579,7 +3140,9 @@ double js_arg_number(VM *m,int i) {
 }
 const char *js_arg_string(VM *m,int i,size_t *length) {
     Val v=hostarg(m,i);
-    if(length)*length=v.t==STR?slen(v):0;
+    if(length) {
+        *length=v.t==STR?slen(v):0;
+    }
     return v.t==STR?chars(v):0;
 }
 void js_return_number(VM *m,double n) {
@@ -2595,7 +3158,9 @@ void js_return_null(VM *m) {
     m->host_result=val(NIL,0,0);
 }
 void js_free(VM *m) {
-    if(!m)return;
+    if(!m) {
+        return;
+    }
     m->global=0;
     m->op=m->ap=m->fp=m->sp=0;
     m->frame=0;
@@ -2610,11 +3175,15 @@ static void bc_error(VM *m) {
     die(m,"invalid or truncated bytecode");
 }
 static void byteout(VM *m,FILE *s,unsigned n) {
-    if(fputc(n&255,s)==EOF)die(m,"bytecode write failed");
+    if(fputc(n&255,s)==EOF) {
+        die(m,"bytecode write failed");
+    }
 }
 static unsigned bytein(VM *m,FILE *s) {
     int c=fgetc(s);
-    if(c==EOF)bc_error(m);
+    if(c==EOF) {
+        bc_error(m);
+    }
     return (unsigned)c;
 }
 static void wordout(VM *m,FILE *s,unsigned long n) {
@@ -2627,17 +3196,23 @@ static void wordout(VM *m,FILE *s,unsigned long n) {
 static unsigned long wordin(VM *m,FILE *s) {
     unsigned long n=0;
     int i;
-    for(i=0;i<4;i++)n|=(unsigned long)bytein(m,s)<<(8*i);
+    for(i=0;i<4;i++) {
+        n|=(unsigned long)bytein(m,s)<<(8*i);
+    }
     return n;
 }
 static int bcinteger(VM *m,FILE *s) {
     unsigned long n=wordin(m,s);
-    if(n>2147483647UL)return -(int)(4294967295UL-n)-1;
+    if(n>2147483647UL) {
+        return -(int)(4294967295UL-n)-1;
+    }
     return (int)n;
 }
 static int countin(VM *m,FILE *s) {
     int n=bcinteger(m,s);
-    if(n<0||n>1000000)bc_error(m);
+    if(n<0||n>1000000) {
+        bc_error(m);
+    }
     return n;
 }
 static void valueout(VM *m,FILE *s,Val v) {
@@ -2647,9 +3222,13 @@ static void valueout(VM *m,FILE *s,Val v) {
     byteout(m,s,v.t);
     if(v.t==STR){
         wordout(m,s,(unsigned long)slen(v));
-        for(i=0;i<slen(v);i++)byteout(m,s,(unsigned char)chars(v)[i]);
+        for(i=0;i<slen(v);i++) {
+            byteout(m,s,(unsigned char)chars(v)[i]);
+        }
     }
-    else if(v.t==BOOL)byteout(m,s,(unsigned)v.u.n);
+    else if(v.t==BOOL) {
+        byteout(m,s,(unsigned)v.u.n);
+    }
     else if(v.t==NUM){
         d=v.u.n;
         if(d!=d){
@@ -2670,7 +3249,9 @@ static void valueout(VM *m,FILE *s,Val v) {
         wordout(m,s,(unsigned long)e);
         wordout(m,s,(unsigned long)hi);
         wordout(m,s,(unsigned long)(d-hi*4294967296.0));
-    }else if(v.t!=U&&v.t!=NIL)bc_error(m);
+    }else if(v.t!=U&&v.t!=NIL) {
+        bc_error(m);
+    }
 }
 static Val valuein(VM *m,FILE *s) {
     unsigned t=bytein(m,s),k;
@@ -2682,29 +3263,45 @@ static Val valuein(VM *m,FILE *s) {
         n=countin(m,s);
         p=(Str *)cell(m,sizeof(Str)+(size_t)n,CSTR);
         p->len=n;
-        for(i=0;i<n;i++)p->s[i]=(char)bytein(m,s);
+        for(i=0;i<n;i++) {
+            p->s[i]=(char)bytein(m,s);
+        }
         p->s[n]=0;
         return val(STR,0,(Cell *)p);
     }
     if(t==BOOL){
         k=bytein(m,s);
-        if(k>1)bc_error(m);
+        if(k>1) {
+            bc_error(m);
+        }
         return boolean(k);
     }
     if(t==NUM){
         k=bytein(m,s);
-        if(k==2)return num(1.0/zero);
-        if(k==3)return num(nanval());
-        if(k==4)return num(-1.0/zero);
-        if(k>1)bc_error(m);
+        if(k==2) {
+            return num(1.0/zero);
+        }
+        if(k==3) {
+            return num(nanval());
+        }
+        if(k==4) {
+            return num(-1.0/zero);
+        }
+        if(k>1) {
+            bc_error(m);
+        }
         e=bcinteger(m,s);
         d=(double)wordin(m,s)*4294967296.0;
         d+=(double)wordin(m,s);
-        if(e< -1073||e>1024||d>=9007199254740992.0)bc_error(m);
+        if(e< -1073||e>1024||d>=9007199254740992.0) {
+            bc_error(m);
+        }
         d=ldexp(d,e-53);
         return num(k?-d:d);
     }
-    if(t!=U&&t!=NIL)bc_error(m);
+    if(t!=U&&t!=NIL) {
+        bc_error(m);
+    }
     return val((int)t,0,0);
 }
 static void funout(VM *m,FILE *s,Fun *f) {
@@ -2717,8 +3314,12 @@ static void funout(VM *m,FILE *s,Fun *f) {
     wordout(m,s,f->nh);
     wordout(m,s,f->nhd);
     wordout(m,s,f->n);
-    for(i=0;i<f->argc;i++)valueout(m,s,f->params[i]);
-    for(i=0;i<f->nv;i++)valueout(m,s,f->vars[i]);
+    for(i=0;i<f->argc;i++) {
+        valueout(m,s,f->params[i]);
+    }
+    for(i=0;i<f->nv;i++) {
+        valueout(m,s,f->vars[i]);
+    }
     for(i=0;i<f->nh;i++){
         valueout(m,s,f->names[i]);
         funout(m,s,f->hoist[i]);
@@ -2737,7 +3338,9 @@ static void funout(VM *m,FILE *s,Fun *f) {
         byteout(m,s,in->op);
         wordout(m,s,(unsigned long)in->a);
         valueout(m,s,in->v);
-        if(in->op==CLOSURE)funout(m,s,in->fn);
+        if(in->op==CLOSURE) {
+            funout(m,s,in->fn);
+        }
     }
 }
 static void *bcarray(VM *m,int n,size_t size) {
@@ -2747,7 +3350,9 @@ static void *bcarray(VM *m,int n,size_t size) {
 }
 static Val namein(VM *m,FILE *s) {
     Val v=valuein(m,s);
-    if(v.t!=STR)bc_error(m);
+    if(v.t!=STR) {
+        bc_error(m);
+    }
     return v;
 }
 static Fun *funin(VM *m,FILE *s,int depth) {
@@ -2755,9 +3360,13 @@ static Fun *funin(VM *m,FILE *s,int depth) {
     int i;
     Handler *h;
     Ins *in;
-    if(depth>512)bc_error(m);
+    if(depth>512) {
+        bc_error(m);
+    }
     f->name=valuein(m,s);
-    if(f->name.t!=STR&&f->name.t!=U)bc_error(m);
+    if(f->name.t!=STR&&f->name.t!=U) {
+        bc_error(m);
+    }
     f->argc=countin(m,s);
     f->nv=f->cv=countin(m,s);
     f->nh=f->ch=countin(m,s);
@@ -2769,8 +3378,12 @@ static Fun *funin(VM *m,FILE *s,int depth) {
     f->hoist=bcarray(m,f->nh,sizeof(Fun *));
     f->handlers=bcarray(m,f->nhd,sizeof(Handler));
     f->code=bcarray(m,f->n,sizeof(Ins));
-    for(i=0;i<f->argc;i++)f->params[i]=namein(m,s);
-    for(i=0;i<f->nv;i++)f->vars[i]=namein(m,s);
+    for(i=0;i<f->argc;i++) {
+        f->params[i]=namein(m,s);
+    }
+    for(i=0;i<f->nv;i++) {
+        f->vars[i]=namein(m,s);
+    }
     for(i=0;i<f->nh;i++){
         f->names[i]=namein(m,s);
         f->hoist[i]=funin(m,s,depth+1);
@@ -2783,18 +3396,30 @@ static Fun *funin(VM *m,FILE *s,int depth) {
         h->finish=countin(m,s);
         h->iter=countin(m,s);
         h->name=namein(m,s);
-        if(h->start>h->end||h->end>f->n||h->target>=f->n||h->finish>f->n)bc_error(m);
+        if(h->start>h->end||h->end>f->n||h->target>=f->n||h->finish>f->n) {
+            bc_error(m);
+        }
     }
     for(i=0;i<f->n;i++){
         in=&f->code[i];
         in->op=bytein(m,s);
         in->a=bcinteger(m,s);
         in->v=valuein(m,s);
-        if(in->op>CATCH)bc_error(m);
-        if(in->op==INIT&&(in->v.t!=NUM||in->a<1||in->a>=f->n-i-1))bc_error(m);
-        if(in->op==CLOSURE)in->fn=funin(m,s,depth+1);
-        if(in->op==NAME&&(in->v.t!=STR||in->a<0||in->a>f->argc+f->nv+f->nh))bc_error(m);
-        if((in->op==JMP||in->op==JF||in->op==JT||in->op==NEXT)&&(in->a<0||in->a>f->n))bc_error(m);
+        if(in->op>CATCH) {
+            bc_error(m);
+        }
+        if(in->op==INIT&&(in->v.t!=NUM||in->a<1||in->a>=f->n-i-1)) {
+            bc_error(m);
+        }
+        if(in->op==CLOSURE) {
+            in->fn=funin(m,s,depth+1);
+        }
+        if(in->op==NAME&&(in->v.t!=STR||in->a<0||in->a>f->argc+f->nv+f->nh)) {
+            bc_error(m);
+        }
+        if((in->op==JMP||in->op==JF||in->op==JT||in->op==NEXT)&&(in->a<0||in->a>f->n)) {
+            bc_error(m);
+        }
     }
     return f;
 }
@@ -2802,20 +3427,28 @@ static char *readfile(const char *path,size_t *len) {
     FILE *s=fopen(path,"rb");
     char *p=0,*q;
     size_t n=0,cap=4096;
-    if(!s)return 0;
+    if(!s) {
+        return 0;
+    }
     for(;;) {
         q=realloc(p,cap);
-        if(!q)break;
+        if(!q) {
+            break;
+        }
         p=q;
         n+=fread(p+n,1,cap-n-1,s);
-        if(ferror(s))break;
+        if(ferror(s)) {
+            break;
+        }
         if(n<cap-1) {
             p[n]=0;
             *len=n;
             fclose(s);
             return p;
         }
-        if(cap>(size_t)-1/2)break;
+        if(cap>(size_t)-1/2) {
+            break;
+        }
         cap*=2;
     }
     free(p);
@@ -2828,7 +3461,9 @@ static int hostread(VM *m,int argc,void *user) {
     char *p;
     (void)argc;
     (void)user;
-    if(!path||!(p=readfile(path,&n)))return 0;
+    if(!path||!(p=readfile(path,&n))) {
+        return 0;
+    }
     js_return_string(m,p,n);
     free(p);
     return 1;
@@ -2838,7 +3473,9 @@ static FILE *files[64];
 static FILE *hostfile(VM *m,int argno) {
     double d=js_arg_number(m,argno);
     int i;
-    if(!(d>=1&&d<=64))return 0;
+    if(!(d>=1&&d<=64)) {
+        return 0;
+    }
     i=(int)d;
     return d==i?files[i-1]:0;
 }
@@ -2847,10 +3484,14 @@ static int hostopen(VM *m,int argc,void *user) {
     int i;
     (void)argc;
     (void)user;
-    if(!path||!mode||(strcmp(mode,"rb")&&strcmp(mode,"wb")))return 0;
+    if(!path||!mode||(strcmp(mode,"rb")&&strcmp(mode,"wb"))) {
+        return 0;
+    }
     for(i=0;i<64&&files[i];i++){
     }
-    if(i==64)return 0;
+    if(i==64) {
+        return 0;
+    }
     files[i]=fopen(path,mode);
     js_return_number(m,files[i]?i+1:0);
     return 1;
@@ -2862,17 +3503,23 @@ static int hostbyte(VM *m,int argc,void *user) {
     FILE *s=hostfile(m,op==FILE_PUT);
     double d;
     (void)argc;
-    if(!s)return 0;
+    if(!s) {
+        return 0;
+    }
     if(op==FILE_CLOSE) {
         files[(int)js_arg_number(m,0)-1]=0;
         c=fclose(s);
     }else if(op==FILE_PUT) {
         d=js_arg_number(m,0);
-        if(!(d>=0&&d<=255)||d!=(int)d)return 0;
+        if(!(d>=0&&d<=255)||d!=(int)d) {
+            return 0;
+        }
         c=fputc((int)d,s);
     }else {
         c=fgetc(s);
-        if(ferror(s))return 0;
+        if(ferror(s)) {
+            return 0;
+        }
     }
     js_return_number(m,c);
     return 1;
@@ -2884,9 +3531,13 @@ static int hostfread(VM *m,int argc,void *user) {
     size_t n;
     (void)argc;
     (void)user;
-    if(!s||!(d>=0&&d<=1048576)||d!=(int)d)return 0;
+    if(!s||!(d>=0&&d<=1048576)||d!=(int)d) {
+        return 0;
+    }
     p=malloc(d?(size_t)d:1);
-    if(!p)return 0;
+    if(!p) {
+        return 0;
+    }
     n=fread(p,1,(size_t)d,s);
     if(ferror(s)){
         free(p);
@@ -2902,7 +3553,9 @@ static int hostfwrite(VM *m,int argc,void *user) {
     const char *p=js_arg_string(m,1,&n);
     (void)argc;
     (void)user;
-    if(!s||!p)return 0;
+    if(!s||!p) {
+        return 0;
+    }
     js_return_number(m,(double)fwrite(p,1,n,s));
     return 1;
 }
@@ -2921,41 +3574,59 @@ static int runfile(VM *m,const char *path,int binary,const char *output,int argc
     Val args;
     int i;
     if(setjmp(m->fail)){
-        if(s)fclose(s);
+        if(s) {
+            fclose(s);
+        }
         free(source);
         m->frame=0;
         m->trap=0;
         return 0;
     }
     args=arr(m);
-    for(i=0;i<argc;i++)append(m,args,str(m,argv[i]));
+    for(i=0;i<argc;i++) {
+        append(m,args,str(m,argv[i]));
+    }
     named(m,m->global->vars,"scriptArgs",args);
     if(binary){
         s=fopen(path,"rb");
-        if(!s)die(m,"cannot open bytecode");
-        if(wordin(m,s)!=0x3143424aUL)bc_error(m);
+        if(!s) {
+            die(m,"cannot open bytecode");
+        }
+        if(wordin(m,s)!=0x3143424aUL) {
+            bc_error(m);
+        }
         f=funin(m,s,0);
-        if(fgetc(s)!=EOF)bc_error(m);
+        if(fgetc(s)!=EOF) {
+            bc_error(m);
+        }
         fclose(s);
         s=0;
     }
     else {
         source=readfile(path,&n);
-        if(!source)die(m,"cannot read source");
+        if(!source) {
+            die(m,"cannot read source");
+        }
         f=compile(m,source);
         free(source);
         source=0;
     }
     if(output){
         s=fopen(output,"wb");
-        if(!s)die(m,"cannot open output");
+        if(!s) {
+            die(m,"cannot open output");
+        }
         wordout(m,s,0x3143424aUL);
         funout(m,s,f);
         i=fclose(s);
         s=0;
-        if(i)die(m,"bytecode write failed");
+        if(i) {
+            die(m,"bytecode write failed");
+        }
     }
-    else execute(m,f);
+    else {
+        execute(m,f);
+    }
     gc(m);
     return 1;
 }
@@ -2967,7 +3638,9 @@ int main(int argc,char **argv) {
         return 1;
     }
     m=js_new();
-    if(!m)return 1;
+    if(!m) {
+        return 1;
+    }
     js_register(m,"readFile",hostread,0);
     js_register(m,"fopen",hostopen,0);
     js_register(m,"fclose",hostbyte,&fileops[0]);
@@ -2977,21 +3650,39 @@ int main(int argc,char **argv) {
     js_register(m,"fwrite",hostfwrite,0);
     js_register(m,"byteCharHost",hostchar,0);
     if(!strcmp(argv[1],"-c")){
-        if(argc==5&&!strcmp(argv[3],"-o"))ok=runfile(m,argv[2],0,argv[4],0,0);
-    }
-    else if(!strcmp(argv[1],"-b")){
-        if(argc>=3)ok=runfile(m,argv[2],1,0,argc-3,argv+3);
-    }
-    else {
-        for(i=2;i<argc;i++)if(argv[i][0]=='-')break;
-        if(i<argc)ok=runfile(m,argv[1],0,0,argc-2,argv+2);
-        else {
-            ok=1;
-            for(i=1;i<argc&&ok;i++)ok=runfile(m,argv[i],0,0,0,0);
+        if(argc==5&&!strcmp(argv[3],"-o")) {
+            ok=runfile(m,argv[2],0,argv[4],0,0);
         }
     }
-    if(!ok)fprintf(stderr,"%s\n",m->error[0]?m->error:"invalid arguments");
-    for(i=0;i<64;i++)if(files[i])fclose(files[i]);
+    else if(!strcmp(argv[1],"-b")){
+        if(argc>=3) {
+            ok=runfile(m,argv[2],1,0,argc-3,argv+3);
+        }
+    }
+    else {
+        for(i=2;i<argc;i++) {
+            if(argv[i][0]=='-') {
+                break;
+            }
+        }
+        if(i<argc) {
+            ok=runfile(m,argv[1],0,0,argc-2,argv+2);
+        }
+        else {
+            ok=1;
+            for(i=1;i<argc&&ok;i++) {
+                ok=runfile(m,argv[i],0,0,0,0);
+            }
+        }
+    }
+    if(!ok) {
+        fprintf(stderr,"%s\n",m->error[0]?m->error:"invalid arguments");
+    }
+    for(i=0;i<64;i++) {
+        if(files[i]) {
+            fclose(files[i]);
+        }
+    }
     js_free(m);
     return !ok;
 }

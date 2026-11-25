@@ -1,4 +1,4 @@
-# JSVM — self-hosted bootstrap edition
+# JSVM — braced self-hosted edition
 
 ## Build
 
@@ -97,10 +97,14 @@ previous optimized release:
   holes and fall back to the hash table for sparse/named properties.
 - Both compilers emit direct dispatch for suitable dense integer switches;
   general switch statements retain strict-equality comparison chains.
-- The JS VM uses explicit dense records for its internal structures rather
-  than named-property records. The record layouts are listed at the top of
-  `jsvm.js`. These are representations of guest structures, not substitutions
-  of host JavaScript's compiler or object semantics for guest machinery.
+- The JS VM uses named fields for the VM, function, parser, lexer, frame,
+  handler and other control records. Values, instructions and managed heap
+  records retain compact dense arrays, with symbolic field indices declared
+  at the top of `jsvm.js`. Long dense record constructors annotate their
+  fields. There are no raw numeric record offsets. Literal cases in dense
+  switches have enum-name comments so the existing jump-table optimization
+  continues to apply. These are representations of guest structures, not
+  substitutions of host JavaScript's compiler or object semantics.
 - Shared immutable small-number records and bounded short-string caches
   reduce repeated allocations. The JS short-string cache is discarded at GC;
   the C short-string cache is weak and cleared before sweep.
@@ -108,12 +112,35 @@ previous optimized release:
   for the JS port is still reclaimed by its host VM, in addition to the
   explicit guest mark-and-sweep traversal.
 - The C CLI shares execution, teardown and binary stream code instead of
-  duplicating it. The standalone source is 2997 physical lines, without
-  packing multiple independent statements onto individual lines.
+  duplicating it. The implementation was 2997 physical lines before enforcing braces on
+  all control bodies. No implementation logic has changed in this revision.
 
-The JS implementation uses 3272 physical lines. Both files are shipped as
-standalone source; no generation step is needed. The 3000-line target
-applies to the C VM, not to the sum of the independent C and JS versions.
+Both files are shipped as standalone source; no generation step is needed.
+
+## Formatting revision
+
+- Every conditional and loop body is braced. Conventional `else if` chains
+  are retained; their individual bodies are always braced. This includes
+  `do` loops and `for...in` loops.
+- Existing expression parentheses in C are preserved. The JavaScript source
+  was regenerated using the previous formatting pipeline with the removal
+  of parenthesized expressions disabled. The resulting JS syntax tree
+  contains 450 parenthesized expressions, versus 50 in the preceding release.
+- Independent statements are not packed onto individual lines. No artificial
+  line compression was used to reach a line-count goal.
+- C: 3688 physical lines (previously 2997); JS: 3548 (previously 3212).
+  The C source therefore exceeds the earlier 3000-line target. Achieving
+  that target with this brace policy requires real code reduction.
+- The same GCC C90 optimized build produces an identical executable to the
+  preceding Readable Edition. The compiled JS bytecode is also identical to
+  the preceding edition (268859 bytes). This revision is formatting-only,
+  not a change to compiler or execution behavior.
+- The earlier fully named-object and symbolic-switch experiments are not
+  shipped in this formatting revision. Named field indices and annotated
+  dense opcode cases are retained from the Readable Edition.
+
+See `verification/results.txt` for actual measurements and test coverage.
+The measured timings are specific to this execution environment.
 
 ## JBC1 binary format
 
