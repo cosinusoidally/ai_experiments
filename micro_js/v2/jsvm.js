@@ -146,26 +146,29 @@ var U=0,
 var INT_MAX=2147483647, INT_MIN=-2147483648;
 function cint(n) { return n<0?Math.ceil(n):Math.floor(n); }
 function val(t,n,p) { return {t:t,n:n,p:p}; }
-function undef() { return val(U,0,0); }
-function num(n) { return val(NUM,n,0); }
-function boolean(n) { return val(BOOL,n?1:0,0); }
-function object(o) { return val(OBJ,0,o); }
+var undefValue={t:U,n:0,p:0},trueValue={t:BOOL,n:1,p:0},falseValue={t:BOOL,n:0,p:0};
+function undef() { return undefValue; }
+function num(n) { return {t:NUM,n:n,p:0}; }
+function boolean(n) { return n?trueValue:falseValue; }
+function object(o) { return {t:OBJ,n:0,p:o}; }
 function die(m,s) { m.error=s.slice(0,250); m.thrown=0; throw m.signal; }
 function cell(m,kind) {
     var c={next:m.heap,gray:0,kind:kind,mark:0};
     m.heap=c; m.live++; return c;
 }
 function strn(m,s,n) { return str(m,s.slice(0,n)); }
-function str(m,s) { var p=cell(m,CSTR); p.s=s; p.len=s.length; return val(STR,0,p); }
+function str(m,s) { var p=cell(m,CSTR); p.s=s; p.len=s.length; p.hash=0; p.idx=0; return {t:STR,n:0,p:p}; }
 function chars(v) { return v.p.s; }
 function slen(v) { return v.p.len; }
 function seq(a,b) { return a.p===b.p||chars(a)===chars(b); }
 function hash(s) {
-    var h=5381,i;
-    for(i=0;i<slen(s);i++) h=(h*33+chars(s).charCodeAt(i))>>>0;
-    return h;
+    var p=s.p,h=p.hash,i,k;
+    if(h)return h;
+    h=5381;k=p.s;
+    for(i=0;i<p.len;i++)h=(h*33+k.charCodeAt(i))>>>0;
+    p.hash=h;return h;
 }
-function iskey(k,s) { return chars(k)===s; }
+function iskey(k,s) { return k.p.s===s; }
 function obj(m,proto) {
     var o=cell(m,COBJ); o.proto=proto; o.tab=[]; o.cap=0; o.count=0;
     o.array=0; o.length=0; o.native=0; o.fun=0; o.scope=0; o.host=0; o.user=0; return o;
@@ -174,7 +177,7 @@ function env(m,up) { var e=cell(m,CENV); e.up=up; e.vars=obj(m,0); e.start=0; e.
 function own(o,k) {
     var h=hash(k),p;
     if(!o.cap)return 0;
-    for(p=o.tab[h%o.cap];p;p=p.next)if(p.hash===h&&seq(p.key,k))return p;
+    for(p=o.tab[h%o.cap];p;p=p.next)if(p.hash===h&&(p.key.p===k.p||p.key.p.s===k.p.s))return p;
     return 0;
 }
 function resize(m,o) {
@@ -186,13 +189,14 @@ function resize(m,o) {
     o.tab=t; o.cap=n;
 }
 function indexof(k) {
-    var s=chars(k),n=0,i,c;
-    if(!s.length||(s.charAt(0)==='0'&&s.length>1))return -1;
-    for(i=0;i<s.length;i++) {
-        c=s.charCodeAt(i); if(c<48||c>57||n>214748363)return -1;
+    var p=k.p,s=p.s,n=0,i,c;
+    if(p.idx)return p.idx-2;
+    if(!p.len||(s.charAt(0)==='0'&&p.len>1)){p.idx=1;return -1;}
+    for(i=0;i<p.len;i++){
+        c=s.charCodeAt(i);if(c<48||c>57||n>214748363){p.idx=1;return -1;}
         n=n*10+c-48;
     }
-    return n;
+    p.idx=n+2;return n;
 }
 function del(o,k) {
     var p,q=0,j;
@@ -305,6 +309,8 @@ function byteChar(c) {
     return '?';
 }
 var keywords=['var','function','return','if','else','while','for','do','break','continue','true','false','null','this','new','typeof','void','delete','in','instanceof','throw','switch','case','default','try','catch'];
+var keywordMap={},kwIndex;
+for(kwIndex=0;kwIndex<keywords.length;kwIndex++)keywordMap["$"+keywords[kwIndex]]=KVAR+kwIndex;
 function next(p) {
     var l=p.l,s=l.s,pos=l.pos,a,b,c,q,i,j,h,escaped,d,ep;
     l.previous=l.line;
@@ -337,7 +343,7 @@ function next(p) {
     }else if(ident(c)) {
         while(ident(lexChar(s,pos)))pos++;
         l.v=str(p.m,s.slice(a,pos));l.t=KID;
-        for(i=0;i<keywords.length;i++)if(iskey(l.v,keywords[i])){l.t=KVAR+i;break;}
+        i=keywordMap["$"+l.v.p.s];if(i!==undefined)l.t=i;
     }else if(c===39||c===34) {
         q=c;b='';
         while(lexChar(s,pos)&&lexChar(s,pos)!==q) {
@@ -381,7 +387,7 @@ function next(p) {
     l.pos=pos;
 }
 function fun(m) {
-    var f={next:m.funs,handlers:[],nhd:0,code:[],mark:0,n:0,cap:0,argc:0,nv:0,cv:0,nh:0,ch:0,params:[],vars:[],names:[],hoist:[],name:undef()};
+    var f={next:m.funs,handlers:[],nhd:0,code:[],mark:0,n:0,cap:0,argc:0,nv:0,cv:0,nh:0,ch:0,needsargs:0,params:[],vars:[],names:[],hoist:[],name:undef()};
     m.funs=f;return f;
 }
 function emit(p,op,a,v) {
@@ -453,7 +459,7 @@ function hidden(m,o,k,v) {
   own(o, key).hidden = 1;
 }
 
-function lookup(e,k) {
+function lookup(m,e,k) {
   var p;
   for (; e; e = e.up)
   {
@@ -462,7 +468,7 @@ function lookup(e,k) {
       return p.value;
   }
 
-  return undef();
+  die(m,"undefined identifier");return undef();
 }
 
 function binding(e,k) {
@@ -524,19 +530,11 @@ function reference(m,e,b,k) {
 }
 
 function readval(m,v) {
-  var r;
-  var e;
-  if (v.t != REF)
-    return v;
-  r = (v.p);
-  if (r.env)
-  {
-    e = binding(r.env, r.key);
-    if (!e)
-      die(m, "undefined identifier");
-    return lookup(e, r.key);
-  }
-  return property(m, r.base, r.key);
+    var r;
+    if(v.t!==REF)return v;
+    r=v.p;
+    if(r.env)return lookup(m,r.env,r.key);
+    return property(m,r.base,r.key);
 }
 
 function store(m,v,x) {
@@ -2177,11 +2175,8 @@ function run(m,f,e,self,callee,argc,base) {
 
   if (callee.t == OBJ)
   {
-    r = arr(m);
-    for (i = 0; i < argc; i++)
-      append(m, r, arg(m, base, argc, i));
-
-    named(m, e.vars, "arguments", r);
+    if(!f.needsargs){f.needsargs=1;for(i=0;i<f.n;i++)if(f.code[i].op===NAME&&iskey(f.code[i].v,"arguments")){f.needsargs=2;break;}}
+    if(f.needsargs===2){r=arr(m);for(i=0;i<argc;i++)append(m,r,arg(m,base,argc,i));named(m,e.vars,"arguments",r);}
     if ((f.name.t == STR) && (!own(e.vars, f.name)))
       put(m, e.vars, f.name, callee);
   }
@@ -2220,7 +2215,9 @@ function run(m,f,e,self,callee,argc,base) {
         break;
 
       case NAME:
-        push(m, reference(m, fr.env, undef(), ins.v));
+        if(!m.limit&&pc<f.n&&(f.code[pc].op===GET||f.code[pc].op===PRECALL)){
+            i=f.code[pc++].op;push(m,lookup(m,fr.env,ins.v));if(i===PRECALL)push(m,undef());
+        }else push(m,reference(m,fr.env,undef(),ins.v));
         break;
 
       case GET:
@@ -2229,9 +2226,10 @@ function run(m,f,e,self,callee,argc,base) {
         break;
 
       case PROP:
-        b = take(m);
-        a = take(m);
-        push(m, reference(m, 0, a, tostring(m, b)));
+        b=take(m);a=take(m);b=tostring(m,b);
+        if(!m.limit&&pc<f.n&&(f.code[pc].op===GET||f.code[pc].op===PRECALL)){
+            i=f.code[pc++].op;push(m,property(m,a,b));if(i===PRECALL)push(m,a);
+        }else push(m,reference(m,0,a,b));
         break;
 
       case SET:
@@ -2598,14 +2596,17 @@ function js_return_string(m,s,n){m.host_result=strn(m,s,n);}
 function js_return_null(m){m.host_result=val(NIL,0,0);}
 function js_free(m){m.heap=0;m.gray=0;m.funs=0;m.global=0;m.op=0;m.ap=0;m.fp=0;m.sp=0;m.stack=[];m.frame=0;m.live=0;}
 
-/* JBC1 portable binary codec. Hex is only the host I/O transport. */
-var bcHex='0123456789abcdef';
-function bcByte(w,n){w.push(bcHex.charAt((n>>>4)&15)+bcHex.charAt(n&15));}
-function bcWord(w,n){var i;for(i=0;i<4;i++){bcByte(w,n&255);n=n>>>8;}}
+/* JBC1 portable binary codec, using length-aware byte strings. */
+var bcChars=asciiChars,bcIndex;
+for(bcIndex=128;bcIndex<256;bcIndex++)bcChars+=byteChar(bcIndex);
+function bcBytes(w,s){w.buf+=s;if(w.buf.length>=4096)bcFlush(w);}
+function bcByte(w,n){bcBytes(w,bcChars.charAt(n&255));}
+function bcFlush(w){if(fwrite(w.fd,w.buf)!==w.buf.length)throw 'bytecode write failed';w.buf='';}
+function bcWord(w,n){bcBytes(w,bcChars.charAt(n&255)+bcChars.charAt((n>>>8)&255)+bcChars.charAt((n>>>16)&255)+bcChars.charAt(n>>>24));}
 function bcValue(w,v){
     var i,d,e=0,hi;
     bcByte(w,v.t);
-    if(v.t===STR){bcWord(w,slen(v));for(i=0;i<slen(v);i++)bcByte(w,chars(v).charCodeAt(i));}
+    if(v.t===STR){bcWord(w,slen(v));bcBytes(w,chars(v));}
     else if(v.t===BOOL)bcByte(w,v.n);
     else if(v.t===NUM){
         d=v.n;if(d!==d){bcByte(w,3);return;}if(d>0&&d===d/2){bcByte(w,2);return;}if(d<0&&d===d/2){bcByte(w,4);return;}
@@ -2625,7 +2626,7 @@ function bcFun(w,f){
     for(i=0;i<f.n;i++){ins=f.code[i];bcByte(w,ins.op);bcWord(w,ins.a);bcValue(w,ins.v);if(ins.op===CLOSURE)bcFun(w,ins.fn);}
 }
 function bcReadByte(r){if(r.pos>=r.s.length)throw 'truncated bytecode';return r.s.charCodeAt(r.pos++);}
-function bcReadWord(r){var i,n=0;for(i=0;i<4;i++)n=n+bcReadByte(r)*Math.pow(256,i);return n;}
+function bcReadWord(r){return bcReadByte(r)+bcReadByte(r)*256+bcReadByte(r)*65536+bcReadByte(r)*16777216;}
 function bcReadInt(r){return bcReadWord(r)|0;}
 function bcCount(r){var n=bcReadInt(r);if(n<0||n>1000000)throw 'invalid bytecode count';return n;}
 function bcReadValue(m,r){
@@ -2649,15 +2650,36 @@ function bcReadFun(m,r,depth){
     return f;
 }
 function bcLoad(m,s){var r={s:s,pos:4},f;if(s.slice(0,4)!=='JBC1')throw 'invalid magic';f=bcReadFun(m,r,0);if(r.pos!==s.length)throw 'trailing bytes';return f;}
-function bcCompile(source,path){var m=js_new(),f=compile(m,source),w=['4a424331'];bcFun(w,f);writeHexFile(path,w.join(''));}
+function bcCompile(source,path){var m=js_new(),f=compile(m,source),w={fd:fopen(path,'wb'),buf:'JBC1'};if(!w.fd)throw 'cannot open output';bcFun(w,f);bcFlush(w);if(fclose(w.fd)!==0)throw 'close failed';}
 function bcRun(m,f){var fr={prev:0,env:m.global,code:f,self:object(m.global.vars),callee:undef(),base:0};m.frame=fr;run(m,f,m.global,fr.self,undef(),0,0);m.frame=0;gc(m);}
-/* Only transport services cross the interpreter boundary. */
+/* Only generic host services cross the interpreter boundary. */
+function forward(m,name,fn){js_register(m,name,function(vm,argc){
+    var a=[],i,v,r;
+    for(i=0;i<argc;i++){v=hostarg(vm,i);a.push(v.t===STR?chars(v):v.n);}
+    r=fn.apply(null,a);
+    if(typeof r==='string')js_return_string(vm,r,r.length);
+    else if(typeof r==='number')js_return_number(vm,r);
+    return 1;
+},0);}
+function cliVM(args){
+    var m=js_new(),a=arr(m),i;
+    forward(m,'readFile',readFile);forward(m,'byteCharHost',byteCharHost);
+    forward(m,'fopen',fopen);forward(m,'fclose',fclose);
+    forward(m,'fgetc',fgetc);forward(m,'fputc',fputc);
+    forward(m,'fread',fread);forward(m,'fwrite',fwrite);
+    for(i=0;i<args.length;i++)append(m,a,str(m,args[i]));
+    named(m,m.global.vars,'scriptArgs',a);return m;
+}
 function cliMain(args){
-    var m,f,i;
+    var m,f,i,j;
     if(args[0]==='-c'&&args.length===4&&args[2]==='-o'){bcCompile(readFile(args[1]),args[3]);return;}
-    m=js_new();
-    if(args[0]==='-b'&&args.length===2){f=bcLoad(m,readFile(args[1]));bcRun(m,f);return;}
-    if(args.length===1){if(!js_eval(m,readFile(args[0])))throw js_error(m);return;}
-    throw 'usage: jsvm.js -c source -o output | -b bytecode | source';
+    if(args[0]==='-b'&&args.length>=2){m=cliVM(args.slice(2));f=bcLoad(m,readFile(args[1]));bcRun(m,f);return;}
+    if(args.length&&args[0]!=='-c'&&args[0]!=='-b'){
+        for(i=1;i<args.length;i++)if(args[i].charAt(0)==='-')break;
+        if(i<args.length){m=cliVM(args.slice(1));if(!js_eval(m,readFile(args[0])))throw js_error(m);}
+        else {m=cliVM([]);for(j=0;j<args.length;j++)if(!js_eval(m,readFile(args[j])))throw js_error(m);}
+        return;
+    }
+    throw 'usage: jsvm.js -c source -o output | -b bytecode [args...] | source [args...]';
 }
 if(typeof scriptArgs!=='undefined'&&scriptArgs.length)cliMain(scriptArgs);

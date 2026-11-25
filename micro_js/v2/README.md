@@ -1,4 +1,4 @@
-# JSVM — ANSI C / JavaScript bootstrap edition
+# JSVM — recursive bootstrap edition
 
 ## Build
 
@@ -17,30 +17,27 @@ The engine uses C90 and the C standard library; the bytecode format assumes
     ./jsvm -c program.js -o program.bc
     ./jsvm -b program.bc
 
-The three bootstrap paths:
+Four bootstrap paths:
 
     ./jsvm -c jsvm.js -o jsvm.bc
     ./jsvm jsvm.js -c jsvm.js -o jsvm2.bc
     ./jsvm -b jsvm.bc -c jsvm.js -o jsvm3.bc
+    ./jsvm jsvm.js jsvm.js -c jsvm.js -o jsvm4.bc
     cmp jsvm.bc jsvm2.bc
     cmp jsvm.bc jsvm3.bc
+    cmp jsvm.bc jsvm4.bc
 
-All three were run successfully. They produced exactly 223355 bytes each,
-with SHA-256:
+The last command uses two interpreted JavaScript VM levels: the C VM
+executes the first JS VM, which compiles and executes the second JS VM,
+which independently compiles the source and serializes its bytecode.
+Neither interpreter delegates compilation to a host native compiler.
+The JBC1 format is unchanged from the previous release.
 
-    9c9a1a87d04adf841effc39cf656edeafda8b9a901f705119af3c8beeef7b735
-
-The original measured source-hosted and bytecode-hosted compilation times
-were 12.94 s and 13.22 s, respectively. Peak RSS was about 142 MiB in both
-cases. These are measurements on one Linux x86-64 machine, not performance
-claims for other systems. The actual three outputs and logs are included
-under `verification/`. The final standalone C translation unit was rebuilt
-and its native compiler output checked against those recorded outputs.
-
-Optional: `sh verify.sh` rebuilds, repeats the bootstrap comparison, and runs
-execution regressions, including a small guest program under both source-
-and bytecode-loaded JavaScript VM. The shell script is not needed to build
-or run the VM. The `verification/` files are test evidence, not dependencies.
+Optional: `sh verify.sh` rebuilds and runs all four bootstrap paths,
+bytecode comparisons and execution regressions. The shell script is not
+needed to build or run the VM. The `verification/` files are test evidence,
+not dependencies. See `verification/results.txt` for measured results and
+any outstanding tests.
 
 When arguments follow a source script and include an option beginning with
 `-`, the full remaining argument list is passed in the global `scriptArgs`
@@ -51,14 +48,48 @@ an explicit filename (unlike the old CLI's no-argument stdin mode).
 
 ## Host services
 
-The C CLI supplies `readFile(path)`, `writeHexFile(path, hexBytes)` and
-`byteCharHost(n)`, plus `scriptArgs`. The JS compiler independently lexes,
-parses, emits instructions and serializes its own function tree. The hex
-string passed to the file-writing primitive is a transport representation
-only: output files contain raw binary bytes. There is no native compiler
-callback and neither `eval` nor `Function` is used for execution. These
-host services are available to scripts in the native CLI; they are not
-a complete OS API for arbitrary depths of guest interpreters.
+The CLI provides generic binary I/O, byte conversion and an argument array.
+The JavaScript CLI forwards these functions as native guest callbacks at
+each nesting level, and forwards the remaining arguments as `scriptArgs`.
+
+| Function | Behaviour |
+|---|---|
+| `fopen(path, mode)` | `rb` or `wb`; numeric handle, or zero if open fails |
+| `fclose(fd)` | Close; returns C status (zero on success) |
+| `fgetc(fd)` | Read byte 0–255, or -1 at EOF |
+| `fputc(byte, fd)` | Write byte 0–255; returns byte or -1 on error |
+| `fread(fd, count)` | Read up to count bytes as a length-aware string; empty at EOF; max count 1 MiB |
+| `fwrite(fd, bytes)` | Write exactly the supplied string bytes (including NUL); returns number written |
+| `readFile(path)` | Convenience whole-file binary read |
+| `byteCharHost(byte)` | Convert byte 0–255 to one-byte string |
+
+Handles are CLI-owned numeric slots (up to 64 open files); invalid handles
+and invalid arguments raise a host callback error. All remaining streams
+are closed when the native CLI exits. This is deliberately not a sandbox.
+The JavaScript interface to `fread`/`fwrite` is length-aware and differs
+from the C pointer/count API. File handles are forwarded unchanged through
+all interpreter levels. `writeHexFile` has been removed.
+
+The JS serializer writes binary strings directly in buffered chunks of
+approximately 4 KiB. This preserves embedded NULs and every byte value.
+The JS compiler independently lexes, parses, emits instructions and
+serializes its own function tree. There is no native compiler callback,
+and neither `eval` nor `Function` is used for guest execution.
+
+## Execution optimizations
+
+Both VM implementations retain the same guest structures and instruction
+set. The C and JS string cells now cache their hash and numeric-index
+classification; these derived fields are not serialized. Adjacent NAME
+or PROP with GET/PRECALL are executed together when no instruction limit
+is active, avoiding temporary reference allocations. Functions allocate
+an arguments array only if their own bytecode refers to that binding
+(the subset does not support eval). The JS implementation uses immutable
+shared undefined/boolean values and a keyword lookup map. The C number
+to string path avoids general floating-point formatting for small
+nonnegative integral keys. The JS binary codec writes complete strings
+and words rather than producing a separate hex string. These optimizations
+are included to make recursive interpretation less expensive.
 
 ## JBC1 binary format
 
@@ -112,8 +143,8 @@ exposes file I/O in the CLI and is not a sandbox for untrusted scripts.
 ## Scope and limitations
 
 This is still the original compact ES5-style subset, not a full ES5.1
-implementation. The bytecode and language semantics have not been changed
-beyond adding portable serialization, loading, and CLI services. Existing
+implementation. The bytecode instruction set and language subset remain unchanged;
+the execution and CLI optimizations are described above. Existing
 limitations include byte-oriented strings, no regular expressions, JSON,
 strict mode, eval or Function constructor, no finally, and incomplete
 standard-library and coercion semantics. The successful bootstrap verifies

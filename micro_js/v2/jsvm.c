@@ -45,7 +45,7 @@ struct Cell {
     Cell *next, *gray; int kind, mark;
 };
 typedef struct Str {
-    Cell h; size_t len; char s[1];
+    Cell h; size_t len; unsigned hash; int idx; char s[1];
 } Str;
 struct Prop {
     Prop *next; unsigned hash; int hidden; Val key, value;
@@ -67,7 +67,7 @@ struct Handler {
     int start,end,target,finish,iter; Val name;
 };
 struct Fun {
-    Fun *next; Handler *handlers; int nhd; Ins *code; int mark, n, cap, argc, nv, cv, nh, ch;
+    Fun *next; Handler *handlers; int nhd; Ins *code; int mark, n, cap, argc, nv, cv, nh, ch, needsargs;
     Val *params, *vars, *names; Fun **hoist; Val name;
 };
 struct Frame {
@@ -107,9 +107,10 @@ static char *chars(Val v) { return ((Str *)v.p)->s; }
 static size_t slen(Val v) { return ((Str *)v.p)->len; }
 static int seq(Val a,Val b) { return a.p==b.p || (slen(a)==slen(b) && !memcmp(chars(a),chars(b),slen(a))); }
 static unsigned hash(Val s) {
-    unsigned h=5381; size_t i;
-    for(i=0;i<slen(s);i++) h=h*33+(unsigned char)chars(s)[i];
-    return h;
+    Str *p=(Str *)s.p; unsigned h=5381; size_t i;
+    if(p->hash)return p->hash;
+    for(i=0;i<p->len;i++) h=h*33+(unsigned char)p->s[i];
+    return p->hash=h;
 }
 static int iskey(Val k,const char *s) { return slen(k)==strlen(s) && !memcmp(chars(k),s,slen(k)); }
 static Obj *obj(VM *m,Obj *proto) {
@@ -133,13 +134,14 @@ static void resize(VM *m,Obj *o) {
     free(o->tab); o->tab=t; o->cap=n;
 }
 static int indexof(Val k) {
-    const char *s=chars(k); int n=0,i;
-    if(!*s || strlen(s)!=slen(k) || (*s=='0' && s[1])) return -1;
-    for(i=0;s[i];i++) {
-        if(s[i]<'0'||s[i]>'9'||n>(INT_MAX-10)/10) return -1;
+    Str *p=(Str *)k.p; const char *s=p->s; int n=0; size_t i;
+    if(p->idx)return p->idx-2;
+    if(!p->len||(*s=='0'&&p->len>1)){p->idx=1;return -1;}
+    for(i=0;i<p->len;i++) {
+        if(s[i]<'0'||s[i]>'9'||n>(INT_MAX-10)/10){p->idx=1;return -1;}
         n=n*10+s[i]-'0';
     }
-    return n;
+    p->idx=n+2;return n;
 }
 static int del(Obj *o,Val k) {
     Prop **p,*q;
@@ -198,13 +200,13 @@ static void named(VM *m,Obj *o,const char *k,Val v) { put(m,o,str(m,k),v); }
 static void hidden(VM *m,Obj *o,const char *k,Val v) {
     Val key=str(m,k); put(m,o,key,v); own(o,key)->hidden=1;
 }
-static Val lookup(Env *e,Val k) {
+static Val lookup(VM *m,Env *e,Val k) {
     Prop *p;
     for(;e;e=e->up) {
         p=own(e->vars,k);
         if(p) return p->value;
     }
-    return undef();
+    die(m,"undefined identifier"); return undef();
 }
 static Env *binding(Env *e,Val k) {
     for(;e;e=e->up) if(own(e->vars,k)) return e;
@@ -237,14 +239,18 @@ static double number(Val v) {
     }
 }
 static Val tostring(VM *m,Val v) {
-    char b[64];
+    char b[64],*p; unsigned n;
     switch(v.t) {
         case STR:return v;
         case U:return str(m,"undefined");
         case NIL:return str(m,"null");
         case BOOL:return str(m,v.n?"true":"false");
         case NUM:if(v.n!=v.n)return str(m,"NaN");
-        if(v.n==0)return str(m,"0");
+        if(v.n>=0&&v.n<=INT_MAX&&v.n==(unsigned)v.n){
+            n=(unsigned)v.n;p=b+sizeof(b);*--p=0;
+            do{*--p=(char)('0'+n%10);n/=10;}while(n);
+            return strn(m,p,(size_t)(b+sizeof(b)-1-p));
+        }
         sprintf(b,"%.15g",v.n); return str(m,b);
         default:return str(m,"[object Object]");
     }
@@ -266,14 +272,10 @@ static Val reference(VM *m,Env *e,Val b,Val k) {
     r->key=k; return val(REF,0,(Cell *)r);
 }
 static Val readval(VM *m,Val v) {
-    Ref *r; Env *e;
+    Ref *r;
     if(v.t!=REF)return v;
     r=(Ref *)v.p;
-    if(r->env) {
-        e=binding(r->env,r->key);
-        if(!e)die(m,"undefined identifier");
-        return lookup(e,r->key);
-    }
+    if(r->env)return lookup(m,r->env,r->key);
     return property(m,r->base,r->key);
 }
 static void store(VM *m,Val v,Val x) {
@@ -1334,9 +1336,8 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
     int saved=m->top,depth=m->depth; Frame *fr=m->frame; jmp_buf trap,*outer=m->trap; Handler *hd;
     for(i=0;i<f->argc;i++)put(m,e->vars,f->params[i],arg(m,base,argc,i));
     if(callee.t==OBJ) {
-        r=arr(m);
-        for(i=0;i<argc;i++)append(m,r,arg(m,base,argc,i));
-        named(m,e->vars,"arguments",r);
+        if(!f->needsargs){f->needsargs=1;for(i=0;i<f->n;i++)if(f->code[i].op==NAME&&iskey(f->code[i].v,"arguments")){f->needsargs=2;break;}}
+        if(f->needsargs==2){r=arr(m);for(i=0;i<argc;i++)append(m,r,arg(m,base,argc,i));named(m,e->vars,"arguments",r);}
         if(f->name.t==STR&&!own(e->vars,f->name))put(m,e->vars,f->name,callee);
     }
     for(i=0;i<f->nv;i++) {
@@ -1369,12 +1370,17 @@ static Val run(VM *m,Fun *f,Env *e,Val self,Val callee,int argc,int base) {
         switch(in->op) {
             case PUSH:push(m,in->v);
             break;
-            case NAME:push(m,reference(m,fr->env,undef(),in->v));
+            case NAME:
+            if(!m->limit&&pc<f->n&&(f->code[pc].op==GET||f->code[pc].op==PRECALL)){
+                i=f->code[pc++].op;push(m,lookup(m,fr->env,in->v));if(i==PRECALL)push(m,undef());
+            }else push(m,reference(m,fr->env,undef(),in->v));
             break;
             case GET:a=take(m);
             push(m,a); break;
-            case PROP:b=take(m);
-            a=take(m); push(m,reference(m,0,a,tostring(m,b))); break;
+            case PROP:b=take(m);a=take(m);b=tostring(m,b);
+            if(!m->limit&&pc<f->n&&(f->code[pc].op==GET||f->code[pc].op==PRECALL)){
+                i=f->code[pc++].op;push(m,property(m,a,b));if(i==PRECALL)push(m,a);
+            }else push(m,reference(m,0,a,b));break;
             case SET:b=take(m);
             a=pop(m); store(m,a,b); push(m,b); break;
             case DUP:a=m->stack[m->top-1];
@@ -1622,11 +1628,21 @@ static char *readfile(const char *path,size_t *len) {
     if(ferror(s)){free(p);p=0;}else if(!p)p=malloc(1);if(p){p[n]=0;*len=n;}fclose(s);return p;
 }
 static int hostread(VM *m,int argc,void *user) { const char *path=js_arg_string(m,0,0);size_t n;char *p;(void)argc;(void)user;if(!path||!(p=readfile(path,&n)))return 0;js_return_string(m,p,n);free(p);return 1; }
-static int hostwrite(VM *m,int argc,void *user) {
-    const char *path=js_arg_string(m,0,0),*data;size_t n,i;FILE *s;int a,b,ok=1;(void)argc;(void)user;
-    data=js_arg_string(m,1,&n);if(!path||!data||n%2)return 0;s=fopen(path,"wb");if(!s)return 0;
-    for(i=0;i<n;i+=2){a=hex(data[i]);b=hex(data[i+1]);if(a<0||b<0||fputc(a*16+b,s)==EOF){ok=0;break;}}return fclose(s)==0&&ok;
+/* CLI-owned binary streams. Handles are numbers, never raw pointers. */
+static FILE *files[64];
+static FILE *hostfile(VM *m,int argno) { double d=js_arg_number(m,argno);int i;if(!(d>=1&&d<=64))return 0;i=(int)d;return d==i?files[i-1]:0; }
+static int hostopen(VM *m,int argc,void *user) {
+    const char *path=js_arg_string(m,0,0),*mode=js_arg_string(m,1,0);int i;(void)argc;(void)user;
+    if(!path||!mode||(strcmp(mode,"rb")&&strcmp(mode,"wb")))return 0;
+    for(i=0;i<64&&files[i];i++){}
+    if(i==64)return 0;
+    files[i]=fopen(path,mode);js_return_number(m,files[i]?i+1:0);return 1;
 }
+static int hostclose(VM *m,int argc,void *user) { FILE *s=hostfile(m,0);int i;(void)argc;(void)user;if(!s)return 0;i=(int)js_arg_number(m,0)-1;files[i]=0;js_return_number(m,fclose(s));return 1; }
+static int hostgetc(VM *m,int argc,void *user) { FILE *s=hostfile(m,0);int c;(void)argc;(void)user;if(!s)return 0;c=fgetc(s);if(ferror(s))return 0;js_return_number(m,c);return 1; }
+static int hostputc(VM *m,int argc,void *user) { FILE *s=hostfile(m,1);double d=js_arg_number(m,0);(void)argc;(void)user;if(!s||!(d>=0&&d<=255)||d!=(int)d)return 0;js_return_number(m,fputc((int)d,s));return 1; }
+static int hostfread(VM *m,int argc,void *user) { FILE *s=hostfile(m,0);double d=js_arg_number(m,1);char *p;size_t n;(void)argc;(void)user;if(!s||!(d>=0&&d<=1048576)||d!=(int)d)return 0;p=malloc(d?(size_t)d:1);if(!p)return 0;n=fread(p,1,(size_t)d,s);if(ferror(s)){free(p);return 0;}js_return_string(m,p,n);free(p);return 1; }
+static int hostfwrite(VM *m,int argc,void *user) { FILE *s=hostfile(m,0);size_t n;const char *p=js_arg_string(m,1,&n);(void)argc;(void)user;if(!s||!p)return 0;js_return_number(m,(double)fwrite(p,1,n,s));return 1; }
 static int hostchar(VM *m,int argc,void *user) { char c=(char)(unsigned)js_arg_number(m,0);(void)argc;(void)user;js_return_string(m,&c,1);return 1; }
 static int runfile(VM *m,const char *path,int binary,const char *output,int argc,char **argv) {
     FILE *volatile s=0;char *volatile source=0;size_t n;Fun *f;Frame fr;Val args;int i;
@@ -1640,10 +1656,11 @@ static int runfile(VM *m,const char *path,int binary,const char *output,int argc
 }
 int main(int argc,char **argv) {
     VM *m;int ok=0,i;if(argc<2){fprintf(stderr,"usage: jsvm [-b] script [args...] | jsvm -c source -o output\n");return 1;}
-    m=js_new();if(!m)return 1;js_register(m,"readFile",hostread,0);js_register(m,"writeHexFile",hostwrite,0);js_register(m,"byteCharHost",hostchar,0);
+    m=js_new();if(!m)return 1;js_register(m,"readFile",hostread,0);js_register(m,"fopen",hostopen,0);js_register(m,"fclose",hostclose,0);js_register(m,"fgetc",hostgetc,0);js_register(m,"fputc",hostputc,0);js_register(m,"fread",hostfread,0);js_register(m,"fwrite",hostfwrite,0);js_register(m,"byteCharHost",hostchar,0);
     if(!strcmp(argv[1],"-c")){if(argc==5&&!strcmp(argv[3],"-o"))ok=runfile(m,argv[2],0,argv[4],0,0);}
     else if(!strcmp(argv[1],"-b")){if(argc>=3)ok=runfile(m,argv[2],1,0,argc-3,argv+3);}
     else {for(i=2;i<argc;i++)if(argv[i][0]=='-')break;if(i<argc)ok=runfile(m,argv[1],0,0,argc-2,argv+2);else {ok=1;for(i=1;i<argc&&ok;i++)ok=runfile(m,argv[i],0,0,0,0);}}
     if(!ok)fprintf(stderr,"%s\n",m->error[0]?m->error:"invalid arguments");
+    for(i=0;i<64;i++)if(files[i])fclose(files[i]);
     js_free(m);return !ok;
 }
