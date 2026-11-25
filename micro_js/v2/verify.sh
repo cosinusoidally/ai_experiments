@@ -1,6 +1,6 @@
 #!/bin/sh
 # Optional full bootstrap and regression verification. No Python, Node or Make.
-set -eu
+set -ex
 cd "$(dirname "$0")"
 gcc -std=c90 -pedantic-errors -Wall -Wextra -O2 jsvm.c -lm -o jsvm
 ./jsvm -c jsvm.js -o jsvm.bc
