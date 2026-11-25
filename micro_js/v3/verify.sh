@@ -1,6 +1,6 @@
 #!/bin/sh
 # The shell script is optional: the VM builds with one GCC invocation.
-set -eu
+set -ex
 cd "$(dirname "$0")"
 gcc -std=c90 -pedantic-errors -Wall -Wextra -O2 jsvm.c -lm -o jsvm
 ./jsvm -c jsvm.js -o jsvm.bc
